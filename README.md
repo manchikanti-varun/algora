@@ -1,6 +1,6 @@
 # Algora — Where Logic Grows
 
-Phase 1 foundation: independent Next.js frontend and Express API. No authentication or business operations are implemented. No deployments have been performed.
+Phase 2: independent Next.js frontend and Express API with Google OpenID Connect, MongoDB-backed sessions, CSRF protection and role-based access checks. No approval, provisioning, registration, courses or attendance workflows exist. Nothing has been deployed automatically.
 
 ## Local development
 
@@ -24,14 +24,19 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Frontend: http://localhost:3000. API: http://localhost:5000/api/v1.
+Frontend: http://localhost:3000. API: http://localhost:5000/api/v1. The browser uses `/backend`, a same-origin rewrite to Express. Set frontend `BACKEND_API_BASE_URL` to the real backend API base; keep `NEXT_PUBLIC_API_BASE_URL=/backend`.
+
+See [AUTHENTICATION.md](AUTHENTICATION.md) for OAuth setup, cookies, environment configuration, API contracts, model/index details, and limitations. With Google or MongoDB unavailable, login stays unavailable and no session is created.
 
 The footer indicator requests the real HTTP health endpoint. It reports liveness, not database readiness. Click it to retry; it refreshes every 30 seconds. With MongoDB unavailable, health remains 200 and readiness returns 503. The server retries database connection every five seconds, logging no connection strings.
 
 ## Routes
 
 - `/`: landing page; future platform capabilities are labeled as planned.
-- `/login`: disabled Google sign-in with an explanation that authentication is not implemented.
+- `/login`: Google sign-in with backend availability checking and session-expired messaging.
+- `/student`, `/admin`, `/super-admin`: server-verified role workspaces; Express enforces the authoritative permission check before any user profile is rendered.
+- `/registration-required`, `/account-pending`: session-verified account lifecycle screens; no registration or approval workflows yet.
+- `/account-suspended`, `/unauthorized`: safe public explanations without user data.
 - `/preview/student`, `/preview/admin`, `/preview/super-admin`: interactive navigation shells, available only when both NODE_ENV=development and ENABLE_PREVIEW_ROUTES=true. Production always returns 404. These routes implement no access control and contain no user data.
 - `GET /api/v1/health`: HTTP liveness, 200.
 - `GET /api/v1/ready`: MongoDB connected plus successful ping, 200; otherwise 503. Unexpected failures use the sanitized error envelope.
@@ -44,7 +49,8 @@ Frontend `.env.local`:
 
 | Variable | Purpose |
 | --- | --- |
-| NEXT_PUBLIC_API_BASE_URL | Public API base URL, including `/api/v1`. Required at production build time. Local development defaults to localhost:5000. |
+| NEXT_PUBLIC_API_BASE_URL | Browser API prefix; use `/backend` for same-origin authentication. No secrets. |
+| BACKEND_API_BASE_URL | Server-only Express API base, including `/api/v1`, used by the rewrite and server-side route verification. Required in production. |
 | ENABLE_PREVIEW_ROUTES | Server-only switch, defaults false; only effective in development. |
 
 Backend `.env`:
@@ -71,7 +77,7 @@ npm test
 npm run build
 ```
 
-Frontend production builds require NEXT_PUBLIC_API_BASE_URL. Prettier is available as `npm run format`. Lockfiles pin installed versions; use npm ci in CI. Tests mock readiness dependency outcomes and network responses rather than requiring database credentials. Real connectivity must be verified separately.
+Frontend production builds require BACKEND_API_BASE_URL and use NEXT_PUBLIC_API_BASE_URL=/backend. Prettier is available as `npm run format`. Lockfiles pin installed versions; use npm ci in CI. Automated authentication tests require neither Google credentials nor Atlas. Real integrations must be verified separately.
 
 ## Deployment preparation
 
@@ -84,8 +90,8 @@ npm test
 
 Both apps pin a patched minimatch range through a scoped npm override for lint-tool dependency advisories. Frontend ESLint 9 is retained for the Next.js plugins' declared peer compatibility; npm emits a deprecation notice. Full dependency audits were clean at implementation time.
 
-Vercel: choose `algora-frontend` as root, set NEXT_PUBLIC_API_BASE_URL to the Railway public HTTPS API base, use npm ci and npm run build. Start command is standard Next.js. Preview shells are unavailable in production.
+Vercel: choose `algora-frontend` as root, set NEXT_PUBLIC_API_BASE_URL=/backend and server-only BACKEND_API_BASE_URL to the Railway HTTPS API base including `/api/v1`. Use npm ci and npm run build. Configure the Google callback through the frontend `/backend/auth/google/callback` path. Preview shells are unavailable in production.
 
 Railway: choose `algora-backend` as root, configure environment variables, build with npm ci and npm run build, start with npm start. `railway.json` uses `/api/v1/health` for process liveness; use `/api/v1/ready` for dependency monitoring. The API binds 0.0.0.0 and the assigned PORT. SIGINT/SIGTERM close HTTP connections and MongoDB with a 10-second forced shutdown deadline. No persistent filesystem storage is used.
 
-No student, administrator, course, attendance, authentication, or registration models exist. Empty directories reserve architectural boundaries for later phases; do not add abstractions until needed.
+Only canonical User, Session and short-lived OAuthTransaction models exist. There are no course, attendance, college, approval, or student-registration models. No email/password or OTP login exists. Mock repositories and identity fixtures are confined to automated tests.

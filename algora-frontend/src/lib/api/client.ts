@@ -10,10 +10,11 @@ export class ApiError extends Error {
     super(message);
   }
 }
-export async function apiGet<T>(
+export async function apiRequest<T>(
   path: string,
   schema: z.ZodType<T>,
   signal?: AbortSignal,
+  options: { method?: 'GET' | 'POST'; csrfToken?: string } = {},
 ): Promise<T> {
   let response: Response;
   try {
@@ -23,7 +24,13 @@ export async function apiGet<T>(
         signal: signal
           ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
           : AbortSignal.timeout(8000),
-        headers: { Accept: 'application/json' },
+        credentials: 'include',
+        cache: 'no-store',
+        method: options.method ?? 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...(options.csrfToken ? { 'X-CSRF-Token': options.csrfToken } : {}),
+        },
       },
     );
   } catch (error) {
@@ -72,3 +79,15 @@ export const healthSchema = z.object({
   service: z.literal('algora-backend'),
   status: z.literal('ok'),
 });
+export const apiGet = <T>(
+  path: string,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal,
+) => apiRequest(path, schema, signal);
+export async function apiPost<T>(path: string, schema: z.ZodType<T>) {
+  const { csrfToken } = await apiGet(
+    '/auth/csrf',
+    z.object({ csrfToken: z.string() }),
+  );
+  return apiRequest(path, schema, undefined, { method: 'POST', csrfToken });
+}

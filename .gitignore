@@ -9,6 +9,7 @@ coverage/
 
 # Local reports and agent/editor state
 PHASE_1_REPORT.md
+PHASE_2_REPORT.md
 AGENTS.md
 .codex/
 .agents/

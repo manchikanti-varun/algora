@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { env } from './env.js';
 import { logger } from '../utils/logger.js';
+import { initializeAuthIndexes, authStorageReady } from '../auth/repository.js';
 mongoose.set('bufferCommands', false);
 mongoose.connection.on('error', () =>
   logger.error('Database connection error'),
@@ -14,10 +15,11 @@ export async function connectDatabase() {
     minPoolSize: 0,
     serverSelectionTimeoutMS: 5000,
   });
+  await initializeAuthIndexes();
   logger.info('Database connected');
 }
 export async function databaseReady() {
-  if (mongoose.connection.readyState !== 1) return false;
+  if (!authStorageReady()) return false;
   try {
     await mongoose.connection.db!.admin().ping({ timeoutMS: 2000 });
     return true;

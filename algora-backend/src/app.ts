@@ -8,7 +8,8 @@ import { databaseReady } from './config/database.js';
 import { logger } from './utils/logger.js';
 import { AppError, errorHandler, notFound } from './middleware/errors.js';
 import { apiRouter } from './routes/index.js';
-export function createApp(ready = databaseReady) {
+import { authRouter, type AuthDependencies } from './auth/router.js';
+export function createApp(ready = databaseReady, auth?: AuthDependencies) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -31,6 +32,7 @@ export function createApp(ready = databaseReady) {
   app.use(helmet());
   app.use(
     cors({
+      credentials: true,
       origin: (origin, cb) =>
         !origin || env.CORS_ORIGINS.includes(origin)
           ? cb(null, true)
@@ -51,6 +53,7 @@ export function createApp(ready = databaseReady) {
     }),
   );
   app.use(express.json({ limit: '32kb' }));
+  app.use('/api/v1/auth', authRouter(auth));
   app.use('/api/v1', apiRouter(ready));
   app.use(notFound);
   app.use(errorHandler);

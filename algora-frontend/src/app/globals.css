@@ -1125,3 +1125,93 @@ h3 {
     scroll-behavior: auto !important;
   }
 }
+
+.auth-trust {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--primary);
+  margin-top: 24px;
+}
+.auth-fine-print {
+  font-size: 10px;
+  line-height: 1.8;
+  margin: 18px 0 25px;
+}
+.auth-loading {
+  padding: 32px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.google-mark {
+  font-size: 19px;
+  font-weight: 800;
+}
+.spin {
+  animation: auth-spin 1.5s linear infinite;
+}
+.sign-out-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sidebar .sign-out-actions .button {
+  font-size: 9px;
+  padding: 8px;
+}
+.account-state {
+  min-height: 100vh;
+  padding-bottom: 50px;
+}
+.account-state > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 100px;
+}
+.account-state > section {
+  max-width: 590px;
+  margin: 8vh auto;
+  text-align: center;
+  padding: 45px;
+}
+.account-state-icon {
+  display: block;
+  color: var(--primary);
+  margin-bottom: 25px;
+}
+.account-state-icon svg {
+  margin: auto;
+}
+.account-state h1 {
+  font-size: 36px;
+  margin: 20px 0;
+}
+.account-state p {
+  font-size: 13px;
+  line-height: 1.9;
+  margin-bottom: 30px;
+}
+.account-state .text-link {
+  display: flex;
+  justify-content: center;
+  margin-top: 25px;
+}
+.account-state .sign-out-actions {
+  justify-content: center;
+}
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 760px) {
+  .account-state > section {
+    margin: 5vh auto;
+    padding: 25px;
+  }
+  .account-state h1 {
+    font-size: 29px;
+  }
+}
