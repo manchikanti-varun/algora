@@ -1,0 +1,36 @@
+# README is the only published Markdown document.
+*.md
+!/README.md
+
+# Dependencies, builds, caches and test output
+node_modules/
+.next/
+dist/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+*.log
+.artifacts/
+.cache/
+.turbo/
+
+# Private environment and credential files; publish sanitized templates only
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+
+# Local tools and editor/OS files
+.codex/
+.agents/
+.aws/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

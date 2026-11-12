@@ -4,7 +4,7 @@ Algora is a multi-college DSA bootcamp and course management platform under deve
 
 ## Publication policy
 
-**Only this root README is published to GitHub.** Frontend/backend source, tests, lockfiles, configuration, environment files and internal reports stay in the local workspace and are excluded by a local .gitignore. Cloning this documentation-only repository does not provide runnable application code. Setup commands below apply to the complete local project.
+**README.md is the only Markdown document published to GitHub.** The repository includes frontend and backend source, tests, package manifests and lockfiles, sanitized environment templates, CI and deployment configuration. Other Markdown documents remain local and ignored. Dependencies, build output, screenshots, real environment files and credentials are excluded.
 
 No credentials, authentication tokens, private keys, personal email addresses or local machine paths belong in this document. Environment variable names and generic localhost examples are documentation only.
 
@@ -14,17 +14,28 @@ No credentials, authentication tokens, private keys, personal email addresses or
 | --- | --- | --- |
 | Phase 1 | Project foundation and branded UI | Implemented; 22 tests passed at handoff; lint, types and builds passed. Real Atlas/browser verification remained blocked. |
 | Phase 2 | Google OAuth, sessions, lifecycle and authorization | Implemented; 104 tests passed (67 backend, 37 frontend); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. |
-| Phase 3 | Future implementation | Not started; awaiting review and a separate implementation request. |
+| Phase 3 | Super Admin, colleges and Admin approval | Implemented locally; 196 tests passed (139 backend, 57 frontend); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
+| Phase 4 | Student registration and subsequent scope | Not started; requires a separate implementation request. |
 
-Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and browser visual checks are still unverified. Automated signed-token fixtures do not establish a live Google/Atlas integration.
+Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
 ## Contents
 
 - [Phase 1 — Project foundation](#phase-1--project-foundation)
 - [Phase 2 — Authentication and authorization](#phase-2--authentication-and-authorization)
+- [Phase 3 — Super Admin and college administration](#phase-3--super-admin-and-college-administration)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
+
+## Repository layout
+
+- `algora-frontend/`: Next.js application, role screens, authentication client and UI tests.
+- `algora-backend/`: Express API, MongoDB models, authorization, administration services and tests.
+- `.github/workflows/ci.yml`: frontend/backend verification.
+- `.env.example` within each application: sanitized configuration templates.
+
+Older phase sections below are historical handoff snapshots. Their references to the former README-only publication policy have been superseded by the publication policy above.
 
 ## Phase 1 — Project foundation
 
@@ -252,13 +263,15 @@ Phase 1 established the frontend/backend foundation. Its automated checks passed
 
 ## Phase 2 — Authentication and authorization
 
+This is the historical Phase 2 snapshot. Phase 3 below extends provisioning, approval, college scope and administration.
+
 ### A. What We Built
 
 Implemented backend-controlled Google OAuth 2.0/OpenID Connect Authorization Code Flow with S256 PKCE, state and nonce, verified Google identity, canonical accounts, server-side hashed sessions, rotation, expiration, revocation, logout/logout-all, CSRF protection, role/account/registration gates and protected frontend routes. Preserved the Phase 1 apps, design tokens, query/theme/toast infrastructure, health endpoints, logging and error envelopes.
 
 Added a responsive branded login entry with honest availability checking, loading and session-expired messages; session-verified registration-required/pending screens; safe suspended/unauthorized screens; and role workspace shells. No course, college, attendance, approval, student-registration, username-allocation or Super Admin provisioning workflows were added.
 
-No credentials were invented. There is no in-memory production authentication, development impersonation, role selector, or privileged backdoor. No application deployment was performed. Source code, configuration and internal reports are retained locally under the README-only publication policy.
+No credentials were invented. There is no in-memory production authentication, development impersonation, role selector, or privileged backdoor. No application deployment was performed. At this historical handoff, source and reports were local; source and safe configuration are now included under the current publication policy.
 
 ### B. Backend Changes
 
@@ -474,6 +487,264 @@ Root: updated README, .gitignore and CI environment; added safe public the authe
 
 The Phase 2 architecture is implemented with automated authentication/security coverage and successful production builds. Real end-to-end acceptance remains blocked on Google credentials, Atlas and browser/deployed-cookie verification. Keep Phase 3 paused until this report is reviewed; do not infer that mocked/signed-fixture tests establish a live Google/Atlas login. No Phase 3 work has started.
 
+## Phase 3 — Super Admin and college administration
+
+### A. What We Built
+
+Implemented the Super Admin administration foundation: secure explicit owner provisioning, college management, identity-bound Admin requests, transactional approval/rejection, permanent name-based Admin usernames, normalized college assignments, backend permission checks, Admin suspension/reactivation, persistent audit models and API-backed administration screens.
+
+Preserved the Phase 1 design and independent applications and the Phase 2 Google OIDC, HttpOnly sessions, CSRF, typed API client, error envelopes and route protection. No additional role, authentication system or production in-memory database was introduced. No student registration, course, batch, enrollment, attendance or progress operations were implemented.
+
+Source, configuration and tests are included in Git under the current publication policy. Other Markdown documents, screenshots, secrets and generated artifacts remain local. No deployment, live provisioning or Atlas configuration was performed in Phase 3.
+
+### B. Backend Architecture
+
+- Models: College, AdminAccessRequest, AdminCollegeAssignment and AuditLog. User gained a single-owner partial unique index and an internal administrative revision used for transaction conflict detection. Existing session/token/identity models remain authoritative.
+- `administration/contracts.ts`: permission/status/action allowlists, DTOs, strict Zod mutation/query schemas, canonical ObjectIds, public/own-data projections, pagination contracts and safe unique-conflict errors.
+- `administration/repository.ts`: production Mongoose transaction unit with session-bound operations, snapshot reads, majority writes, unique-error translation and index readiness. No business write bypasses the transaction unit.
+- `administration/service.ts`: owner provisioning, college lifecycle, requests/review, bounded username allocation, canonical-account promotion, assignment replacement, account status, current college authorization, own scope, metrics and audit reads.
+- `administration/middleware.ts`: reusable requireCollegePermission middleware for future scoped operations.
+- `administration/router.ts`: versioned session/role/CSRF-protected endpoints, request throttling, safe error mapping and no-store responses.
+- `scripts/provision-super-admin.ts`: explicit interactive owner CLI, separate from HTTP startup/routes.
+- Database startup initializes required new indexes and includes their readiness. Existing auth repositories continue to use the same canonical User.
+- The OAuth transaction may carry a fixed ADMIN_ACCESS intent, validated/stored by the backend; arbitrary redirect URLs remain forbidden.
+
+No new npm dependency was required. Existing Mongoose, Express, Zod, React Hook Form, TanStack Query, Lucide and theme/toast infrastructure are reused.
+
+### C. Frontend Architecture
+
+Protected routes:
+
+- `/super-admin`: real summary counts and recent administrative activity.
+- `/super-admin/colleges`: searchable, sortable, status-filtered college table; paginated results; create/edit/details; status and archive confirmation.
+- `/super-admin/approvals`: request queue and details; requested-college selection; server-defined permission matrix; shared/private review notes; confirmation before approve/reject.
+- `/super-admin/admins`: searchable/filterable Admin list and detail; assignment/permission editing; assignment history; suspend/reactivate confirmations.
+- `/super-admin/audit`: action/search/date-filtered, paginated audit table with actor, target, change summary and timestamp.
+- `/admin`: own verified account, permanent username, authorized active colleges, permission keys and unavailable-assignment count; no unrelated colleges or fake business metrics.
+- `/request-admin-access`: Google-session-verified request form and own history, available without student registration. Verified email is read-only and excluded from mutation bodies. Supports cancellation and shared rejection feedback.
+
+Organized feature modules: administration, super-admin, colleges, admin-requests, admin-management and audit. Reusable shared components include typed tables, pagination, search/status/sort controls, fields, status indicators, query loading/error states, college selection, permission matrix and native modal confirmation dialogs. Forms use React Hook Form/Zod and mutations use the existing CSRF-aware client plus toast feedback/query invalidation.
+
+Next.js Proxy and server pages still verify through Express before protected rendering. An admin-request login intent keeps unauthenticated requesters on the existing Google flow. Registration/account-state screens link to the request workflow. Expired, suspended and unavailable authentication states are distinguished and hide the form.
+
+### D. Super Admin Provisioning
+
+Run only from an authorized interactive backend terminal after real Google/Atlas setup:
+
+```powershell
+# Configure PROVISION_SUPER_ADMIN_SUBJECT securely in the operator environment.
+npm run provision:super-admin
+```
+
+The command requires interactive stdin/stdout and the exact operator phrase `PROVISION SUPER ADMIN`. It does not print the subject, tokens or credentials. It requires an existing verified canonical Google identity selected by stable subject, never email. After confirmation it connects and initializes indexes, then executes provisioning, session invalidation and audit insertion in one transaction.
+
+The resulting account is SUPER_ADMIN/ACTIVE with an immutable `sa-fullname` derived from the verified Google display name. A unique partial User index on role=SUPER_ADMIN covers all lifecycle statuses, preventing a second owner. Zero owners are allowed before intentional initial provisioning; normal APIs cannot delete/demote the owner afterward.
+
+Repeated provisioning of the same valid active owner is a no-op. A different owner, suspended/archived owner, unverified identity, incompatible permanent username, missing subject, missing confirmation or ambiguous database state fails closed. No public registration/provisioning or unrestricted transfer endpoint exists. A separate high-assurance recovery procedure is documented in OWNERSHIP_RECOVERY.md; it requires independent identity verification, multiple authorized operators, backups, a reviewed transactional migration, audit evidence and session invalidation. No recovery/transfer migration was executed or supplied as a bypass.
+
+Positive provisioning behavior is tested through injected transactional repositories; the actual CLI is tested to reject noninteractive execution before database work. Live owner provisioning remains BLOCKED until real configuration is available.
+
+### E. College Management
+
+College stores name, normalized uppercase code, lowercase slug, city/state/country, status, revision, actor references and timestamps. Code, slug and a normalized name/location identity key are unique. Strict Zod schemas enforce allowlists, lengths and formats; ObjectIds normalize case before duplicate-selection checks.
+
+The Super Admin creates, lists, searches, filters, sorts, views, updates and changes status. Updates require expectedRevision to reject stale changes. ACTIVE permits access/request/grant eligibility. INACTIVE blocks new scoped operations/grants. ARCHIVED is terminal through ordinary APIs and preserves records/references. No hard-delete endpoint exists.
+
+Admins receive only currently assigned ACTIVE colleges with college.view permission. Direct foreign-college requests fail 403. Requesters receive only safe active-college directory fields needed to select colleges; private ownership/audit fields are omitted.
+
+### F. Admin Request and Approval Workflow
+
+An authenticated, verified, non-suspended Student can submit full name, one to twenty active college IDs and a 20–2000 character reason, without student registration or roll number. Requester User ID and Google email come from the backend identity. Strict bodies reject supplied roles, emails, requester IDs and permission lists.
+
+A unique partial index allows only one PENDING request per requester. Users view their own history and a global pending indicator, cancel their own pending request idempotently, and see only shared review notes. Rejected/cancelled users may resubmit immediately within the documented limit of three submission attempts per hour. Rejection does not suspend the Student or grant privileges.
+
+Only the Super Admin reviews requests. Approval requires a nonempty subset of requested ACTIVE colleges and allowlisted permission keys including college.view. It updates the existing User by immutable ID/subject relationship, sets ADMIN/ACTIVE, generates the username, stores grants, transitions the request, invalidates sessions and inserts audit events atomically. Student registration status is not falsely completed and is not required for active Admin access.
+
+Privileged usernames use NFKD normalization, combining-mark removal, lowercase ASCII letters, removal of spaces/punctuation/unsupported characters and a maximum 60-letter name base. Names with fewer than two supported letters require human review. Admin collisions allocate the base, then suffixes 2–8 with unique-index-enforced bounded retries of the entire transaction. No sequential AD-0001 identifiers or student usernames are generated. Existing usernames never change with display-name updates.
+
+Concurrent approvals have only one winner; reviewed requests cannot be approved/rejected again. Cancellation/review state is rechecked inside the transaction. Critical failures roll back User changes, username, request state, grants, session revocation and audit writes together. Audit failure never produces an approved account.
+
+### G. Permissions and Authorization
+
+Roles remain SUPER_ADMIN, ADMIN and STUDENT. The server defines college.view, course.manage, batch.manage, student.view, student.enroll, attendance.manage and report.view. Only college viewing is operational now; the other keys reserve future capabilities without implementing those business features.
+
+The reusable scope helper/middleware reloads current account, assignment, required permission and college status. It does not trust browser role/scope headers. Revoked assignments and missing permissions fail immediately on the next authorization check. Super Admin can manage all college records; new scoped operations still require ACTIVE college status.
+
+Admin assignment edits use expectedRevision, preserve revoked history, increment sessionVersion and revoke sessions. Suspension immediately blocks protected Admin actions and invalidates sessions while preserving assignments. Reactivation requires valid current active-college grants and never revives revoked assignments. Ordinary Admin-management endpoints cannot target the Super Admin or perform role elevation.
+
+Actor/target state checks and administrative revision writes inside transactions protect against concurrent privileged changes. Authorization checks are independent of frontend guards. The frontend refetches/clears session state using the existing architecture; already in-flight/read responses are not a substitute for a fresh backend permission check.
+
+### H. Database Models and Indexes
+
+```text
+User (extended)
+  existing canonical Google identity/role/lifecycle/session fields
+  administrativeRevision: internal conflict-detection counter
+  UNIQUE PARTIAL { role: 1 } where role=SUPER_ADMIN, across all account statuses
+  existing UNIQUE subject/email/optional username indexes retained
+
+College
+  name, code, slug, identityKey, city, state, country
+  ACTIVE | INACTIVE | ARCHIVED, revision
+  createdBy -> User, updatedBy -> User, timestamps
+  UNIQUE code; UNIQUE slug; UNIQUE identityKey
+  status/name index
+
+AdminAccessRequest
+  requesterUserId -> User (immutable), fullName, verified-email snapshot
+  requestedCollegeIds -> College[], reason
+  PENDING | APPROVED | REJECTED | CANCELLED
+  reviewedBy -> User, reviewedAt, shared reviewNote, private internalNote
+  UNIQUE PARTIAL requesterUserId where status=PENDING
+  status/createdAt and requester/createdAt indexes
+
+AdminCollegeAssignment
+  adminUserId -> User, collegeId -> College, permission keys
+  ACTIVE | REVOKED, assignedBy/assignedAt, updatedBy, timestamps
+  UNIQUE PARTIAL { adminUserId, collegeId } where status=ACTIVE
+  adminUserId/status lookup index
+
+AuditLog
+  actorUserId -> User, actorName, action, targetType/targetId
+  optional collegeId, allowlisted before/after/count/permission metadata
+  requestId, immutable createdAt
+  time, action/time, actor/time and college/time indexes
+```
+
+Critical multi-document writes require a compatible MongoDB replica set/Atlas. The production repository uses Mongoose Connection.transaction with snapshot reads and majority write concern; transaction operations are sequential. Unique username conflicts retry the entire transaction, not an already-aborted transaction. No standalone/nontransactional fallback exists.
+
+Index definitions and driver/session usage are tested without a live database. Actual index creation, persistence, database-enforced concurrent uniqueness and transaction behavior against Atlas remain BLOCKED. Index initialization errors fail readiness for operator review rather than silently dropping constraints.
+
+### I. API Endpoints
+
+Base `/api/v1`, browser prefix `/backend`. Every mutation requires the existing HttpOnly session, exact Origin and CSRF token. Administration JSON uses the standard success/data or sanitized error envelope and no-store caching.
+
+| Method | Path | Authorization / behavior |
+| --- | --- | --- |
+| GET | /super-admin/overview | Active Super Admin; real counts and recent activity. |
+| GET | /super-admin/permissions | Active Super Admin; server permission definitions/current-vs-future labels. |
+| POST | /super-admin/colleges | Active Super Admin; validated creation, 201. |
+| GET | /super-admin/colleges | Active Super Admin; paginated search/status/sort. |
+| GET | /super-admin/colleges/:collegeId | Active Super Admin; details including historical status. |
+| PATCH | /super-admin/colleges/:collegeId | Active Super Admin; allowlisted information + expectedRevision. |
+| PATCH | /super-admin/colleges/:collegeId/status | Active Super Admin; status + expectedRevision, no archive restoration. |
+| GET | /super-admin/admin-requests | Active Super Admin; review queue, search/status/pagination. |
+| GET | /super-admin/admin-requests/:requestId | Active Super Admin; full review details and requested colleges. |
+| POST | /super-admin/admin-requests/:requestId/approve | Active Super Admin; selected grants/shared/private note, transactional promotion. |
+| POST | /super-admin/admin-requests/:requestId/reject | Active Super Admin; shared note at least ten characters. |
+| GET | /super-admin/admins | Active Super Admin; Admin-only list, search/status/pagination. |
+| GET | /super-admin/admins/:adminId | Active Super Admin; account and assignment history. |
+| PATCH | /super-admin/admins/:adminId/assignments | Active Super Admin; replacement grants + expectedRevision; empty list revokes active scope. |
+| PATCH | /super-admin/admins/:adminId/status | Active Super Admin; ACTIVE/SUSPENDED + expectedRevision. |
+| GET | /super-admin/audit-logs | Active Super Admin; paginated read-only audit, action/date/actor/college/search filters. |
+| GET | /admin-access-requests/eligible-colleges | Eligible authenticated Student; safe ACTIVE directory, no registration requirement. |
+| POST | /admin-access-requests | Eligible authenticated Student; identity-bound submission, 201. |
+| GET | /admin-access-requests/me | Authenticated Student/Admin; own history plus pending indicator, no private review metadata. |
+| POST | /admin-access-requests/:requestId/cancel | Owning eligible Student; pending cancellation, idempotent when already cancelled. |
+| GET | /admin/me | Active Admin; safe own account. |
+| GET | /admin/colleges | Active Admin; current authorized scope only. |
+| GET | /admin/colleges/:collegeId | Active Admin with current college.view on ACTIVE college. |
+
+No provisioning, owner transfer, college hard-delete, audit write/update/delete, student registration or course/attendance endpoint exists. Existing health/auth endpoints remain. GET /auth/google accepts only the fixed optional intent=admin-access value; the callback uses stored intent, not browser redirect hints.
+
+Lists accept bounded page/pageSize, escaped search text, allowlisted sort/direction/status. Audit dates use UTC ISO values and a validated range. Invalid input returns 400, unauthenticated/expired session 401, unauthorized scope 403, hidden/missing ownership 404, duplicate/stale state 409, throttling 429 and unavailable storage 503.
+
+### J. Security and Audit Logging
+
+Strict field allowlists, canonical IDs, current session/role/lifecycle checks, backend college scoping, exact-origin CSRF and fixed redirects prevent role/body spoofing, mass assignment, IDOR and arbitrary return URLs. No browser-provided requester identity or unrestricted permission is trusted.
+
+The singleton owner, pending-request and active-assignment invariants have database unique partial indexes. Promotion uses a subject/role/status/version/unset-username guarded update, preventing changes to already assigned usernames. Reviewed-state checks, revision guards and transactions prevent duplicate approvals, stale overwrites and partial privilege changes.
+
+Audit events cover provisioning, college creation/update/status, request submission/cancellation/approval/rejection, role grants, Admin suspension/reactivation, college assignment/revocation and permission updates. Writes are coupled to the relevant transaction. Normal APIs are append-only; actor/action/target/time fields are immutable. College updates record only changed allowlisted field summaries; permissions retain before/after key sets. Credentials, sessions, OAuth data, cookie values, request reasons and private review notes are excluded from audit metadata.
+
+Application logging/error handling remains sanitized. Deployment/database operator permissions and log retention require separate operational controls; normal API append-only behavior is not a claim that a database administrator cannot modify data.
+
+### K. Environment Variables
+
+No new runtime secret is required. Existing backend variables remain: MONGODB_URI, FRONTEND_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, SESSION_TTL, CORS_ORIGINS, NODE_ENV, PORT, TRUST_PROXY_HOPS and LOG_LEVEL.
+
+CLI-only addition: PROVISION_SUPER_ADMIN_SUBJECT, set explicitly to the independently verified intended existing Google identity. It is not a browser variable, not a runtime authorization allowlist, not hardcoded and not printed.
+
+Frontend variables remain NEXT_PUBLIC_API_BASE_URL=/backend, server-only BACKEND_API_BASE_URL and optional development-only ENABLE_PREVIEW_ROUTES. No role, Google secret or database credential is placed in NEXT_PUBLIC configuration.
+
+Both .env.example files/local operational documentation retain generic configuration only. No real credential was requested or supplied. Real Google/Atlas connection and live owner provisioning were not attempted.
+
+### L. Testing Results
+
+Final validation: **196 tests passed: 139 backend tests across 9 files and 57 frontend tests across 8 files.** The frontend run included the optional live backend-health check.
+
+Both applications passed npm run lint, npm run typecheck, npm test and npm run build. Formatting completed successfully. Frontend production build used the same-origin /backend transport and a localhost backend upstream. Both npm audit checks reported zero vulnerabilities. These checks establish local code/build behavior, not live Google or Atlas integration.
+
+Automated backend coverage includes confirmed/idempotent/competing provisioning; missing/unverified/different/archived owner rejection; database index definitions; normalized IDs/code/slug; duplicates, stale updates and archive restrictions; incomplete-student requests, cancellation/IDOR, duplicate pending requests, throttling and shared-note projections; existing-user promotion; username collisions/bounded exhaustion/permanence; competing approvals and full rollback; assignment/permission scope; suspension/reactivation and session invalidation; no public provisioning/audit mutation endpoints; safe unavailable storage; real transaction/session call contracts; and noninteractive CLI rejection without printing the subject.
+
+Frontend coverage includes protected direct routes, incomplete-student access intent, loading/error states without fabricated counts, real API-shaped metrics/scope, request validation and identity-safe JSON/CSRF, pending/cancellation/rejection states, approval/rejection confirmations, permission grants, college form validation/pagination and admin suspension revisions. Existing Phase 1/2 OIDC signature/session/CSRF/route tests remain in the suites. Fixtures are confined to automated tests; production servers did not serve mocked identities/data.
+
+Built HTTP smoke checks observed:
+
+- Backend health 200; readiness 503 with local database unavailable; auth/status 200 with available=false.
+- Unauthenticated overview, colleges, requests, audit, eligible directory and Admin scope APIs each returned 401 without data.
+- Super Admin root/colleges/approvals/admins/audit and Admin page returned 307 to login.
+- /request-admin-access returned 307 to /login?intent=admin-access; login with that intent returned 200.
+- Production preview returned 404.
+
+Browser verification succeeded for the real login/admin-request entry: desktop light and 390×844 mobile dark layouts, disabled Google action while unconfigured, clear availability text and real Backend connected status. Theme appearance and viewport were restored afterward. Screenshots are retained locally. Authenticated dashboard visual/end-to-end flows remain BLOCKED because no real Google/Atlas account/session is configured; no role backdoor was used for screenshots.
+
+Initial checks found mapper/session TypeScript issues and three fixture/validation assumptions, all corrected. A rate-limit test timed out under simultaneous heavy checks; it now reuses one HTTP server with a bounded 15-second test budget. A later review normalized ObjectId case before duplicate selection validation and distinguished unavailable/suspended/expired request-page authentication states. Final results supersede earlier failures; no unexecuted live integration is counted as passing.
+
+### M. Known Issues and Blockers
+
+- BLOCKED: real Atlas connection, persistence/index creation, multi-document transaction/concurrency behavior and audit durability. These are intentionally unconfigured, not replaced with fake production behavior.
+- BLOCKED: actual Google login, live Super Admin provisioning, deployed Vercel/Railway cookie transport and authenticated browser E2E/visual flows.
+- Browser login/intent/light/dark/mobile checks passed locally; this does not establish authenticated dashboard layout or keyboard interaction in a real session.
+- Privileged names with insufficient supported ASCII letters require reviewed transliteration/name input. Username retries are bounded to eight candidates. A future student-to-Admin transition after a permanent student username exists needs a separately reviewed username policy; current approval refuses incompatible existing usernames instead of silently renaming them.
+- Admin-management ordinary transitions cover ACTIVE/SUSPENDED; owner recovery/transfer and ambiguous legacy account states require separate high-assurance operations. No unrestricted recovery command is supplied.
+- General/login/submission limiters remain process-local. A multi-replica rollout requires shared/edge rate limiting and verified proxy configuration.
+- Startup index creation must be reviewed against existing production data. Duplicate legacy identities/owners/colleges/assignments prevent readiness until resolved through authorized migration.
+- Local validation uses the provided Node 26.13.1/npm 11.20.0 host; project guidance/CI remains Node 22 LTS. Remote CI was not executed. Existing ESLint/plugin compatibility and optional esbuild install-policy warnings are unchanged; no dependency was added in Phase 3.
+- Normal API audit immutability is not database-administrator tamper resistance; use appropriate production database roles/backups/retention.
+
+### N. Files Created or Modified
+
+Backend additions: administration/contracts.ts, repository.ts, service.ts, middleware.ts and router.ts; models/college.ts, admin-access-request.ts, admin-college-assignment.ts and audit-log.ts; scripts/provision-super-admin.ts; tests/administration-fixtures.ts, administration.test.ts, administration-http.test.ts, administration-repository.test.ts and provision-command.test.ts.
+
+Backend changes: User singleton/administrative revision/username validation; auth transaction intent types/model/repository/router; username validation utility; app route mounting; database/index readiness; provisioning npm script/env example; existing auth tests and rate-limit harness.
+
+Frontend additions: shared admin-ui components; administration-shell layout; administration contracts/queries/styles; super-admin overview/section; college management/selection; Admin request/review modules; Admin management/own-scope modules; audit viewer; request-access and four Super Admin subpages; administration UI/routing tests.
+
+Frontend changes: Super Admin/Admin overview pages; protected request-route policy; login intent/provider; account-state entry link; API JSON/PATCH mutations; root CSS import; dialog test polyfills. Local documentation: ADMINISTRATION.md and OWNERSHIP_RECOVERY.md. The cumulative README gains Phase 3 while preserving prior phase records. This report and screenshot artifacts remain ignored/local.
+
+### O. Acceptance Criteria
+
+| # | Requirement | Status | Evidence / qualification |
+| --- | --- | --- | --- |
+| 1 | Secure Super Admin provisioning | PASS | Explicit interactive CLI; existing verified subject, confirmation and audit/rollback tests. Live provisioning blocked. |
+| 2 | Single-Super-Admin invariant | PASS | Unique partial role index across statuses; idempotent/competing/different-owner tests. Zero before intentional bootstrap; live index execution blocked. |
+| 3 | College model/management APIs | PASS | Schema, unique normalization and protected CRUD/status APIs; no hard delete. |
+| 4 | College management UI against API | PASS | Typed client integration tests for list, pagination, forms and commands. Live authenticated browser/Atlas use blocked. |
+| 5 | Admin request model/APIs | PASS | Identity-bound request and state lifecycle with pending uniqueness. |
+| 6 | Admin request UI | PASS | Real endpoint wiring, selection, validation, status/history/cancellation tests. |
+| 7 | Incomplete students can request | PASS | Service, HTTP, form and pre-render policy tests; no roll number required. |
+| 8 | Owner approve/reject | PASS | Backend authorization, review UI/confirmation and transaction tests. |
+| 9 | Approval updates existing User | PASS | ID/subject-bound guarded promotion; no duplicate User; session invalidation test. |
+| 10 | ad-fullname usernames | PASS | Name normalization and role prefix with permanent assignment. |
+| 11 | Safe username collisions | PASS | Global unique index and bounded whole-transaction suffix retries; exhaustion test. |
+| 12 | College assignments stored | PASS | Real MongoDB relationship/repository, active uniqueness and mocked transactional tests. Live persistence blocked. |
+| 13 | Backend permissions | PASS | Current account/grant/permission/college checks; cross-college/missing/revoked/forged-role tests. |
+| 14 | Admin suspension/reactivation | PASS | Owner-only transitions, valid-scope reactivation, no revoked access restoration. |
+| 15 | Session invalidation | PASS | Version increment + session revocation coupled to privileged changes; stale-cookie tests. |
+| 16 | Persistent critical audit | PASS | MongoDB AuditLog inserts share critical transaction; failed audit rolls back changes. Actual Atlas durability blocked. |
+| 17 | Super Admin dashboard | PASS | Real metrics/query states plus colleges, approvals, management and audit screens; no fake metrics. |
+| 18 | Admin authorized scope | PASS | Own account, active permitted colleges/permissions only; unauthorized records omitted. |
+| 19 | Consistent contracts | PASS | Zod schemas, strict bodies, normalized IDs, revisions and typed mutation/DTO tests. |
+| 20 | Security tests | PASS | Backend/frontend security suites; live configuration limitations separately recorded. |
+| 21 | Lint/types/tests/builds | PASS | Both applications passed; 196 tests passed. See section L. |
+| 22 | No production fake success | PASS | Real MongoDB/OIDC defaults; test-only fixtures; unavailable health/auth/admin checks. |
+| 23 | No Phase 4 functionality | PASS | No student registration, courses, batches, enrollment, attendance or progress operations. |
+
+### P. Next Phase Readiness
+
+Phase 3 is implemented, locally validated and ready for review. Google/Atlas/deployment and authenticated visual checks remain launch gates, as allowed by this phase's database constraint. Review the permanent-student-username/role-transition policy before introducing Phase 4 username allocation. No Phase 4 work has started, and no later phase will begin without a new implementation request. The implementation is published as source under the current policy; no deployment or live provisioning was performed.
+
 ## Current local setup
 
 Use Node.js 22 LTS and npm in the complete local workspace. Two independent applications are retained: algora-frontend and algora-backend.
@@ -519,6 +790,10 @@ Production cookies are host-only `__Host-algora_session` and `__Host-algora_oaut
 The rewrite target is trusted server configuration, never user input. This introduces one extra frontend-to-backend hop. Keep frontend deployment previews separate from production sessions; use a separate OAuth client/environment for previews rather than wildcard origins or redirects. Configure the exact allowed frontend origin and correct Railway reverse-proxy hop count. Rate limit storage is process-local; a horizontally scaled production deployment needs a shared limiter or edge-level equivalent.
 
 Next.js external rewrites are documented in the [official rewrite reference](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites). Browser verification of the deployed cookie transport remains required.
+
+### Super Admin setup
+
+After a real verified Google account exists in MongoDB, an authorized operator can run npm run provision:super-admin from the backend with PROVISION_SUPER_ADMIN_SUBJECT set privately for that invocation. The command requires an interactive terminal and exact confirmation. It is never run during startup, deployment or tests. See Phase 3 section D for safeguards and the separate local ownership recovery procedure. Never publish the subject or credentials.
 
 ### Google Cloud setup
 
@@ -566,17 +841,17 @@ The callback atomically consumes a transaction matching state, browser binding a
 
 Only the stable Google subject identifies an existing account. Email collisions with another subject are rejected, never automatically linked. Atomic subject upsert plus unique indexes handle concurrent first login. Only profile fields and lastLoginAt are updated on later Google login; role, account/registration status and username are not accepted from Google/browser profile input.
 
-New users are STUDENT / PENDING / NOT_STARTED, without a username. They can view their own session profile and registration-required screen, but no student workspace or learning resources. Existing privileged accounts must already have been securely provisioned/approved; Phase 2 supplies no provisioning or approval route.
+New users are STUDENT / PENDING / NOT_STARTED, without a username. They can view their own session profile and registration-required screen, but no student workspace or learning resources. Privileged accounts use the explicit Phase 3 operator provisioning command or the authenticated Super Admin approval workflow. Browser role selection never assigns privilege.
 
 A fresh opaque session is created after verification; an existing browser session is revoked to prevent fixation. Status and revocation version are rechecked before issuing the cookie. Redirect destinations come only from a fixed server-side role/status policy, never a request URL. Invalid OAuth callbacks return sanitized API errors; the user can return to the login page to restart. Google cancellation never creates an account session.
 
 ### Models and indexes
 
-User: googleSubject (immutable, unique), normalized email (unique), emailVerified, displayName, optional avatarUrl, role, optional immutable username, accountStatus, registrationStatus, sessionVersion, lastLoginAt, createdAt, updatedAt. Username uniqueness uses a partial index for strings, allowing multiple unregistered users without usernames. Names are normalized only by reusable utilities; no username allocation occurs in this phase.
+User: googleSubject (immutable, unique), normalized email (unique), emailVerified, displayName, optional avatarUrl, role, optional immutable username, accountStatus, registrationStatus, sessionVersion, lastLoginAt, createdAt, updatedAt. Username uniqueness uses a partial index for strings, allowing multiple unregistered users without usernames. Names are normalized only by reusable utilities; privileged usernames are allocated only by the controlled Phase 3 provisioning/approval workflows. Student allocation remains unimplemented.
 
 Session: userId reference to User, tokenHash (unique SHA-256 hash), version, expiresAt (TTL index), revokedAt, createdAt, updatedAt. A compound userId/revokedAt index supports revocation. The raw 256-bit random token exists only transiently during issuance and in the HttpOnly cookie, never in responses, logs or browser storage.
 
-OAuthTransaction: unique stateHash, browserHash, verifier, nonce, expiresAt with TTL. Atomic find-and-delete plus explicit expiry prevents replay independent of delayed MongoDB TTL cleanup.
+OAuthTransaction: unique stateHash, browserHash, verifier, nonce, fixed optional Admin-access intent and expiresAt with TTL. Atomic find-and-delete plus explicit expiry prevents replay independent of delayed MongoDB TTL cleanup.
 
 Auth indexes are created after connection before auth storage is considered ready. Failures keep authentication/readiness unavailable. Do not bypass this check or enable login before indexes exist. Plan index changes carefully for existing production datasets; Phase 2 starts without user data. User status changes increment sessionVersion; logout-all does the same and revokes session rows. Every request reloads current User and compares versions, so revocation remains effective even if an older session row is inserted during a race.
 
@@ -587,7 +862,7 @@ All routes below are under `/api/v1/auth` on Express and `/backend/auth` from th
 | Method/path | Behavior |
 | --- | --- |
 | GET /status | Public availability/message for the login button. No credentials or infrastructure details. 200 with available=false when not ready. |
-| GET /google | Public OAuth entry, rate-limited; sets transient browser binding cookie and redirects to Google. 503 when configuration/storage unavailable. No request redirect parameters accepted. |
+| GET /google | Public OAuth entry, rate-limited; sets transient browser binding cookie and redirects to Google. 503 when configuration/storage unavailable. Only the fixed optional intent=admin-access is accepted; no arbitrary redirect parameters. |
 | GET /google/callback | Validates single-use transaction and identity, creates session and redirects to a fixed frontend route. 400/401 on invalid transactions/identity; 503 on storage/provider unavailability. |
 | GET /me | Requires valid session; safe own-user profile plus fixed destination. No subject, hashes, token, version or raw OAuth data. |
 | GET /csrf | Requires session; session-bound CSRF token, for subsequent mutation headers. |
@@ -598,7 +873,7 @@ All routes below are under `/api/v1/auth` on Express and `/backend/auth` from th
 | GET /access/admin | Session + ADMIN + ACTIVE account. No college/admin business data. |
 | GET /access/super-admin | Session + SUPER_ADMIN + ACTIVE account. No privileged business operations. |
 
-Session errors return 401; role/lifecycle/CSRF denial returns 403; repository unavailability returns sanitized 503. Suspended/archived users are blocked and sessions revoked. Unauthenticated logout is treated as already signed out by the frontend; failed server revocation is never reported as successful logout. Non-auth business endpoints do not exist.
+Session errors return 401; role/lifecycle/CSRF denial returns 403; repository unavailability returns sanitized 503. Suspended/archived users are blocked and sessions revoked. Unauthenticated logout is treated as already signed out by the frontend; failed server revocation is never reported as successful logout. Phase 3 administration endpoints are documented above and enforce their own lifecycle, role, scope and CSRF checks.
 
 ### CSRF and frontend route protection
 
@@ -606,16 +881,16 @@ Mutation requests require exact FRONTEND_URL Origin and a session-bound HMAC CSR
 
 Frontend fetch always includes credentials. Mutation helpers bootstrap CSRF before each request, avoiding stale tokens after session rotation. No authentication tokens are stored in localStorage or sessionStorage. TanStack Query owns current-user state; logout cancels and clears cached data and refreshes routing. Auth state refetches on focus and every minute. A client guard hides content during verification and on failure, but the server-side Express access check is the actual authority.
 
-Next.js Proxy checks the relevant Express access endpoint before rendering to issue HTTP redirects for direct navigation, refresh and session expiry. Each role server page then rechecks through the same transport helper before rendering any profile. No profile, role, or authorization decision is trusted from a browser-supplied header. Checks use no-store requests. Missing/expired sessions go to login, denied roles to unauthorized, and lifecycle states to dedicated screens. The role policy is exact (SUPER_ADMIN does not implicitly gain another role's route); future college scoping must compose with existing backend middleware rather than trusting browser metadata. The extra check adds a backend round trip on protected page requests and closes the time gap before server rendering.
+Next.js Proxy checks the relevant Express access endpoint before rendering to issue HTTP redirects for direct navigation, refresh and session expiry. Each role server page then rechecks through the same transport helper before rendering any profile. No profile, role, or authorization decision is trusted from a browser-supplied header. Checks use no-store requests. Missing/expired sessions go to login, denied roles to unauthorized, and lifecycle states to dedicated screens. The role policy is exact (SUPER_ADMIN does not implicitly gain another role's route); college scoping composes with existing backend middleware and current database assignments rather than trusting browser metadata. The extra check adds a backend round trip on protected page requests and closes the time gap before server rendering.
 
 ### Verification and outstanding configuration
 
 Unit/integration tests use only test-directory repositories, mocked transport and controlled signed JWT fixtures. They require no live Atlas database. Production imports contain no mock identity provider or in-memory user/session store. The optional Phase 1 live health test requires RUN_CONNECTIVITY_TEST=true and a running API; normal tests skip it.
 
-Actual Google consent/token exchange, Atlas index creation/persistence, deployed cookie transport, responsive appearance and browser theme behavior must be verified with real configuration before launch. Do not represent fixture tests as live Google/Atlas verification. No Admin approval, Super Admin provisioning, student registration, college/course management or attendance features are implemented.
+Actual Google consent/token exchange, Atlas index creation/persistence, deployed cookie transport and authenticated administration browser flows must be verified with real configuration before launch. Login desktop/mobile appearance and light/dark themes were checked locally. Do not represent fixture tests as live Google/Atlas verification. Phase 3 implements Admin approval, explicit Super Admin provisioning and college management. Student registration, courses and attendance remain unimplemented.
 
 ## Updating this record
 
 After each implementation phase, preserve these previous phase records and add a new phase section covering scope, architecture, important modules, API changes, environment variable names, actual verification commands/results, unresolved blockers, acceptance criteria and next-phase readiness. Update the current-status table and setup instructions to match the latest implementation. Never claim unexecuted checks passed, and never publish credentials or personal machine information.
 
-Publish only README.md when a push is requested. All other workspace files remain local. Do not begin a later phase without a separate implementation request.
+When a push is requested, publish application source, tests, lockfiles and safe configuration together with README.md. Keep other Markdown files, secrets, dependencies and generated artifacts ignored. Do not begin a later phase without a separate implementation request.

@@ -1,0 +1,26 @@
+name: Application checks
+on: [push, pull_request]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [algora-frontend, algora-backend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    env:
+      NEXT_PUBLIC_API_BASE_URL: /backend
+      BACKEND_API_BASE_URL: http://localhost:5000/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
