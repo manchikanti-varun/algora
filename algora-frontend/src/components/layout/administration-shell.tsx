@@ -34,7 +34,15 @@ export function AdministrationShell({
     role === 'SUPER_ADMIN'
       ? [
           { label: 'Overview', href: '/super-admin', icon: LayoutDashboard },
+          { label: 'Courses', href: '/super-admin/courses', icon: Building2 },
+          { label: 'Batches', href: '/super-admin/batches', icon: Users },
+          {
+            label: 'Reconciliation',
+            href: '/super-admin/reconciliation',
+            icon: ScrollText,
+          },
           { label: 'Colleges', href: '/super-admin/colleges', icon: Building2 },
+          { label: 'Students', href: '/super-admin/students', icon: Users },
           {
             label: 'Admin Approvals',
             href: '/super-admin/approvals',
@@ -47,7 +55,12 @@ export function AdministrationShell({
           },
           { label: 'Audit Logs', href: '/super-admin/audit', icon: ScrollText },
         ]
-      : [{ label: 'Overview', href: '/admin', icon: LayoutDashboard }];
+      : [
+          { label: 'Overview', href: '/admin', icon: LayoutDashboard },
+          { label: 'Courses', href: '/admin/courses', icon: Building2 },
+          { label: 'Batches', href: '/admin/batches', icon: Users },
+          { label: 'Students', href: '/admin/students', icon: Users },
+        ];
   return (
     <RouteGuard role={role}>
       <div className="dashboard">

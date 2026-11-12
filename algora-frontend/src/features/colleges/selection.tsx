@@ -117,6 +117,7 @@ const definitions = z.object({
         'course.manage',
         'batch.manage',
         'student.view',
+        'student.verify',
         'student.enroll',
         'attendance.manage',
         'report.view',
@@ -144,8 +145,20 @@ export function PermissionMatrix({
           : {
               ...g,
               permissions: checked
-                ? [...g.permissions, key]
-                : g.permissions.filter((p) => p !== key),
+                ? [
+                    ...new Set([
+                      ...g.permissions,
+                      key,
+                      ...(key === 'student.verify'
+                        ? ['student.view' as const]
+                        : []),
+                    ]),
+                  ]
+                : g.permissions.filter(
+                    (p) =>
+                      p !== key &&
+                      !(key === 'student.view' && p === 'student.verify'),
+                  ),
             },
       ),
     );

@@ -57,11 +57,11 @@ describe('production transaction and promotion contracts', () => {
         sessionVersion: 0,
       }),
       expect.objectContaining({
-        $set: {
+        $set: expect.objectContaining({
           role: 'ADMIN',
           username: 'ad-alicemorgan',
           accountStatus: 'ACTIVE',
-        },
+        }),
         $inc: { sessionVersion: 1 },
       }),
       expect.objectContaining({

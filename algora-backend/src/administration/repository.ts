@@ -1,3 +1,4 @@
+import { reconciliationPending } from '../learning/markers.js';
 import mongoose, { type ClientSession } from 'mongoose';
 import { User } from '../models/user.js';
 import { Session } from '../models/session.js';
@@ -182,7 +183,12 @@ export class MongoAdminUnit implements AdminUnit {
         username: { $exists: false },
       },
       {
-        $set: { role, username, accountStatus: 'ACTIVE' },
+        $set: {
+          role,
+          username,
+          accountStatus: 'ACTIVE',
+          ...reconciliationPending(),
+        },
         $inc: { sessionVersion: 1 },
       },
       {
@@ -206,7 +212,10 @@ export class MongoAdminUnit implements AdminUnit {
         sessionVersion: version,
         accountStatus: { $in: ['ACTIVE', 'SUSPENDED'] },
       },
-      { $set: { accountStatus: status }, $inc: { sessionVersion: 1 } },
+      {
+        $set: { accountStatus: status, ...reconciliationPending() },
+        $inc: { sessionVersion: 1 },
+      },
       { new: true, runValidators: true, session: this.session ?? undefined },
     );
     return doc ? userRecord(doc) : null;
@@ -276,7 +285,12 @@ export class MongoAdminUnit implements AdminUnit {
     const doc = await College.findOneAndUpdate(
       { _id: id, revision },
       {
-        $set: { ...data, identityKey: identityKey(combined), updatedBy: actor },
+        $set: {
+          ...data,
+          identityKey: identityKey(combined),
+          updatedBy: actor,
+          ...reconciliationPending(),
+        },
         $inc: { revision: 1 },
       },
       { new: true, runValidators: true, session: this.session ?? undefined },

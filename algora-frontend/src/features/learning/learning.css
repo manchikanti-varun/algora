@@ -1,0 +1,106 @@
+.learning-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+}
+.learning-toolbar > .form-field {
+  flex: 1;
+  min-width: 150px;
+}
+.learning-tabs {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0.5rem 0 1.25rem;
+  margin: 1rem 0;
+}
+.learning-tabs button {
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: 30px;
+  background: var(--card);
+  color: var(--muted);
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+}
+.learning-tabs button[aria-selected='true'] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+.learning-tabs button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.learning-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+}
+.learning-summary > div {
+  background: var(--soft);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.learning-summary dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.learning-summary dd {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 700;
+}
+.learning-prose {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  margin: 1rem 0;
+}
+.learning-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+.learning-card-grid .student-card {
+  margin: 0;
+}
+.learning-card-grid + .pagination {
+  margin-top: 1.5rem;
+}
+.student-card details summary,
+details.student-card summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+.learning-toolbar input,
+.learning-toolbar select {
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--foreground);
+}
+@media (max-width: 700px) {
+  .learning-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .learning-toolbar {
+    align-items: stretch;
+  }
+  .learning-toolbar > * {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .learning-tabs {
+    margin-right: -0.5rem;
+  }
+  .learning-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

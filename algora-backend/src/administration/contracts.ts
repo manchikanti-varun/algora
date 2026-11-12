@@ -6,6 +6,7 @@ export const permissions = [
   'course.manage',
   'batch.manage',
   'student.view',
+  'student.verify',
   'student.enroll',
   'attendance.manage',
   'report.view',
@@ -19,6 +20,35 @@ export const requestStatuses = [
   'CANCELLED',
 ] as const;
 export const auditActions = [
+  'COURSE_CREATED',
+  'COURSE_UPDATED',
+  'COURSE_PUBLISHED',
+  'COURSE_ARCHIVED',
+  'BATCH_CREATED',
+  'BATCH_UPDATED',
+  'BATCH_ACTIVATED',
+  'BATCH_COMPLETED',
+  'BATCH_ARCHIVED',
+  'ENROLLMENT_CREATED',
+  'PENDING_ENROLLMENT_CREATED',
+  'ENROLLMENT_ACTIVATED',
+  'ENROLLMENT_WITHDRAWN',
+  'ENROLLMENT_TRANSFERRED',
+  'BULK_IMPORT_COMPLETED',
+  'IMPORT_CONFLICTS',
+  'ENROLLMENT_RECONCILED',
+  'ENROLLMENT_RECONCILIATION_RETRIED',
+  'STUDENT_REGISTERED',
+  'STUDENT_PROFILE_UPDATED',
+  'STUDENT_VERIFIED',
+  'STUDENT_VERIFICATION_REJECTED',
+  'STUDENT_QR_ISSUED',
+  'STUDENT_QR_ROTATED',
+  'STUDENT_CORRECTION_REQUESTED',
+  'STUDENT_CORRECTION_CANCELLED',
+  'STUDENT_CORRECTION_APPROVED',
+  'STUDENT_CORRECTION_REJECTED',
+  'STUDENT_IDENTITY_CORRECTED',
   'SUPER_ADMIN_PROVISIONED',
   'COLLEGE_CREATED',
   'COLLEGE_UPDATED',
@@ -83,7 +113,22 @@ export interface AuditRecord {
   actorUserId: string;
   actorName: string;
   action: AuditAction;
-  targetType: 'USER' | 'COLLEGE' | 'ADMIN_REQUEST' | 'ASSIGNMENT';
+  targetType:
+    | 'USER'
+    | 'COLLEGE'
+    | 'ADMIN_REQUEST'
+    | 'ASSIGNMENT'
+    | 'STUDENT_PROFILE'
+    | 'COURSE'
+    | 'BATCH'
+    | 'ENROLLMENT'
+    | 'IMPORT'
+    | 'RECONCILIATION'
+    | 'COURSE'
+    | 'BATCH'
+    | 'ENROLLMENT'
+    | 'IMPORT'
+    | 'RECONCILIATION';
   targetId: string;
   collegeId?: string;
   metadata: {
@@ -263,8 +308,11 @@ export const grantSchema = z
       .min(1)
       .max(permissions.length)
       .refine(
-        (v) => new Set(v).size === v.length && v.includes('college.view'),
-        'Include college.view and avoid duplicate permissions',
+        (v) =>
+          new Set(v).size === v.length &&
+          v.includes('college.view') &&
+          (!v.includes('student.verify') || v.includes('student.view')),
+        'Include college.view, avoid duplicates and include student.view for student.verify',
       ),
   })
   .strict();

@@ -4,6 +4,7 @@ export const permissionKeys = [
   'course.manage',
   'batch.manage',
   'student.view',
+  'student.verify',
   'student.enroll',
   'attendance.manage',
   'report.view',

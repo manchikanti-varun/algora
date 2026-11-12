@@ -11,10 +11,16 @@ import { apiRouter } from './routes/index.js';
 import { authRouter, type AuthDependencies } from './auth/router.js';
 import { administrationRouter } from './administration/router.js';
 import type { AdminRepository } from './administration/contracts.js';
+import { studentsRouter } from './students/router.js';
+import type { StudentRepository } from './students/contracts.js';
+import { learningRouter } from './learning/router.js';
+import type { LearningRepository } from './learning/contracts.js';
 export function createApp(
   ready = databaseReady,
   auth?: AuthDependencies,
   administration?: AdminRepository,
+  students?: StudentRepository,
+  learning?: LearningRepository,
 ) {
   const app = express();
   app.disable('x-powered-by');
@@ -58,8 +64,16 @@ export function createApp(
         next(new AppError(429, 'RATE_LIMITED', 'Too many requests')),
     }),
   );
+  const importJson = express.json({ limit: '1500kb' });
+  app.use((req, res, next) =>
+    /^\/api\/v1\/batches\/[a-f0-9]{24}\/enrollments\/preview$/i.test(req.path)
+      ? importJson(req, res, next)
+      : next(),
+  );
   app.use(express.json({ limit: '32kb' }));
   app.use('/api/v1/auth', authRouter(auth));
+  app.use('/api/v1', learningRouter(auth, learning));
+  app.use('/api/v1', studentsRouter(auth, students));
   app.use('/api/v1', administrationRouter(auth, administration));
   app.use('/api/v1', apiRouter(ready));
   app.use(notFound);

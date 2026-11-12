@@ -11,6 +11,32 @@ export async function proxy(request: NextRequest) {
   if (!pathname.startsWith('/preview')) {
     const role = /^\/(student|admin|super-admin)(?:\/|$)/.exec(pathname)?.[1];
     const token = request.cookies.get(sessionCookieName())?.value;
+    if (
+      [
+        '/student/register',
+        '/student/profile',
+        '/student/my-qr',
+        '/student/courses',
+        '/student/batches',
+      ].includes(pathname)
+    ) {
+      const result = await verifyBackend(token, '/auth/me', meSchema);
+      if (!result.ok)
+        return NextResponse.redirect(new URL(result.destination, request.url));
+      const user = result.data.user;
+      if (user.role !== 'STUDENT')
+        return NextResponse.redirect(
+          new URL(result.data.destination, request.url),
+        );
+      const registered = !['NOT_STARTED', 'INCOMPLETE'].includes(
+        user.registrationStatus,
+      );
+      if (pathname === '/student/register' && registered)
+        return NextResponse.redirect(new URL('/student/profile', request.url));
+      if (pathname !== '/student/register' && !registered)
+        return NextResponse.redirect(new URL('/student/register', request.url));
+      return NextResponse.next();
+    }
     if (role) {
       const result = await verifyBackend(
         token,

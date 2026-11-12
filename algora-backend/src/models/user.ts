@@ -1,3 +1,4 @@
+import { reconciliationFields } from '../learning/markers.js';
 import {
   Schema,
   model,
@@ -7,6 +8,7 @@ import {
 import { accountStatuses, registrationStatuses, roles } from '../auth/types.js';
 const userSchema = new Schema(
   {
+    ...reconciliationFields,
     googleSubject: { type: String, required: true, immutable: true },
     email: { type: String, required: true, lowercase: true, trim: true },
     emailVerified: { type: Boolean, required: true },
@@ -58,5 +60,9 @@ userSchema.index(
   { username: 1 },
   { unique: true, partialFilterExpression: { username: { $type: 'string' } } },
 );
+userSchema.index({
+  enrollmentReconciliationPending: 1,
+  reconciliationNextAt: 1,
+});
 export const User = model('User', userSchema);
 export type UserDocument = HydratedDocument<InferSchemaType<typeof userSchema>>;

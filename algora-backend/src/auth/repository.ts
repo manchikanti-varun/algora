@@ -1,3 +1,4 @@
+import { reconciliationPending } from '../learning/markers.js';
 import mongoose from 'mongoose';
 import { User, type UserDocument } from '../models/user.js';
 import { Session, type SessionDocument } from '../models/session.js';
@@ -152,7 +153,10 @@ export const mongoAuthRepository: AuthRepository = {
   async changeAccountStatus(id, expected, next) {
     const result = await User.updateOne(
       { _id: id, accountStatus: expected },
-      { $set: { accountStatus: next }, $inc: { sessionVersion: 1 } },
+      {
+        $set: { accountStatus: next, ...reconciliationPending() },
+        $inc: { sessionVersion: 1 },
+      },
       { runValidators: true },
     );
     return result.modifiedCount === 1;

@@ -2,6 +2,8 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { logger } from './utils/logger.js';
+import { startReconciliationWorker } from './learning/worker.js';
+const stopReconciliation = startReconciliationWorker();
 const server = createApp().listen(env.PORT, '0.0.0.0', () =>
   logger.info({ port: env.PORT }, 'HTTP server started'),
 );
@@ -21,6 +23,7 @@ void connect();
 async function shutdown() {
   if (stopping) return;
   stopping = true;
+  stopReconciliation();
   logger.info('Shutting down');
   const deadline = setTimeout(() => process.exit(1), 10000);
   deadline.unref();

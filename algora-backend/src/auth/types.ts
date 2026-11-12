@@ -101,7 +101,12 @@ export function destination(
     user.role === 'STUDENT' &&
     ['NOT_STARTED', 'INCOMPLETE'].includes(user.registrationStatus)
   )
-    return '/registration-required';
+    return '/student/register';
+  if (
+    user.role === 'STUDENT' &&
+    user.registrationStatus === 'PENDING_VERIFICATION'
+  )
+    return '/student/profile';
   if (
     user.accountStatus !== 'ACTIVE' ||
     (user.role === 'STUDENT' && user.registrationStatus !== 'VERIFIED')

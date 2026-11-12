@@ -15,7 +15,9 @@ No credentials, authentication tokens, private keys, personal email addresses or
 | Phase 1 | Project foundation and branded UI | Implemented; 22 tests passed at handoff; lint, types and builds passed. Real Atlas/browser verification remained blocked. |
 | Phase 2 | Google OAuth, sessions, lifecycle and authorization | Implemented; 104 tests passed (67 backend, 37 frontend); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. |
 | Phase 3 | Super Admin, colleges and Admin approval | Implemented locally; 196 tests passed (139 backend, 57 frontend); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
-| Phase 4 | Student registration and subsequent scope | Not started; requires a separate implementation request. |
+| Phase 4 | Student registration, verification, profiles, corrections and permanent QR | Implemented locally; 275 tests passed (200 backend, 75 frontend including separate real API health test); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
+| Phase 5 | Course/Batch management, roll-only enrollment and reconciliation | Implemented locally; 368 tests passed (270 backend, 98 frontend including separate live API health); lint, types and production builds passed; both audits reported zero vulnerabilities. Live Google/Atlas verification remains blocked. |
+| Phase 6 | Learning Days and subsequent curriculum scope | Not started; requires a separate reviewed implementation request. |
 
 Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
@@ -24,6 +26,8 @@ Real Google consent/login, Atlas persistence/index creation, deployed cookie tra
 - [Phase 1 — Project foundation](#phase-1--project-foundation)
 - [Phase 2 — Authentication and authorization](#phase-2--authentication-and-authorization)
 - [Phase 3 — Super Admin and college administration](#phase-3--super-admin-and-college-administration)
+- [Phase 4 — Student identity, verification and permanent QR](#phase-4--student-identity-verification-and-permanent-qr)
+- [Phase 5 — Courses, batches and roll-based enrollment](#phase-5--courses-batches-and-roll-based-enrollment)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
@@ -39,7 +43,7 @@ Older phase sections below are historical handoff snapshots. Their references to
 
 ## Phase 1 — Project foundation
 
-This section records the Phase 1 snapshot. Later phases extend its behavior; use the current setup and Phase 2 sections for today's authentication configuration.
+This section records the Phase 1 snapshot. Later phases extend its behavior; use the latest phase and current setup sections for today's configuration.
 
 ### A. What We Built
 
@@ -489,6 +493,8 @@ The Phase 2 architecture is implemented with automated authentication/security c
 
 ## Phase 3 — Super Admin and college administration
 
+This is the historical Phase 3 handoff snapshot. Phase 4 below implements student registration, independent Student identities, verification, corrections and permanent QR credentials.
+
 ### A. What We Built
 
 Implemented the Super Admin administration foundation: secure explicit owner provisioning, college management, identity-bound Admin requests, transactional approval/rejection, permanent name-based Admin usernames, normalized college assignments, backend permission checks, Admin suspension/reactivation, persistent audit models and API-backed administration screens.
@@ -745,6 +751,505 @@ Frontend changes: Super Admin/Admin overview pages; protected request-route poli
 
 Phase 3 is implemented, locally validated and ready for review. Google/Atlas/deployment and authenticated visual checks remain launch gates, as allowed by this phase's database constraint. Review the permanent-student-username/role-transition policy before introducing Phase 4 username allocation. No Phase 4 work has started, and no later phase will begin without a new implementation request. The implementation is published as source under the current policy; no deployment or live provisioning was performed.
 
+## Phase 4 — Student identity, verification and permanent QR
+
+This is the historical Phase 4 handoff snapshot. Phase 5 below adds Course/Batch delivery, enrollment and durable eligibility reconciliation.
+
+### A. What We Built
+
+Implemented mandatory Student registration, independent permanent Student identities, globally reserved roll numbers, institutional verification, own-profile editing, reviewed identity corrections, encrypted permanent QR credentials, scoped Admin student review and global Super Admin student management. Preserved the canonical Google User, existing OIDC/HttpOnly sessions/CSRF, Phase 3 administrative usernames and approval workflow, college assignments and audit infrastructure.
+
+The UI uses real APIs and explicit loading/error/unavailable states. MongoDB and Google remain intentionally unconfigured. Test fixtures are confined to test files. No production in-memory identity store, fake success, impersonation route, enrollment, course, batch, attendance scanning or progress tracking was introduced. No Phase 5 work, commit, push or deployment was performed during this implementation.
+
+### B. Backend Architecture
+
+- `students/contracts.ts`: strict Zod registration/contact/correction/review/rotation/query schemas, DTOs, repository interfaces, department suggestions, safe projections and permanent username generation.
+- `students/repository.ts`: Mongoose unit of work sharing its MongoDB ClientSession with the existing MongoAdminUnit; snapshot/majority transactions, explicit index initialization, profile revisions, permanent roll reservations, encrypted credential replacement and pending-request state checks.
+- `students/service.ts`: current-account authorization, transactional registration, active-college guards, college/permission scopes, verification, correction review, safe own-profile access and audited credential issuance/rotation.
+- `students/crypto.ts`: 256-bit opaque randomness, SHA-256 lookup hashing and AES-256-GCM credential vault with key IDs, random nonces and authenticated identity/version binding.
+- `students/router.ts`: session/role/CSRF enforcement, allowlisted request bodies and queries, pagination, per-user attempt limits, no-store headers and standardized safe responses.
+- Four Mongoose models: StudentProfile, StudentRollReservation, StudentQrCredential and StudentProfileCorrectionRequest.
+- Existing app/database/readiness, permission definitions, audit model/actions, auth destinations and explicit provisioning CLI extended without replacing authentication. The provisioning CLI now loads database/model infrastructure only after interactive confirmation.
+
+### C. Frontend Architecture
+
+Added protected dynamic pages `/student/register`, `/student/profile`, `/student/my-qr`, `/admin/students` and `/super-admin/students`.
+
+`features/students` contains typed schemas, responsive student shell, RHF/Zod registration and profile forms, review/confirmation steps, debounced roll availability, private QR rendering/download/rotation, paginated profile correction history, student directories and reviewer dialogs. Shared data tables, status pills, native accessible dialogs, query/error states and CSRF API mutation transport are reused. Administration navigation includes Students; verified Student workspace links to working Profile/My QR pages rather than placeholder actions.
+
+Proxy and server page guards allow incomplete Students to register and registered/pending Students to view profile and QR. Verified workspace access remains guarded by backend registration verification. Fixed safe destinations preserve Admin/Super Admin workspaces and the incomplete-Student Admin-access request flow. No browser role flag grants access.
+
+### D. Student Registration
+
+All ten requested fields are mandatory: full name, roll number, verified Google email, phone, canonical active college, department, year 1–4 and all three coding handles. Email is read-only in the UI and obtained only from the current backend Google User; it is rejected as a registration body field. Registered fullName is separate from Google displayName.
+
+Names normalize Unicode and whitespace, permit legitimate international name letters/marks and bounded punctuation, and reject invalid content. Phone validation uses the maximum metadata from [libphonenumber-js](https://www.npmjs.com/package/libphonenumber-js), requires explicit +country code, rejects extensions and stores E.164. There is no OTP or phone ownership claim.
+
+College selection is API-backed, paginated/searchable and limited to existing ACTIVE college IDs. Suggested engineering departments include common and broader disciplines; a validated free-text department supports legitimate programs outside the suggestions. Academic year is a numeric study year, not graduation year.
+
+Coding handles use bounded ASCII platform-specific character allowlists. LeetCode and Codeforces input casing is retained; CodeChef handles are lowercased. External APIs and ownership verification are not required or claimed.
+
+Registration creates one profile, records PENDING_VERIFICATION, activates an eligible pending Student account, preserves Google identity/name and keeps institutional verification separate from successful form submission. When QR encryption is unavailable, registration still succeeds with an explicitly unissued QR; QR actions fail safely until configured.
+
+### E. Roll Number Rules
+
+Input is trimmed, checked for exactly ten ASCII A–Z/a–z/0–9 characters before conversion, then uppercased and validated against `^[A-Z0-9]{10}$`. Checking ASCII before uppercasing prevents Unicode characters such as long-s from turning into accepted letters. Internal spaces, punctuation, Unicode lookalikes and incorrect lengths are rejected without padding or truncation.
+
+StudentProfile has a global unique rollNumber index, independent of college. StudentRollReservation has another global unique rollNumber index and permanently binds every claimed current or historical roll number to its original profile. Registration and corrections reserve rolls inside the same transaction as profile/account/audit writes. Unique-index races fail safely and roll back; frontend availability is advisory, owner-free and never the final authority.
+
+No archive, withdrawal or deletion operation recycles a roll number. A former roll may be restored only to the same identity through reviewed correction; another identity cannot claim it. There is no public roll-reservation deletion endpoint.
+
+### F. Username and Identity Architecture
+
+Canonical User remains the single Google-subject account and retains the existing role, lifecycle, session and administrative username compatibility. StudentProfile has a unique userId relationship and independent immutable studentUsername. A Student registration does not populate User.username.
+
+Student username format is lowercased roll number plus a safe hyphenated normalized name, for example `23a91a05b2-varun-manchikanti`. Latin diacritics are decomposed; unsupported characters become separators; the bounded name slug is capped at 65 characters. Entirely non-Latin names retain their full registered name while using the deterministic safe `student` suffix. Username maximum length is 80 and uniqueness is indexed globally. The roll prefix also keeps Student/Admin/Super Admin namespaces disjoint.
+
+Phase 3 promotion allocates `ad-...` only into the still-empty administrative User.username, preserving StudentProfile/studentUsername/history/QR unchanged. One canonical Google User remains. Regression coverage registers a Student, requests Admin access and explicitly approves that same User. Existing administrative usernames are not renamed or migrated.
+
+Single-role authorization intentionally remains: an approved ADMIN enters `/admin` and cannot simultaneously use Student workspace APIs. Their StudentProfile and credential remain retained for history/future policy. There is no automatic privilege elevation or public role assignment.
+
+Migration contract: Phases 1–3 did not create student registrations, so no StudentProfile backfill is expected for this project. Unexpected legacy STUDENT User.username values require a reviewed, backed-up migration that copies the permanent value into a validated StudentProfile, checks all identity/roll/username collisions, preserves history, creates reservations, then removes the legacy administrative slot only under an audited operator procedure. Registration fails closed for such a legacy value; no silent destructive migration is shipped or executed. Existing synthetic VERIFIED User flags without profiles must likewise be reconciled before launch. Deploying new model indexes against real legacy data remains a live integration gate.
+
+### G. Student Verification
+
+Added `student.verify`, granted only through Super Admin-controlled existing assignment APIs. Grant validation requires `college.view` and `student.view`; selecting verify in the UI includes view, and removing view removes verify. Existing grants do not gain this permission automatically.
+
+Admin directory/detail access requires current ACTIVE assignment, ACTIVE college and student.view. Verification and correction review additionally require student.verify. Mutations reload/lock the current reviewer and subject User, enforce profile revisions and lock the active College document in the same transaction. Suspension, assignment changes and college deactivation therefore conflict safely with concurrent privileged writes. Super Admin can inspect the global directory, including inactive-college details, while verification/correction mutations still require an ACTIVE college.
+
+Verification supports explicit AUTHORIZED_MANUAL evidence review with a required bounded reason/evidence reference and true confirmation. Only authorized verification reviewers see the private evidence reference; Student and ordinary viewer projections omit it. Do not put document contents, credentials or sensitive document numbers into evidence references. No trusted roster exists or is imported in this phase, so no roster-match option or claim is offered.
+
+Profile states are PENDING_VERIFICATION, VERIFIED and REJECTED. User.registrationStatus is the compatibility mirror used by existing verified workspace gates; REJECTED maps to its pending verification state, while the profile preserves the explicit rejection/feedback. Verification is never automatic, a verified identity cannot simply be overwritten by another verification, and material corrections reset the mirror and profile for reverification. Reviewers cannot verify or approve/reject corrections to their own retained Student identity; a separate authorized reviewer is required. These states grant no enrollment or arbitrary batch access.
+
+### H. Permanent QR System
+
+QR payload is only a random 32-byte base64url credential (256 bits), not a URL, database ID, name, roll, email, phone, college, or session. The lookup/indexing field holds a SHA-256 hash. Re-display material is stored as AES-256-GCM ciphertext plus random 12-byte nonce, authentication tag and keyId. Associated authenticated data binds profile ID, credential version and key ID. Plaintext is never stored in MongoDB or audit/log metadata.
+
+One unique credential row per profile and one unique lookup hash exist. Logins and contact/identity edits do not issue or replace it. Own QR GET decrypts only for the authenticated Student. There is no administrative credential-read endpoint or public token-resolution URL. Sensitive responses set private/no-store, Pragma no-cache and no-referrer headers.
+
+The client fetches credential material only after explicit Display QR. It lives in the display component's transient operation, not TanStack Query, persistent browser storage, SSR HTML, navigation URL or analytics. [qrcode](https://www.npmjs.com/package/qrcode) renders only the opaque payload to a local PNG data URL; displayed name/college/verification are outside the QR. The student may explicitly download that credential image. Hide, rotation, unmount/session invalidation and stale-response guards prevent retaining an old displayed image in application state. Keep downloaded copies private.
+
+Rotation requires a Student session, exact Origin/CSRF, true confirmation and the expected credential version. Five attempts/hour per user are allowed. One transaction advances profile revision and QR version, replaces hash/encrypted material, and appends audit; competing rotations using the same old version cannot both succeed. The old lookup hash disappears immediately on commit. No attendance scanner or enrollment resolver is introduced.
+
+Key lifecycle: configure a backend-only keyring and active key ID; retain older keys while their ciphertext is still used. To change wrapping keys without changing QR payloads, use an independently reviewed maintenance migration that authenticates/decrypts each old record, re-encrypts the SAME token with a fresh nonce/new AAD key ID, preserves hash/version and verifies counts/integrity under CAS/transactions before retiring keys. No such migration runs automatically. Maintain access-controlled key backups separately from database backups. Lost keys cannot recover plaintext from hashes; after establishing trusted identity, use explicit QR replacement with a new available active key, invalidating all old copies. A compromised wrapping key requires incident review and credential replacement, not merely changing the key label. No production key was generated, requested or supplied here.
+
+### I. Profile and Correction Workflow
+
+Own profile shows registered name, roll, permanent username, trusted Google email, normalized phone, college, department, year, all coding handles and verification status/method/timestamp/feedback.
+
+Direct PATCH accepts only all contact/coding fields plus expectedRevision. It rejects name/roll/college/year/department/email/userId/role/status/username mass assignment. Successful changes are audited without placing contact values into audit logs.
+
+Protected changes require an identity-bound correction with a reason and current profile revision. One pending request per profile is a deliberately stronger restriction than duplicate requests per field. Students see their own history and can cancel only their own pending request. Cancellation is idempotent; already-reviewed approvals/rejections cannot be replayed.
+
+Reviewers inspect current profile and requested values, supply a shared note, confirm, and submit the current expectedRevision. A profile changed since form review causes conflict. Request profileRevision is retained as historical context; re-review against the latest explicit revision is allowed. Approval reserves any new roll, changes only allowlisted protected fields, preserves permanent username/QR, clears previous verification metadata and resets verification in one transaction. Audit includes changed identity before/after summaries and review events, without QR/evidence secrets. College transfer approvals require Super Admin, preventing one college's Admin from assigning identity into another college.
+
+### J. Database Models and Indexes
+
+| Model | Identity/relationships | Important indexes and guards |
+| --- | --- | --- |
+| StudentProfile | Canonical User + College; registered fields; verification; QR version; revision/timestamps | UNIQUE userId, rollNumber, studentUsername; collegeId+verificationStatus; collegeId+rollNumber; immutable userId/studentUsername; revision compare-and-set |
+| StudentRollReservation | Immutable normalized roll + profile binding | UNIQUE rollNumber across current/historical identities; no public delete/update |
+| StudentQrCredential | Immutable profile relationship; version; hash; authenticated ciphertext/nonce/tag/keyId | UNIQUE profileId; UNIQUE tokenHash; no plaintext; one active row replaced transactionally |
+| StudentProfileCorrectionRequest | Profile/User/source College; immutable requested changes/reason/submission revision; status/reviewer/note/timestamps | UNIQUE profile with partial status=PENDING; sourceCollegeId+status+createdAt; requesterUserId+createdAt; pending-only review CAS |
+| Existing User / College / AuditLog | Single-role compatibility; operational college write guard; append-only administrative audit | Existing identity/privilege indexes retained; permission enum and STUDENT_PROFILE audit target/actions extended |
+
+All student/profile/reservation/credential/account/audit writes share one MongoDB transaction and ClientSession, with snapshot read concern and majority write concern. Active-college guards increment operationalRevision rather than editing human-facing details. No transactionless fallback exists. Replica-set/Atlas transactions and actual unique index creation remain unverified locally; explicit readiness gates require student indexes to initialize successfully.
+
+### K. API Endpoints
+
+All paths are under `/api/v1` on Express; browser paths use the existing `/backend` transport. All mutations require exact Origin and session-bound CSRF. Sensitive responses are non-cacheable. Pagination is bounded to 50 records/page and supports escaped literal search/allowlisted filters.
+
+| Method | Path | Authority and behavior |
+| --- | --- | --- |
+| GET | /students/registration-options | Authenticated nonsuspended Student, including incomplete; active college directory and department suggestions |
+| POST | /students/register | Same Student, mandatory fields/confirmation; transactional unique registration; 10 attempts/hour |
+| GET | /students/roll-number-availability | Same Student; exact normalized roll, owner-free available flag; 120 requests/hour |
+| GET | /students/me | Student's own profile, trusted email, college and vault availability |
+| PATCH | /students/me | Student's own contact/coding fields; revision guard; 30 attempts/hour |
+| GET | /students/me/correction-requests | Student's own paginated history |
+| POST | /students/me/correction-requests | Student's own protected correction; reason/revision; 10 attempts/hour |
+| POST | /students/me/correction-requests/:requestId/cancel | Student's own pending request; idempotent cancellation |
+| GET | /students/me/qr | Student's own credential only; explicit component fetch; 120 requests/hour |
+| POST | /students/me/qr/rotate | Student's own issue/rotate; confirmation/version; 5 attempts/hour |
+| GET | /admin/students | ACTIVE Admin; active assigned colleges with student.view; paginated directory |
+| GET | /admin/students/:studentId | Same scoped view; canVerify flag; evidence only with verification authority |
+| POST | /admin/students/:studentId/verify | Active scoped student.verify; manual evidence/confirmation/revision |
+| POST | /admin/students/:studentId/reject-verification | Same authority; shared reason/confirmation/revision |
+| GET | /admin/student-correction-requests | Active assigned student.verify colleges; paginated review queue/history |
+| POST | /admin/student-correction-requests/:requestId/approve | Same authority, pending request/revision/confirmation; no cross-college transfer approval |
+| POST | /admin/student-correction-requests/:requestId/reject | Same authority, pending request/shared reason/revision/confirmation |
+| GET | /super-admin/students | ACTIVE Super Admin; global paginated/search/college/status directory |
+| GET | /super-admin/students/:studentId | ACTIVE Super Admin; global detail; inactive colleges viewable, not verifiable |
+| POST | /super-admin/students/:studentId/verify | ACTIVE Super Admin and ACTIVE student college; manual evidence/revision/confirmation |
+| POST | /super-admin/students/:studentId/reject-verification | Same authority; reason/revision/confirmation |
+| GET | /super-admin/student-correction-requests | ACTIVE Super Admin global correction queue/history |
+| POST | /super-admin/student-correction-requests/:requestId/approve | ACTIVE Super Admin; active source/destination colleges; transactional review including transfers |
+| POST | /super-admin/student-correction-requests/:requestId/reject | ACTIVE Super Admin; audited shared rejection |
+
+Existing auth `/me` destinations now return `/student/register`, `/student/profile`, or `/student` as appropriate. Old registration-required direct links redirect through the authoritative policy. Existing Phase 3 APIs remain available; the permission-definition endpoint now marks student.view/student.verify as implemented.
+
+### L. Security Implementation
+
+Backend User/session identity is authoritative. Strict bodies/queries reject browser-supplied identity, email, roles, permissions, verification flags and protected-field edits. Student APIs expose only self; Admin queries/details/reviews enforce current active college grants and permissions; Super Admin remains an explicit separate role. Account and assignment/college changes are rechecked inside mutation transactions. No QR endpoint accepts a target student ID.
+
+Unique profile/roll/username indexes plus permanent reservations handle concurrent registrations and prevent cross-college duplication/reuse. Revision/version/pending-state CAS, same-session writes, audit atomicity and user/college write guards prevent stale/concurrent privileged approvals or rotations. CSRF, session fixation defense, hashed backend sessions, suspension checks, and Google subject identity binding remain intact.
+
+QR values never appear in request URLs, application logs, audit records or stored plaintext. Error translation hides driver/key values and infrastructure diagnostics. Owner-free rate-limited availability limits enumeration. Rate limiters are process-local; a distributed limiter is required before horizontal scaling. Normal database access controls, backups, key management and prevention of external platform response-body logging remain operator responsibilities. Audit APIs are append-only, not a claim that a database administrator cannot alter storage.
+
+### M. Environment Variables
+
+Existing backend MongoDB, Google OAuth, exact frontend/CORS origins, session and proxy settings remain unchanged; frontend keeps the same-origin `/backend` configuration. No new public environment secret exists.
+
+- `QR_ACTIVE_KEY_ID`: backend-only identifier of the current encryption key; ASCII letters/digits/underscore/hyphen, 1–40 characters.
+- `QR_ENCRYPTION_KEYS`: backend-only JSON object mapping key IDs to base64-encoded 32-byte encryption keys. Values must be generated securely and stored in backend secrets, never in Git/browser/chat/logs. Previous keys are retained until their ciphertext is migrated safely.
+- Missing/invalid active configuration leaves registration/profile available but QR issuance unavailable. Retrieval also requires the matching retained decryption key and valid authenticated ciphertext. No dummy/default key or plaintext fallback exists.
+
+Sanitized `.env.example` documents only names/contracts. No Google credentials, Atlas credentials, QR key or identity subject was requested or included.
+
+### N. Testing Results
+
+Final application checks passed locally on Node 26.13.1.
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| npm run format | PASS | PASS |
+| npm run lint | PASS | PASS |
+| npm run typecheck | PASS | PASS |
+| npm test -- --maxWorkers=2 | 200 passed, 12 files | 74 passed, 9 files; optional live-health file initially skipped |
+| npm run build | PASS (TypeScript) | PASS (Next.js production build; all five new routes dynamic/protected) |
+| npm audit | Zero vulnerabilities | Zero vulnerabilities |
+
+The opt-in real API health test was then explicitly executed with RUN_CONNECTIVITY_TEST=true using npm test -- src/tests/connectivity.test.ts: 1 passed. Across the full suites and this separate optional run, **275 distinct tests passed: 200 backend and 75 frontend**. This confirms local HTTP health transport, not Google login or database persistence.
+
+The frontend build used NEXT_PUBLIC_API_BASE_URL=/backend and a localhost BACKEND_API_BASE_URL. No production secret was required or embedded. Remote Node 22 CI was not executed.
+
+Backend tests cover all mandatory fields; exact ASCII roll normalization and rejection cases; international phones; username bounds/fallback; duplicate/current-user/concurrent/cross-college registration; transaction rollback; inactive colleges; unregistered Admin requests; registered Student to explicit Admin approval preserving one User/student identity; scope/permission/suspension; manual evidence validation; competing verification; contact/protected separation; correction duplication/IDOR/cancellation/roll uniqueness/concurrent review/transfers/reverification; stable opaque encrypted QR, missing key, tamper detection, rotation conflicts, old lookup invalidation and audit rollback; API session/CSRF/mass assignment/no-store/safe errors; schema indexes; and real MongoDB method contracts for sessions, revisions, metadata clearing, reservations and credential replacement.
+
+Frontend tests cover mandatory/roll validation, read-only email, review/confirmation and identity-safe registration payloads, honest unavailable behavior, profile/pending-verification status, explicit-only QR fetch, opaque-only encoding, PNG download, hide/rotation clearing, Admin/Super Admin API-backed directories, route integration, wrong-role restrictions and fail-closed authority/session errors. Existing Phase 1–3 suites remain in place with expected registration destination updates.
+
+Initial runs found historical redirect expectations and a noninteractive provisioning subprocess timeout. Redirect expectations were updated to the implemented registration path; the CLI now defers database/model loading until after confirmation, preserving fail-closed behavior while avoiding unnecessary startup work. Initial checks are not counted as final success. Actual MongoDB transactions and Google integration are not established by mocked repository tests.
+
+Built-server HTTP smoke checks passed: all five new protected frontend routes returned 307 to /login; Admin-access entry retained /login?intent=admin-access; production preview returned 404. API health returned 200, readiness 503 and auth availability false with the deliberately unavailable local database. Student options/profile/QR and Admin/Super Admin directory/correction APIs returned 401 without a session and retained private/no-store headers. The production /backend rewrite preserved health 200, readiness 503 and Student/QR 401 responses. No authenticated success was fabricated. Temporary servers were used only for local checks.
+
+### O. Known Issues and Blockers
+
+- BLOCKED: real Google login, Atlas persistence/index creation, database transaction/write-conflict/unique-index behavior, encrypted credential durability and deployed cookie transport. No credentials were requested and no production database operation was faked.
+- BLOCKED: authenticated browser visual/accessibility/responsive end-to-end review, real PNG scan/rotation behavior across sessions and student/Admin workflows with actual accounts. Components and CSS are implemented and fixture-tested; that is not live browser proof.
+- Trusted roster import/matching is outside this phase. Authorized documented manual verification is implemented without claiming a roster match, phone OTP or coding account ownership.
+- Administrative/student profile records are independent, but simultaneous Student/Admin workspace access intentionally remains restricted by the existing single-role model.
+- Unexpected legacy Student User usernames or synthetic verified flags require the documented reviewed reconciliation before production; no silent migration was performed.
+- QR key loss requires trusted identity recovery and explicit replacement; operational wrapping-key migration is documented, not automatically executed. No administrative recovery endpoint is shipped; Student self-rotation is supported.
+- Per-user rate limit state is process-local. Distributed coordination and platform logging/caching policy must be reviewed before horizontal deployment.
+- Checks ran locally on Node 26.13.1. The repository targets Node 22 LTS in CI; remote Node 22 CI was not executed during this phase.
+
+### P. Files Created or Modified
+
+Backend new: `src/students/{contracts,crypto,repository,service,router}.ts`; `src/models/student-profile.ts` (profile and roll reservation); `student-qr-credential.ts`; `student-profile-correction-request.ts`; student domain/HTTP/repository tests and test-only transactional fixtures.
+
+Backend extended: app DI/router mounting; database index/readiness integration; auth destinations; administration permission validation/definitions/audit actions; College operationalRevision; AuditLog target; provisioning CLI lazy loading; sanitized environment template; package manifests/lockfile for phone validation; auth regression expectations.
+
+Frontend new: `src/features/students/{contracts,server,shell,registration,profile,qr,management}` and responsive stylesheet; five protected route pages; student UI and routing tests. Extended auth contracts/proxy/error destinations, shared role navigation/workspace links, permission matrix and definitions, root stylesheet imports and package manifests/lockfile for phone validation/QR rendering/types.
+
+Documentation: cumulative root README updated with this A–R record, latest setup and current status. This separate report remains local/ignored. Root README is the only Markdown document eligible for publication; source/tests/safe config stay eligible for Git, while secrets/dependencies/generated files remain ignored. No commit or push was performed.
+
+### Q. Acceptance Criteria
+
+| # | Requirement | Status | Evidence / limitation |
+| --- | --- | --- | --- |
+| 1 | StudentProfile model | PASS | Production Mongoose model and unique/scoped indexes |
+| 2 | Mandatory registration | PASS | All fields validated; trusted Google email; real API form |
+| 3 | Exactly 10 alphanumeric roll | PASS | ASCII precheck + uppercase regex |
+| 4 | Global roll uniqueness | PASS | Global profile/reservation indexes; live index enforcement BLOCKED |
+| 5 | Consistent normalization | PASS | Backend/frontend trim/ASCII/uppercase tests |
+| 6 | Permanent Student usernames | PASS | Bounded safe generator; unique immutable profile field |
+| 7 | Student/Admin separation | PASS | Independent profile username; one canonical User |
+| 8 | Phase 3 approval compatibility | PASS | Registered-student promotion regression |
+| 9 | Verification lifecycle | PASS | Pending/verified/rejected distinct from registration |
+| 10 | Scoped verification | PASS | Current permission/assignment/college/account checks |
+| 11 | Registration UI/API integration | PASS | Functional API client; fixture-tested; live authenticated E2E BLOCKED |
+| 12 | Student profile page | PASS | Protected own-profile UI/API |
+| 13 | Direct/protected edit separation | PASS | Strict allowlists and reviewed identity changes |
+| 14 | Corrections | PASS | Own requests/history/cancel; transactional staff reviews |
+| 15 | Permanent QR | PASS | Persistent encrypted credential design; live persistence BLOCKED |
+| 16 | No PII in QR | PASS | Only random opaque token encoded |
+| 17 | Hash/encryption storage | PASS | SHA-256 + AES-256-GCM; tests detect tampering |
+| 18 | Stable across sessions | PASS | No login/edit rotation; persisted reversible material; real cross-session E2E BLOCKED |
+| 19 | Rotation invalidation | PASS | Single hash replacement/version CAS; concurrency tests |
+| 20 | Admin verification UI | PASS | Directory, scoped details, evidence/rejection/correction review |
+| 21 | Super Admin student UI | PASS | Global directory/filters/detail/review/transfer authority |
+| 22 | Backend authorization | PASS | Session/role/own/scoped checks and negative tests |
+| 23 | Audit coverage | PASS | Same-transaction lifecycle/identity/QR/review events |
+| 24 | Automated tests | PASS | 275 distinct tests passed: 200 backend, 74 frontend suite + 1 optional real API health test |
+| 25 | Lint/types/builds | PASS | Both applications passed lint, types and production builds |
+| 26 | No production mock storage | PASS | Real Mongo repository; test fixtures only |
+| 27 | No Phase 5 | PASS | No course/batch/enrollment/attendance/progress operations |
+
+PASS denotes implemented and automated evidence, with explicitly named live integration limitations. No mocked result is represented as real Atlas/Google verification.
+
+### R. Next Phase Readiness
+
+Phase 4 implementation is locally validated and ready for review. Live Google/Atlas, credential durability and authenticated browser checks remain explicit pre-launch gates; this handoff does not authorize Phase 5.
+
+Phase 5 must use the independent StudentProfile, active college and current institutional verification rather than treating Google login or registration completion as enrollment authority. Review real indexes/transactions, identity migration policy, secret/key backups and authenticated browser behavior before launch. Phase 5 has not started and requires a new request after review. No automatic commit, push or deployment was performed.
+
+## Phase 5 — Courses, batches and roll-based enrollment
+
+### A. What We Built
+
+Implemented reusable scoped Course management, college-specific Batch delivery, permanent batch metadata snapshots, roll-only manual enrollment, bulk paste, CSV/XLSX import, owner-bound preview/confirmation, capacity-safe membership creation, pending registration/verification, durable reconciliation, immediate effective-access checks, withdrawal/transfer/history, real Student course/batch summaries and shared role-aware Admin/Super Admin management screens.
+
+Preserved the independent applications, canonical Google User, separate StudentProfile, permanent usernames/QR, OIDC sessions, CSRF, college assignments, existing permissions and audit infrastructure. No production mock database, fake identity, successful offline import, public self-enrollment, Learning Day content, editorials, attendance scanning, coding progress, certificates or payments were introduced. No Phase 6 work, commit, push or deployment was performed.
+
+### B. Backend Architecture
+
+- `learning/contracts.ts`: strict Zod course, batch, lifecycle, pagination/filter/sort, roll-only manual, preview, confirmation, withdrawal and transfer schemas; typed DTOs and dependency-injected repository/unit interfaces. Reuses Phase 4 rollSchema.
+- `models/learning.ts`: Course, Batch, BatchEnrollment, EnrollmentImport and append-only EnrollmentHistory Mongoose models with global/scoped/partial uniqueness, immutable relationship fields and indexed operational state.
+- `learning/repository.ts`: real Mongoose unit sharing one ClientSession with MongoStudentUnit and MongoAdminUnit; explicit index readiness; scoped queries; conditional seat counters; revision/pending-state updates; persisted manifests/results; bounded reconciliation reads.
+- `learning/service.ts`: ownership/college permission rules, curriculum snapshots, lifecycle validation, shared enrollment assessment, transactional import/withdrawal/transfer/history, reconciliation transitions and fresh effective-access authorization.
+- `learning/parser.ts`: bounded CSV/XLSX/paste parsing; no filesystem extraction or permanent uploaded file storage; roll-column-only canonical manifests.
+- `learning/markers.ts` and `worker.ts`: durable source-document work markers, event generation IDs, cursor continuation, retry/failure state, startup worker and audited Super Admin retry.
+- `learning/router.ts`: existing session authentication, exact-Origin/CSRF mutation checks, strict schemas, private/no-store responses, rate limiting and safe standardized errors.
+- Existing Student, Admin and auth repositories mark relevant state changes atomically in their original writes. App DI/router/body limits, database readiness, startup/shutdown and permission/audit definitions are extended.
+
+### C. Frontend Architecture
+
+New shared feature modules: typed contracts; paginated college/course/destination selectors; Course catalog/editor/details; Batch catalog/editor/details; organized enrollment workspace; manual and bulk import flows; paginated preview/results; membership change dialogs; Student membership cards; reconciliation status/retry; responsive stylesheet.
+
+Protected routes:
+
+- `/admin/courses`, `/admin/batches`, `/admin/batches/[batchId]`, `/admin/batches/[batchId]/enrollments`.
+- Equivalent `/super-admin/...` routes, reusing the same components with explicit role props.
+- `/super-admin/reconciliation` for durable failures and audited retries.
+- `/student/courses`, `/student/batches`, and the updated verified `/student` dashboard.
+
+Existing server page guards, authoritative Proxy checks, TanStack Query, typed API/CSRF transport, RHF/Zod forms, toast notifications, native focus-trapping confirmation dialogs, shared tables, pagination, skeletons, status pills and design tokens are reused. Registered pending Students may enter own-summary routes, but the backend exposes no unrelated pending rolls or course resources. Session/role/registration redirects remain authoritative.
+
+### D. Course Management
+
+Course is a reusable curriculum, separate from delivery groups. Fields include title, globally unique normalized uppercase code, unique lowercase slug, plain-text description/short description, difficulty, optional estimated study days, bounded normalized tags, explicit scope/owner/sharing, lifecycle, actor IDs, revision and timestamps.
+
+Super Admin manages platform and college-owned courses. Admins with course.manage can create/edit/publish/archive only courses owned by their currently ACTIVE assigned College. Admins cannot create platform courses, take over ownership, edit another college's shared course or grant sharing. Ownership is fixed after creation. Super Admin may explicitly share a college-owned course with up to 20 active colleges. Published global or explicitly eligible shared/own courses are selectable for college delivery; private drafts remain restricted to their owner management scope. Other college ownership grants are never inferred from browser selection.
+
+Lifecycle is DRAFT → PUBLISHED → ARCHIVED, with direct draft archive allowed. Archive is terminal and retains referenced records. Published metadata edits require expectedRevision. Course code/slug uniqueness is enforced by indexes; no hard-delete API exists. Course edits never rewrite existing Batch snapshots. Student-facing APIs do not expose the management catalog or unpublished content.
+
+### E. Batch Management
+
+Batch belongs immutably to one Course and one College. College+code is unique. Name, bounded description, optional validated ISO dates and optional integer capacity are supported. Enrollment policy is fixed to ADMIN_ROLL_ONLY. Batch revision protects human edits; operationalRevision serializes capacity and eligibility writes separately.
+
+Creation requires batch.manage in the active College and a published course eligible for that College. Activation repeats those checks and refreshes the minimal snapshot from the current Course revision. Snapshot holds title, code, slug, description, difficulty and revision; completed/archived Batch metadata is not editable. This is a metadata snapshot foundation, not Learning Day versioning. Phase 6 must attach immutable curriculum revisions/content snapshots without mutating completed history.
+
+Lifecycle is DRAFT → ACTIVE → COMPLETED → ARCHIVED, with explicit earlier archive allowed. Reopening completed/archived batches is unsupported. New enrollment is allowed only in DRAFT/ACTIVE batches; only ACTIVE batches can grant current effective learning access. Completion/archive retain membership and history while denying current access.
+
+Capacity policy: every current membership, including both pending states, reserves a seat until explicit withdrawal/transfer. Conditional counter updates enforce the limit in the same transaction as membership creation; concurrent writers serialize on Batch. Capacity edits cannot reduce below existing reserved seats. No count-then-write check outside a transaction authorizes admission.
+
+### F. Enrollment Architecture
+
+Only rollNumber is accepted as an enrollment identifier. The canonical Phase 4 schema trims, rejects non-ASCII/incorrect length/internal spaces/punctuation, and uppercases exactly ten letters/digits. User/profile IDs, email, phone, Google subject, names and usernames are rejected as enrollment body fields and are never used for enrollment lookup.
+
+The backend resolves the current StudentProfile.rollNumber, not merely a historical reservation. Current profile College, verification and canonical User eligibility are checked. Eligible verified STUDENT accounts in the matching active College/course and ACTIVE Batch receive ACTIVE membership. Registered unverified/ineligible accounts receive PENDING_VERIFICATION. Missing profiles receive PENDING_REGISTRATION without creating a User/Profile. Wrong-college or historical-roll matches produce safe conflicts without foreign profile details or automatic college changes.
+
+Partial unique indexes prevent contradictory current Batch+roll and Batch+profile memberships. Current states are PENDING_REGISTRATION, PENDING_VERIFICATION and ACTIVE; WITHDRAWN/CANCELLED history remains retained. API responses contain safe roll/status/outcome data, not another college's personal profile.
+
+Former withdrawn/cancelled membership is not silently recreated: a new add of that same roll to the same Batch returns HISTORY_CONFLICT and requires separate reviewed recovery. No re-enrollment recovery endpoint is shipped in this phase. An old bound enrollment after an approved roll correction cannot activate against the historical roll; explicit withdrawal and enrollment of the current corrected roll preserve history and identity rules.
+
+### G. Pending Enrollment and Reconciliation
+
+Relevant User, StudentProfile, College, Course and Batch writes include durable enrollmentReconciliationPending/cursor/attempt/next-time/error/event-token fields in the SAME original document write. These markers are an embedded durable outbox: they do not depend on a process-local event callback or a browser action. Student registration/verification/rejection/correction, canonical account suspension/reactivation/promotion, College changes and Course/Batch changes all feed this mechanism. Events reset the cursor and retry state and issue a fresh generation token.
+
+The backend worker starts with the server, polls every five seconds only after storage readiness, and processes at most one marker per source kind per pass, with at most 50 current memberships per transaction. The same transaction writes enrollment changes, history/audit and source cursor/completion state. Full pages retain a cursor; shorter pages finish the marker. Process restarts retain pending work. Concurrent source changes conflict on the same document and restart safely. Current and historical roll associations are considered for repair discovery, but only CURRENT profile roll ownership can activate an enrollment.
+
+Failures retain the marker and safe diagnostic text, increment attempts and back off to at most five minutes; after eight failures the work remains visible for explicit Super Admin review/retry. A generation guard prevents an old failure from replacing a newer event's retry state. `/super-admin/reconciliation` shows real pending/failure records. Retry is session/CSRF protected, rechecks current active Super Admin authority, marks work and appends audit transactionally. No external job service is required.
+
+Authorized roster reads reconcile a bounded page as a safety net. Reconciliation is idempotent and writes history only when status, binding or eligibility reason changes. COMPLETED/ARCHIVED batch membership may retain ACTIVE as a historical membership state, while current effective access is always false. Withdrawal/transfer are not undone by reconciliation.
+
+Effective access never trusts a stale stored ACTIVE flag. The reusable service helper checks the current User role/status/verification, current StudentProfile roll/College/verification, bound current ACTIVE enrollment, active College, published eligible Course and ACTIVE Batch on each use. Revocation denies access immediately even while a job is delayed or failed. Future Learning Day/attendance/progress endpoints must call this authority rather than trusting a preview, roll possession or stored membership status alone.
+
+### H. Bulk Import
+
+All manual, paste, CSV and XLSX methods use one enrollment assessment/execution pipeline. Manual requests require confirmation and a UUID request key. Paste accepts one-per-line, comma or whitespace separators. Every normalized input is categorized deterministically as ACTIVE, PENDING_REGISTRATION, PENDING_VERIFICATION, ALREADY_ENROLLED, DUPLICATE_INPUT, INVALID_ROLL, COLLEGE_CONFLICT, HISTORICAL_ROLL_CONFLICT, HISTORY_CONFLICT or CAPACITY_CONFLICT.
+
+[csv-parse](https://csv.js.org/parse/options/) handles UTF-8, optional BOM, quoted fields, blank rows and strict record structure. Exactly one recognized Roll Number/RollNumber/Roll_No/Roll No header is required. Extra columns are ignored with a warning and are not retained as a profile lookup source.
+
+[ExcelJS](https://github.com/exceljs/exceljs) reads the first worksheet only. Plain-text roll cells retain leading zeros. Unambiguous ten-digit integer cells with General/0 number formatting are supported; short numbers, padded/ambiguous numeric formats, formulas, hyperlinks and object-valued identifiers are rejected rather than silently converted. No formula engine or macro execution is used. [fflate](https://github.com/101arrowz/fflate) checks entry count/declared expansion before decompression; bounded extracted buffers are repacked before passing to the workbook parser so original ZIP metadata is not trusted again.
+
+Limits: 200 nonblank input rows, 1 MiB original file, 8 MiB expanded workbook, 4 MiB per ZIP entry and 500 ZIP entries. Paste/text/cell lengths and JSON body sizes are also bounded. Workbook row ranges beyond 201 including the header are rejected. Only CSV/XLSX kinds are accepted; malformed encoding, UTF-8, CSV, ZIP or workbook data fails safely. Files are not extracted to disk, stored permanently, logged, or shared between Colleges. Only bounded roll-column manifests/results persist.
+
+Flow: parse → validate/preview → explicit confirmation → authoritative revalidation → transaction → results. A random 256-bit preview token is returned once; only its hash is stored with owner User, Batch, canonical rows, source, warnings and 30-minute expiry. It is not a session or permanent authorization. Confirmation accepts only this token and true confirmation, rechecks current account/grants/College/Course/Batch/profile/verification/capacity/membership, and cannot be rebound to another actor or Batch.
+
+Atomicity policy: because the entire operation is bounded to 200 rows, all accepted memberships, seat changes, histories, audit summaries and operation results commit in ONE transaction. Expected invalid/duplicate/conflicting rows are skipped individually and reported alongside committed rows. An unexpected database/audit failure rolls back every accepted row in that operation. This is not chunked partial commitment, and no whole-file success is fabricated after failure.
+
+Completed results persist and identical preview/request-key retries return those original results without adding seats or rows; reusing a manual request key for another roll is rejected. Revalidation still requires current authorized operational access to retrieve/replay execution results. Preview alone reserves no capacity. Attempts across manual/preview/import are limited to 30 per current User/hour in addition to the existing API limiter. The XLSX library's UUID transitive advisory was addressed with a compatible UUID 11.1.1-or-later override; no vulnerable downgrade was applied.
+
+### I. Withdrawal and Transfer
+
+Withdrawal requires current student.enroll authority in the active College, confirmation, reason and enrollment revision. It changes the existing record to WITHDRAWN, records time/reason, releases a reserved seat and appends history/audit in one transaction. Effective access ends immediately; identity and previous events remain.
+
+Transfer requires current authority for both source/destination, a different eligible DRAFT/ACTIVE destination Batch of the SAME Course and SAME College, current roll/profile compatibility, source revision, available destination capacity and no current/former conflicting destination membership. It creates a new destination record, links transferredFrom/transferredTo, withdraws source, adjusts both counters and writes both histories plus audit atomically. If verification is unavailable, destination remains pending. Cross-college/course transfer is rejected without changing StudentProfile; cross-college identity correction remains the separate Phase 4 process.
+
+### J. Student Dashboard
+
+The verified Student dashboard and own Course/Batch pages use real backend membership data. Cards show authorized snapshot course title, Batch, College, Batch status, dates, enrollment state and fresh effective-access state. No percentages, learning-day/problem totals, attendance or coding progress are invented.
+
+Unverified profiles receive a safe verification-needed summary with no unrelated pending roll records. A verified current identity can see its own bound pending membership metadata where appropriate; that does not grant resources. Old-roll/foreign-current-college or operationally unavailable memberships show a generic review/unavailable state without unrelated curriculum details. No endpoint lets Students browse private catalogs/rosters or self-enroll.
+
+### K. Database Models and Indexes
+
+| Model | Fields/relationships | Important indexes/guards |
+| --- | --- | --- |
+| Course | Metadata, scope/owner/shared Colleges, lifecycle, actor IDs, revision, timestamps, durable marker | UNIQUE code; UNIQUE slug; scope+owner+status; title+status; pending marker+retry time |
+| Batch | Immutable Course/College, College code, lifecycle/dates/capacity, policy, snapshot, seatCount, revisions, actors/timestamps/marker | UNIQUE College+code; College+status; Course+status; startDate; marker+retry time |
+| BatchEnrollment | Immutable Batch/College/normalized roll/source, optional profile binding, state/reason, creator, activation/withdrawal/transfer links, revision/timestamps | Partial UNIQUE Batch+roll for current states; partial UNIQUE Batch+profile for current bound states; Batch/status; profile/status; College/status; roll/status |
+| EnrollmentImport | Actor/Batch/token hash/request key/source/canonical roll rows/warnings/expiry/status/results/timestamps | UNIQUE tokenHash; UNIQUE actor+Batch+requestKey; Batch+status+createdAt; completed results retained for replay |
+| EnrollmentHistory | Immutable membership/Batch/College/actor/action/before/after/reason/time | Enrollment+time; Batch+time; actor+time; no mutation/delete endpoint |
+| Existing User/Profile/College | Existing identities preserved; durable source markers added | Indexed pending marker/retry time; source marker written atomically with domain update |
+
+Critical operations share one Mongoose ClientSession through existing units with snapshot read concern and majority write concern. Capacity and enrollment revisions serialize competing writes. No transactionless fallback exists. Index readiness is explicit and gates `/ready`/learning repository access. Partial `$in` indexes require a MongoDB version that supports those expressions; validate on the actual Atlas version before launch. Schema/index mocks and transactional fixtures do not prove live MongoDB enforcement.
+
+### L. API Endpoints
+
+Paths below are under `/api/v1`; browser requests use the existing `/backend` same-origin transport. All use existing sessions and private/no-store responses; mutations require exact Origin and session-bound CSRF. Strict request/query schemas and bounded pagination/filter/sort prevent browser mass assignment.
+
+| Method | Path | Authority / behavior |
+| --- | --- | --- |
+| GET | /courses | Admin authorized catalog or Super Admin global catalog; search/status/difficulty/scope/owner filters |
+| GET | /courses/:courseId | Authorized metadata/details and current management capability |
+| POST | /courses | Super Admin platform/college draft or Admin course.manage in owner College |
+| PATCH | /courses/:courseId | Same ownership authority, full validated metadata and expectedRevision |
+| POST | /courses/:courseId/publish | Same management authority; lifecycle/revision/confirmation |
+| POST | /courses/:courseId/archive | Same management authority; terminal archive without deletion |
+| GET | /batches | Admin active assigned College scope or Super Admin global; College/Course/status/search filters |
+| GET | /batches/:batchId | Authorized Batch/snapshot/counter/capabilities |
+| POST | /batches | batch.manage, active College, published eligible Course |
+| PATCH | /batches/:batchId | Same management scope; revision/dates/capacity; immutable Course/College |
+| POST | /batches/:batchId/activate | Same scope; eligible Course/College, current snapshot, revision/confirmation |
+| POST | /batches/:batchId/complete | Same scope; retain history, deny current learning access |
+| POST | /batches/:batchId/archive | Same scope; retain historical records |
+| GET | /batches/:batchId/enrollments | student.view; scoped current roster/search/status; bounded repair safety net |
+| POST | /batches/:batchId/enrollments | student.enroll; roll-only manual request key/confirmation and shared execution rules |
+| POST | /batches/:batchId/enrollments/preview | student.enroll; authorized bounded paste/CSV/XLSX preview |
+| POST | /batches/:batchId/enrollments/import | student.enroll; owner-bound token/confirmation; revalidate and atomically commit/results |
+| POST | /batches/:batchId/enrollments/:enrollmentId/withdraw | student.enroll; reason/revision/confirmation; retain history |
+| POST | /batches/:batchId/enrollments/:enrollmentId/transfer | student.enroll in both batches; same Course/College policy and destination capacity |
+| GET | /batches/:batchId/enrollment-history | student.view plus report.view, student.enroll or batch.manage; retained membership records |
+| GET | /batches/:batchId/enrollment-events | Same history authority; paginated append-only transition events |
+| GET | /students/me/courses | Own current canonical Student identity only; fresh effective membership projections |
+| GET | /students/me/batches | Same safe own membership projection |
+| GET | /learning/reconciliation | Active Super Admin; real durable pending/failure visibility |
+| POST | /learning/reconciliation/retry | Rechecked active Super Admin; kind/target/confirmation; audited durable retry |
+
+Super Admin uses the same business services with explicit global authority; implementation is not duplicated into a second API or authentication flow. There is no hard-delete, public self-enrollment, direct profile enrollment or content-management route.
+
+### M. Security and Audit
+
+Every mutation uses current backend identity and college permissions. Admins cannot edit global/foreign curricula, create foreign batches, read foreign rosters, bind fake profile IDs, claim an old reserved roll, escalate via preview replay or bypass verification/capacity. Withdraw/transfer target membership IDs are checked against the authorized Batch. Student enrollment input accepts only roll, not another identity field.
+
+Current memberships use partial unique indexes, conditional reserved-seat counters, actor/profile/College/Course/Batch write guards and revisions inside transactions. Preview tokens are hashed, actor/Batch bound, expiring and revalidated. Manual retries are keyed; completed manifests/results prevent duplicate execution. Reconciliation markers, bounded pages and retry generations survive process restart/failure, while fresh access checks deny revoked eligibility immediately.
+
+Import file/row/expansion/type/encoding/cell limits, fixed roll-column selection, formula/link rejection, bounded repacking, text-only rendering and no filesystem extraction reduce spreadsheet attack surfaces. Uploaded full spreadsheets and foreign profile details never enter audit summaries. Application logging retains request IDs/status/timing rather than raw bodies, lists, cookies, QR or OAuth values.
+
+Audit actions cover Course create/update/publish/archive; Batch create/update/activate/complete/archive; current/pending enrollment creation; activation/reconciliation; withdrawal/transfer; import completion/conflict summaries; and reconciliation retry. Per-enrollment history records include actor/time/transition/reason. All critical history/audit writes commit with the corresponding domain writes; unexpected audit failure aborts the transaction. Automated reconciliation uses the original enrollment creator's real retained User reference with explicit System reconciliation actor naming; no fake system User is created.
+
+Process-local rate limiters require distributed coordination before horizontal scaling. The worker's local running guard is only an efficiency measure; persistence and transaction conflict handling provide durability. Audit APIs are append-only, not a promise of database-administrator tamper resistance.
+
+### N. Environment Variables
+
+No new secret is required. Existing MongoDB, Google OIDC, frontend/exact CORS origins, session/proxy and optional QR vault variables remain backend-only where appropriate. Frontend keeps NEXT_PUBLIC_API_BASE_URL=/backend and server-only BACKEND_API_BASE_URL. Parsing limits, page sizes, retry/backoff and worker intervals are bounded constants, not insecure browser overrides.
+
+Atlas remains deliberately unconfigured. No production credential, import signing secret, fake identity, real personal roster or QR key was requested or generated. Existing `.env.example` files retain sanitized names/examples. No uploaded spreadsheet artifact is written into the repository.
+
+### O. Testing Results
+
+Final local validation (Node 26.13.1; remote Node 22 CI not run):
+
+| Command | Backend | Frontend |
+| --- | --- | --- |
+| npm run format | PASS | PASS |
+| npm run lint | PASS | PASS |
+| npm run typecheck | PASS | PASS |
+| npm test -- --maxWorkers=2 | 270 passed across 17 files | 97 passed across 11 files; optional live-health file initially skipped |
+| npm run build | PASS (TypeScript) | PASS (Next.js production build, all new pages protected/dynamic) |
+| npm audit | Zero vulnerabilities | Zero vulnerabilities |
+
+The optional live-health test was then explicitly executed against the built local API with RUN_CONNECTIVITY_TEST=true and npm test -- src/tests/connectivity.test.ts: 1 passed. **368 distinct tests passed: 270 backend and 98 frontend including that separate connectivity run.** This establishes local HTTP transport, not MongoDB persistence or Google login.
+
+The frontend production build used NEXT_PUBLIC_API_BASE_URL=/backend and a localhost server-only BACKEND_API_BASE_URL. No secret was embedded. The final HTTP cache-header fix was rechecked after moving no-store before authentication; final source/build results supersede the initial middleware-order finding.
+
+Backend coverage includes scope/ownership/sharing, unique course IDs, lifecycle/revision/snapshot rules, active College and eligible Course checks, strict roll-only validation, verified/pending/missing/foreign/historical identities, duplicate/current/former membership policy, competing capacity requests, pending-seat reservation, preview conflicts/revalidation/expiry authority, replay/request-key binding, full rollback after unexpected audit failure, transfer/withdraw/history, reconciliation idempotence and immediate revocation gates.
+
+Parser tests exercise BOM/headers/quoted UTF-8 CSV, leading-zero strings, ignored extra columns, no email/phone identifier fallback, invalid encodings/formats/quoting, limits, first XLSX worksheet, formulas/hyperlinks/ambiguous numeric formats and expanded archive bounds. Real model contract tests cover partial indexes, transaction options/session composition, durable flags in original identity/College writes, conditional counters and import-result updates. Worker tests cover same-transaction cursor completion, 50-row continuation, persisted eight-attempt failure/backoff visibility, generation guarding and unavailable readiness.
+
+Frontend tests exercise course/batch forms and optional numbers/dates, ownership-aware controls, lifecycle confirmation/revisions, enrollment tabs/roll validation, paste preview/confirmation/results, preview invalidation after changed input, CSV/XLSX upload transport/type rejection, real own cards/unavailable states, reconciliation retry confirmation and protected routes. Existing Phase 1–4 tests remain included.
+
+Initial validation found TypeScript/model-query union issues, historical mock expectations extended by durable marker fields, test transport mocks that treated GET as mutation, asynchronous selector timing and a real empty optional-number conversion bug. These were corrected; final results below supersede earlier failures. The parser's dependency audit advisory was fixed with the compatible UUID override and verified by execution, not a vulnerable downgrade. No failed or unexecuted check is labeled PASS.
+
+Built HTTP checks observed unauthenticated Admin Course/Batch/detail/enrollment, Super Admin catalog/reconciliation and Student Course/Batch routes redirecting 307 to /login. Production preview returned 404. Backend health returned 200, readiness 503 and auth/status available=false with the deliberately unavailable localhost database. Private Course/Batch/enrollment/own-summary/reconciliation APIs returned 401 without data. The production /backend rewrite preserved health/readiness/denial behavior. After the middleware-order correction and rebuilt API, direct and same-origin Course, Batch, own-summary and reconciliation authentication denials all returned 401 with Cache-Control: no-store, private. No real Google/Atlas account was fabricated. Temporary servers were stopped after local checks.
+
+### P. Known Issues and Blockers
+
+- BLOCKED: actual Atlas persistence, partial unique index creation/enforcement, real transaction/write-conflict behavior, counters under multi-process load, worker restart/retry durability against real MongoDB and Google-authenticated end-to-end operations. Test fixtures are not live database proof.
+- BLOCKED: authenticated browser visual/mobile/accessibility review and real administrative roster import against configured accounts. Responsive layouts and component behavior are implemented/fixture-tested, without a production preview account or impersonation route.
+- Imports are deliberately bounded to 200 rows/1 MiB. Larger cohorts use multiple independent confirmed imports. Accepted rows of one import commit atomically; multiple imports do not form one global transaction.
+- Pending memberships reserve capacity until explicit withdrawal/transfer. Former same-Batch membership is not silently recreated; reviewed re-enrollment recovery remains a separate future policy/tool.
+- Transfers are same Course/same College only; cross-college identity correction remains Phase 4. Existing single-role Student/Admin access remains intentionally preserved.
+- No Learning Day content or completed-curriculum content revision system exists yet. Phase 6 must extend immutable snapshots without rewriting completed Batch history.
+- Per-process rate limits and worker operational throughput need validation before horizontal production scaling. Completed import results/history are retained for replay/audit; production retention policy must preserve idempotency/history guarantees.
+- Local Node and remote Node 22 CI execution are distinct; remote CI is not claimed as executed. Application dependency audit results are recorded from actual local runs.
+
+### Q. Files Created or Modified
+
+New backend: `src/learning/{contracts,markers,parser,repository,router,service,worker}.ts`; `src/models/learning.ts`; learning transactional test fixtures and domain/parser/HTTP/repository/worker test suites.
+
+Backend integration: existing User, College, StudentProfile marker fields/indexes; Student/Admin/auth repository atomic marker writes; Course/Batch/import/enrollment audit actions/targets; permission availability metadata; app DI/preview body limit/router mount; database indexes/readiness; startup/shutdown worker; dependency manifest/lockfile and safe UUID override; relevant prior model-contract test assertions.
+
+New frontend: `features/learning/{contracts,options,courses,batches,enrollments,transfer-options,student,reconciliation}` plus responsive stylesheet; eleven new role pages for Course/Batch/Enrollment/own summaries/worker visibility; learning UI/routing tests. Updated verified Student dashboard, Student/administration navigation, root CSS imports, Proxy own-summary exceptions and audit filter actions.
+
+Documentation: cumulative README with complete Phase 5 A–S record, current status and setup; this local ignored report. README remains the only publishable Markdown document. Source/tests/safe config are eligible for Git, while secrets, dependencies, builds, internal Markdown reports and screenshots remain ignored. Nothing was staged, committed, pushed or deployed automatically.
+
+### R. Acceptance Criteria
+
+| # | Requirement | Status | Evidence / limitation |
+| --- | --- | --- | --- |
+| 1 | Course model | PASS | Production schema/global/scoped indexes |
+| 2 | Course management/lifecycle | PASS | Create/read/update/publish/archive; no destructive delete |
+| 3 | Course ownership/scope | PASS | Owner-only Admin edits, global published selection, explicit SA sharing |
+| 4 | Batch model | PASS | Immutable Course/College, snapshot/capacity/revisions |
+| 5 | Batch lifecycle | PASS | Draft/active/completed/archived transitions |
+| 6 | Course/College eligibility | PASS | Backend active/publication/scope guards |
+| 7 | Enrollment model | PASS | Current-state partial uniqueness/history |
+| 8 | Roll-only enrollment | PASS | Strict input, no PII identity lookup |
+| 9 | Exact reused roll validation | PASS | Phase 4 schema imported directly |
+| 10 | Verified enrollment | PASS | Current verified identity/College/Batch rules |
+| 11 | Unverified remains pending | PASS | No effective resource access |
+| 12 | Unregistered pending | PASS | No fake canonical account/profile |
+| 13 | Historical roll safety | PASS | Current profile roll required; reservation alone cannot activate |
+| 14 | Manual enrollment | PASS | Shared service, confirmation, keyed retry |
+| 15 | Bulk paste | PASS | Delimiters, duplicates/invalid/conflict preview |
+| 16 | CSV import | PASS | Bounded maintained parser, headers/BOM/quoting |
+| 17 | XLSX import | PASS | Bounded first worksheet/plain-text/formula safeguards |
+| 18 | Preview/confirmation | PASS | Persisted owner-bound manifest, authoritative revalidation |
+| 19 | Idempotent/concurrent import | PASS | Transactional results/uniqueness/counter; live MongoDB BLOCKED |
+| 20 | Safe capacity | PASS | Pending seat reservation and conditional transactional counter |
+| 21 | Reconciliation | PASS | Durable markers, bounded retry/cursors, fresh effective gates; live restart proof BLOCKED |
+| 22 | Withdrawal history | PASS | Explicit revision/reason/confirmation, no deletion |
+| 23 | Transfer/history/scope | PASS | Same course/college, both permissions/counters, preserved links |
+| 24 | Real Student dashboard | PASS | Own API-backed summaries; no fabricated progress |
+| 25 | Admin management UI | PASS | Shared catalog/batches/enrollment workspace; live authenticated visual review BLOCKED |
+| 26 | Super Admin oversight | PASS | Global scope/shared UI and reconciliation visibility |
+| 27 | College authorization | PASS | Server current account/grants/College checks |
+| 28 | Audit/history | PASS | Critical writes append atomically |
+| 29 | Automated tests | PASS | 368 distinct tests passed, including separate real API health check; see section O |
+| 30 | Lint/types/builds | PASS | Both applications passed lint, types and production builds |
+| 31 | No fake production behavior | PASS | Real MongoDB repository, honest unavailability |
+| 32 | No Phase 6 | PASS | No Learning Day/editorial/content operations |
+
+PASS means implemented with the stated local evidence; explicitly blocked live integration is not represented as tested.
+
+### S. Next Phase Readiness
+
+Phase 5 is implemented and locally validated, ready for review with explicit live integration gates. This report does not authorize Phase 6 or represent mocked transaction tests as real Atlas verification.
+
+Phase 6 has not started and requires a separate request after review. Before launch, verify the actual Atlas version/indexes/transactions, reserved counters, durable worker recovery, configured Google roles and authenticated responsive flows. Phase 6 content must use fresh effective enrollment checks and immutable course/batch curriculum references. No automatic commit, push or deployment was performed.
+
 ## Current local setup
 
 Use Node.js 22 LTS and npm in the complete local workspace. Two independent applications are retained: algora-frontend and algora-backend.
@@ -790,6 +1295,20 @@ Production cookies are host-only `__Host-algora_session` and `__Host-algora_oaut
 The rewrite target is trusted server configuration, never user input. This introduces one extra frontend-to-backend hop. Keep frontend deployment previews separate from production sessions; use a separate OAuth client/environment for previews rather than wildcard origins or redirects. Configure the exact allowed frontend origin and correct Railway reverse-proxy hop count. Rate limit storage is process-local; a horizontally scaled production deployment needs a shared limiter or edge-level equivalent.
 
 Next.js external rewrites are documented in the [official rewrite reference](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites). Browser verification of the deployed cookie transport remains required.
+
+### Course, Batch and enrollment setup
+
+Grant course.manage, batch.manage, student.enroll and student.view explicitly to the authorized College Admins through Super Admin assignment management. History additionally requires report.view or membership/batch-management permission alongside student.view. These grants are not automatically added to existing accounts.
+
+Super Admin manages platform curricula and explicit cross-college course sharing. College Admins manage their own College-owned curricula and authorized Batches. Publish an eligible Course, create the College Batch, and activate it when ready. Enrollment uses the current ten-character roll only. Pending records reserve seats but grant no learning access. For paste/CSV/XLSX imports, review the server preview and confirm it; the final operation revalidates eligibility and capacity.
+
+The backend starts its durable reconciliation worker automatically after storage readiness. Super Admin can review failures at /super-admin/reconciliation. Database indexes/transactions, worker restart behavior and configured authenticated workflows must be verified before production use. No additional enrollment secret is required.
+
+### Student identity and QR setup
+
+Create ACTIVE colleges and explicitly grant student.view/student.verify to authorized college Admins. Students complete mandatory registration after Google login, then enter their profile while institutional verification is pending. Only an authorized separate reviewer may verify identity. Course/Batch delivery and authorized roll-only enrollment are implemented in Phase 5; institutional verification and effective enrollment remain separate requirements.
+
+QR requires backend-only QR_ACTIVE_KEY_ID and QR_ENCRYPTION_KEYS. Store an independently generated 32-byte key in the backend secret manager as a base64 value in the JSON keyring; never put a real value in README, source, chat or browser configuration. Registration remains usable with explicitly unissued QR when the vault is unavailable. See Phase 4 section H for wrapping-key rotation, backups and lost-key recovery. No credential has been configured here.
 
 ### Super Admin setup
 
@@ -841,13 +1360,13 @@ The callback atomically consumes a transaction matching state, browser binding a
 
 Only the stable Google subject identifies an existing account. Email collisions with another subject are rejected, never automatically linked. Atomic subject upsert plus unique indexes handle concurrent first login. Only profile fields and lastLoginAt are updated on later Google login; role, account/registration status and username are not accepted from Google/browser profile input.
 
-New users are STUDENT / PENDING / NOT_STARTED, without a username. They can view their own session profile and registration-required screen, but no student workspace or learning resources. Privileged accounts use the explicit Phase 3 operator provisioning command or the authenticated Super Admin approval workflow. Browser role selection never assigns privilege.
+New users are STUDENT / PENDING / NOT_STARTED, without a username. They enter /student/register. Registered but unverified Students may view /student/profile and /student/my-qr; only institutional verification permits the verified Student workspace, and Course/Batch access separately requires a current eligible enrollment. Privileged accounts use the explicit Phase 3 operator provisioning command or the authenticated Super Admin approval workflow. Browser role selection never assigns privilege.
 
 A fresh opaque session is created after verification; an existing browser session is revoked to prevent fixation. Status and revocation version are rechecked before issuing the cookie. Redirect destinations come only from a fixed server-side role/status policy, never a request URL. Invalid OAuth callbacks return sanitized API errors; the user can return to the login page to restart. Google cancellation never creates an account session.
 
 ### Models and indexes
 
-User: googleSubject (immutable, unique), normalized email (unique), emailVerified, displayName, optional avatarUrl, role, optional immutable username, accountStatus, registrationStatus, sessionVersion, lastLoginAt, createdAt, updatedAt. Username uniqueness uses a partial index for strings, allowing multiple unregistered users without usernames. Names are normalized only by reusable utilities; privileged usernames are allocated only by the controlled Phase 3 provisioning/approval workflows. Student allocation remains unimplemented.
+User: googleSubject (immutable, unique), normalized email (unique), emailVerified, displayName, optional avatarUrl, role, optional immutable username, accountStatus, registrationStatus, sessionVersion, lastLoginAt, createdAt, updatedAt. Username uniqueness uses a partial index for strings, allowing multiple unregistered users without usernames. Names are normalized only by reusable utilities; privileged usernames are allocated only by controlled provisioning/approval workflows, while independent permanent Student usernames live in StudentProfile after registration.
 
 Session: userId reference to User, tokenHash (unique SHA-256 hash), version, expiresAt (TTL index), revokedAt, createdAt, updatedAt. A compound userId/revokedAt index supports revocation. The raw 256-bit random token exists only transiently during issuance and in the HttpOnly cookie, never in responses, logs or browser storage.
 
@@ -873,7 +1392,7 @@ All routes below are under `/api/v1/auth` on Express and `/backend/auth` from th
 | GET /access/admin | Session + ADMIN + ACTIVE account. No college/admin business data. |
 | GET /access/super-admin | Session + SUPER_ADMIN + ACTIVE account. No privileged business operations. |
 
-Session errors return 401; role/lifecycle/CSRF denial returns 403; repository unavailability returns sanitized 503. Suspended/archived users are blocked and sessions revoked. Unauthenticated logout is treated as already signed out by the frontend; failed server revocation is never reported as successful logout. Phase 3 administration endpoints are documented above and enforce their own lifecycle, role, scope and CSRF checks.
+Session errors return 401; role/lifecycle/CSRF denial returns 403; repository unavailability returns sanitized 503. Suspended/archived users are blocked and sessions revoked. Unauthenticated logout is treated as already signed out by the frontend; failed server revocation is never reported as successful logout. Phase 3 administration, Phase 4 Student identity and Phase 5 Course/Batch/enrollment endpoints are documented above and enforce their own lifecycle, role, own-record/scope and CSRF checks.
 
 ### CSRF and frontend route protection
 
@@ -887,7 +1406,7 @@ Next.js Proxy checks the relevant Express access endpoint before rendering to is
 
 Unit/integration tests use only test-directory repositories, mocked transport and controlled signed JWT fixtures. They require no live Atlas database. Production imports contain no mock identity provider or in-memory user/session store. The optional Phase 1 live health test requires RUN_CONNECTIVITY_TEST=true and a running API; normal tests skip it.
 
-Actual Google consent/token exchange, Atlas index creation/persistence, deployed cookie transport and authenticated administration browser flows must be verified with real configuration before launch. Login desktop/mobile appearance and light/dark themes were checked locally. Do not represent fixture tests as live Google/Atlas verification. Phase 3 implements Admin approval, explicit Super Admin provisioning and college management. Student registration, courses and attendance remain unimplemented.
+Actual Google consent/token exchange, Atlas index creation/persistence, QR encrypted durability, deployed cookie transport and authenticated Student/administration browser flows must be verified with real configuration before launch. Login desktop/mobile appearance and light/dark themes were checked locally. Do not represent fixture tests as live Google/Atlas verification. Phase 3 implements Admin approval, explicit Super Admin provisioning and college management. Phase 4 implements registration, independent Student identities, scoped verification, corrections and encrypted permanent QR. Phase 5 implements scoped Courses/Batches, authorized enrollment/import/history and durable reconciliation. Learning Day content, attendance and coding progress remain unimplemented.
 
 ## Updating this record
 

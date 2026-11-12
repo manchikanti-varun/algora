@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { Menu, X, LayoutDashboard, ShieldCheck } from 'lucide-react';
 import { Brand, ThemeToggle } from '@/components/layout/header';
 import { navigation, type PreviewRole } from '@/config/navigation';
@@ -35,20 +36,31 @@ export function Workspace({ role, user }: { role: Role; user: PublicUser }) {
           </div>
           <span className="eyebrow">{key.replaceAll('-', ' ')} WORKSPACE</span>
           <nav aria-label="Workspace navigation">
-            {navigation[key].map((item) => (
-              <button
-                key={item}
-                className={active === item ? 'active' : ''}
-                aria-current={active === item ? 'page' : undefined}
-                onClick={() => {
-                  setActive(item);
-                  setOpen(false);
-                }}
-              >
-                <LayoutDashboard size={17} />
-                {item}
-              </button>
-            ))}
+            {role === 'STUDENT' && (
+              <>
+                <Link href="/student/profile">My profile</Link>
+                <Link href="/student/my-qr">My QR</Link>
+              </>
+            )}
+            {navigation[key]
+              .filter(
+                (item) =>
+                  role !== 'STUDENT' || !['Profile', 'My QR'].includes(item),
+              )
+              .map((item) => (
+                <button
+                  key={item}
+                  className={active === item ? 'active' : ''}
+                  aria-current={active === item ? 'page' : undefined}
+                  onClick={() => {
+                    setActive(item);
+                    setOpen(false);
+                  }}
+                >
+                  <LayoutDashboard size={17} />
+                  {item}
+                </button>
+              ))}
           </nav>
           <div className="sidebar-bottom">
             <p>Securely signed in with Google.</p>
@@ -90,7 +102,7 @@ export function Workspace({ role, user }: { role: Role; user: PublicUser }) {
                     ? 'A secure foundation for what’s next'
                     : active + ' is coming later'
                 }
-                description="Authentication is ready. Learning, college administration, and registration workflows will be introduced in future phases."
+                description="Your student identity, profile and permanent QR are available through the navigation. Courses, batches and enrollment will be introduced in later phases."
               />
             </Card>
           </main>

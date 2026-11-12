@@ -75,7 +75,15 @@ export function administrationRouter(
       permissions: permissions.map((key) => ({
         key,
         label: key.replace('.', ' · '),
-        availableNow: key === 'college.view',
+        availableNow: [
+          'college.view',
+          'student.view',
+          'student.verify',
+          'course.manage',
+          'batch.manage',
+          'student.enroll',
+          'report.view',
+        ].includes(key),
       })),
     })),
   );

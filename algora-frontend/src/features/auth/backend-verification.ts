@@ -57,7 +57,7 @@ export async function verifyBackend<T>(
         : code === 'ACCOUNT_PENDING'
           ? '/account-pending'
           : code === 'REGISTRATION_REQUIRED'
-            ? '/registration-required'
+            ? '/student/register'
             : '/unauthorized',
     );
   }

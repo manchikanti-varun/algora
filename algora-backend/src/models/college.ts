@@ -1,3 +1,4 @@
+import { reconciliationFields } from '../learning/markers.js';
 import {
   Schema,
   model,
@@ -7,6 +8,7 @@ import {
 import { collegeStatuses } from '../administration/contracts.js';
 const schema = new Schema(
   {
+    ...reconciliationFields,
     name: {
       type: String,
       required: true,
@@ -40,6 +42,7 @@ const schema = new Schema(
       required: true,
     },
     revision: { type: Number, default: 0, required: true },
+    operationalRevision: { type: Number, default: 0, required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
@@ -49,5 +52,6 @@ schema.index({ code: 1 }, { unique: true });
 schema.index({ slug: 1 }, { unique: true });
 schema.index({ identityKey: 1 }, { unique: true });
 schema.index({ status: 1, name: 1 });
+schema.index({ enrollmentReconciliationPending: 1, reconciliationNextAt: 1 });
 export const College = model('College', schema);
 export type CollegeDocument = HydratedDocument<InferSchemaType<typeof schema>>;

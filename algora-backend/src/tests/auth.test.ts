@@ -99,7 +99,7 @@ describe('OAuth HTTP boundary', () => {
       })
       .set('Cookie', flow.cookie);
     expect(result.headers.location).toBe(
-      'http://localhost:3000/registration-required',
+      'http://localhost:3000/student/register',
     );
   });
   it('completes callback with a minimum-privilege account and secure HTTP-only cookie', async () => {
@@ -110,7 +110,7 @@ describe('OAuth HTTP boundary', () => {
       .set('Cookie', flow.cookie);
     expect(response.status).toBe(303);
     expect(response.headers.location).toBe(
-      'http://localhost:3000/registration-required',
+      'http://localhost:3000/student/register',
     );
     expect(response.headers['set-cookie'].join(';')).toContain('HttpOnly');
     expect(response.headers['set-cookie'].join(';')).toContain('SameSite=Lax');
@@ -498,14 +498,14 @@ describe('session, naming and lifecycle utilities', () => {
         accountStatus: 'PENDING',
         registrationStatus: 'NOT_STARTED',
       }),
-    ).toBe('/registration-required');
+    ).toBe('/student/register');
     expect(
       destination({
         ...data.user,
         accountStatus: 'PENDING',
         registrationStatus: 'PENDING_VERIFICATION',
       }),
-    ).toBe('/account-pending');
+    ).toBe('/student/profile');
     expect(destination({ ...data.user, accountStatus: 'SUSPENDED' })).toBe(
       '/account-suspended',
     );

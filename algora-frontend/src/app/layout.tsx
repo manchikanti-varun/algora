@@ -6,6 +6,8 @@ import '@fontsource/manrope/700.css';
 import '@fontsource/manrope/800.css';
 import './globals.css';
 import '@/features/administration/administration.css';
+import '@/features/students/students.css';
+import '@/features/learning/learning.css';
 import { Providers } from '@/providers';
 export const metadata: Metadata = {
   title: { default: 'Algora — Where Logic Grows', template: '%s | Algora' },

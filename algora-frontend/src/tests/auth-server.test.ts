@@ -69,7 +69,7 @@ describe('authoritative server route protection', () => {
   it.each([
     ['FORBIDDEN', '/unauthorized'],
     ['ACCOUNT_SUSPENDED', '/account-suspended'],
-    ['REGISTRATION_REQUIRED', '/registration-required'],
+    ['REGISTRATION_REQUIRED', '/student/register'],
     ['ACCOUNT_PENDING', '/account-pending'],
   ])('routes backend %s safely', async (code, path) => {
     vi.stubGlobal(

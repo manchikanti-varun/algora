@@ -1,8 +1,5 @@
 import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
-import { connectDatabase, disconnectDatabase } from '../config/database.js';
-import { AdministrationService } from '../administration/service.js';
-import { mongoAdminRepository } from '../administration/repository.js';
 import { AppError } from '../middleware/errors.js';
 export async function runProvisionCommand() {
   const subject = process.env.PROVISION_SUPER_ADMIN_SUBJECT?.trim();
@@ -30,6 +27,13 @@ export async function runProvisionCommand() {
       'PROVISIONING_CANCELLED',
       'Provisioning was not confirmed',
     );
+  // Load database/model infrastructure only after explicit interactive confirmation.
+  const { connectDatabase, disconnectDatabase } =
+    await import('../config/database.js');
+  const { AdministrationService } =
+    await import('../administration/service.js');
+  const { mongoAdminRepository } =
+    await import('../administration/repository.js');
   try {
     await connectDatabase();
     const result = await new AdministrationService(
