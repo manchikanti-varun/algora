@@ -21,7 +21,7 @@ export function useCommand() {
   return useMutation({
     mutationFn: (command: {
       path: string;
-      method?: 'POST' | 'PATCH';
+      method?: 'POST' | 'PATCH' | 'DELETE';
       body?: unknown;
     }) =>
       apiMutate(

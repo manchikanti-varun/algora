@@ -15,7 +15,7 @@ export async function apiRequest<T>(
   schema: z.ZodType<T>,
   signal?: AbortSignal,
   options: {
-    method?: 'GET' | 'POST' | 'PATCH';
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     csrfToken?: string;
     body?: unknown;
   } = {},
@@ -102,7 +102,7 @@ export async function apiPost<T>(
 }
 export async function apiMutate<T>(
   path: string,
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PATCH' | 'DELETE',
   schema: z.ZodType<T>,
   body?: unknown,
 ) {

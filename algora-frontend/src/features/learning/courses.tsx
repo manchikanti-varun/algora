@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -140,6 +141,18 @@ export function CourseCatalog({
                       <Button variant="outline" onClick={() => setDetail(c)}>
                         Details
                       </Button>
+                      {c.canManage && (
+                        <Link
+                          href={
+                            (superAdmin ? '/super-admin' : '/admin') +
+                            '/courses/' +
+                            c.id +
+                            '/curriculum'
+                          }
+                        >
+                          Build curriculum
+                        </Link>
+                      )}
                       {c.canManage && c.status !== 'ARCHIVED' && (
                         <>
                           <Button variant="outline" onClick={() => setEdit(c)}>

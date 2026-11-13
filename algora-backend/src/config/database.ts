@@ -1,3 +1,7 @@
+import {
+  initializeCurriculumIndexes,
+  curriculumStorageReady,
+} from '../curriculum/repository.js';
 import mongoose from 'mongoose';
 import {
   initializeLearningIndexes,
@@ -31,6 +35,7 @@ export async function connectDatabase() {
   await initializeAdminIndexes();
   await initializeStudentIndexes();
   await initializeLearningIndexes();
+  await initializeCurriculumIndexes();
   logger.info('Database connected');
 }
 export async function databaseReady() {
@@ -38,7 +43,8 @@ export async function databaseReady() {
     !authStorageReady() ||
     !adminStorageReady() ||
     !studentStorageReady() ||
-    !learningStorageReady()
+    !learningStorageReady() ||
+    !curriculumStorageReady()
   )
     return false;
   try {

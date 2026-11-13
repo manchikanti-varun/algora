@@ -372,6 +372,11 @@ export function BatchDetail({
                   </Link>
                 </Button>
               )}
+              {q.data.canManage && (
+                <Link href={prefix + '/batches/' + id + '/curriculum'}>
+                  Curriculum and assignment history
+                </Link>
+              )}
               {q.data.canManage && q.data.status !== 'ARCHIVED' && (
                 <>
                   {q.data.status === 'DRAFT' && (
@@ -394,8 +399,8 @@ export function BatchDetail({
               )}
             </div>
             <p>
-              Learning Days, attendance and coding progress are not implemented
-              yet.
+              Assign a published curriculum to deliver Learning Days. Attendance
+              and verified coding progress are reserved for later phases.
             </p>
           </section>
         )}

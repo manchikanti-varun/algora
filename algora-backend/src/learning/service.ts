@@ -46,6 +46,74 @@ const snapshot = (c: CourseRecord) => ({
 });
 export class LearningService {
   constructor(private repo: LearningRepository) {}
+  async authorizeCourseEditor(
+    tx: LearningUnit,
+    id: string,
+    courseId: string,
+    write = false,
+  ) {
+    const u = await this.actor(tx, id, false, write),
+      c = need(await tx.course(courseId));
+    if (u.role !== 'SUPER_ADMIN') {
+      if (
+        !c.ownerCollegeId ||
+        !(await this.scopes(tx, u, 'course.manage'))?.includes(c.ownerCollegeId)
+      )
+        fail(
+          'COURSE_FORBIDDEN',
+          'Only the current Course owner may author curriculum',
+          403,
+        );
+    }
+    if (c.ownerCollegeId)
+      await this.college(tx, u, c.ownerCollegeId, 'course.manage', write);
+    if (write && c.status === 'ARCHIVED')
+      fail('COURSE_ARCHIVED', 'Archived course content is preserved');
+    if (write) await tx.lockCourse(c.id);
+    return { u, c };
+  }
+  async authorizeBatchManager(
+    tx: LearningUnit,
+    id: string,
+    batchId: string,
+    write = false,
+  ) {
+    const u = await this.actor(tx, id, false, write),
+      b = need(await tx.batch(batchId));
+    await this.college(tx, u, b.collegeId, 'batch.manage', write);
+    const c = need(await tx.course(b.courseId));
+    if (write) {
+      if (!eligible(c, b.collegeId))
+        fail('COURSE_INELIGIBLE', 'A published eligible course is required');
+      await tx.lockBatch(b.id);
+      await tx.lockCourse(c.id);
+    }
+    return { u, b, c };
+  }
+  async authorizeCatalog(
+    tx: LearningUnit,
+    id: string,
+    ownerCollegeId?: string | null,
+    write = false,
+  ) {
+    const u = await this.actor(tx, id, false, write);
+    const owners = await this.scopes(tx, u, 'course.manage');
+    if (u.role !== 'SUPER_ADMIN' && !owners?.length)
+      fail('FORBIDDEN', 'Current curriculum editor authority is required', 403);
+    if (
+      write &&
+      u.role !== 'SUPER_ADMIN' &&
+      (!ownerCollegeId || !owners?.includes(ownerCollegeId))
+    )
+      fail(
+        'CATALOG_FORBIDDEN',
+        'Only the owning college may edit this record',
+        403,
+      );
+    if (write && ownerCollegeId)
+      await this.college(tx, u, ownerCollegeId, 'course.manage', true);
+    return { u, owners };
+  }
   private async actor(
     tx: LearningUnit,
     id: string,
@@ -1162,6 +1230,8 @@ export class LearningService {
           visible && e.status === 'ACTIVE' && state.status === 'ACTIVE',
         ...(visible
           ? {
+              courseId: b.courseId,
+              batchId: b.id,
               courseTitle: b.snapshot.title,
               batchName: b.name,
               collegeName: college.name,

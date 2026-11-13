@@ -11,6 +11,8 @@ const schema = z.object({
       id: z.string(),
       status: z.string(),
       effectiveAccess: z.boolean(),
+      courseId: z.string().optional(),
+      batchId: z.string().optional(),
       courseTitle: z.string().optional(),
       batchName: z.string().optional(),
       collegeName: z.string().optional(),
@@ -82,10 +84,20 @@ export function StudentLearning({
                   )}
                   <div className="student-notice">
                     {item.effectiveAccess
-                      ? 'Your enrollment is active. Learning Days will be available in a later phase.'
+                      ? 'Your enrollment is active. Explore your assigned curriculum.'
                       : item.message.replaceAll('_', ' ').toLowerCase() ||
                         'This membership does not currently grant learning access.'}
                   </div>
+                  {item.effectiveAccess && item.courseId && item.batchId && (
+                    <div className="student-actions">
+                      <Link href={'/student/courses/' + item.courseId}>
+                        Course overview
+                      </Link>
+                      <Link href={'/student/batches/' + item.batchId}>
+                        Open learning path
+                      </Link>
+                    </div>
+                  )}
                 </article>
               ))}
             </div>

@@ -17,7 +17,8 @@ No credentials, authentication tokens, private keys, personal email addresses or
 | Phase 3 | Super Admin, colleges and Admin approval | Implemented locally; 196 tests passed (139 backend, 57 frontend); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
 | Phase 4 | Student registration, verification, profiles, corrections and permanent QR | Implemented locally; 275 tests passed (200 backend, 75 frontend including separate real API health test); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
 | Phase 5 | Course/Batch management, roll-only enrollment and reconciliation | Implemented locally; 368 tests passed (270 backend, 98 frontend including separate live API health); lint, types and production builds passed; both audits reported zero vulnerabilities. Live Google/Atlas verification remains blocked. |
-| Phase 6 | Learning Days and subsequent curriculum scope | Not started; requires a separate reviewed implementation request. |
+| Phase 6 | Immutable curricula, Learning Days, problem/editorial authoring and Student learning | Implemented locally; 488 tests passed (356 backend, 132 frontend including separate live API health); formatting, lint, types and production builds passed; both audits reported zero vulnerabilities. Live Atlas/Google and authenticated visual verification remain blocked. |
+| Phase 7 | QR attendance | Not started; awaiting review and a separate implementation request. |
 
 Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
@@ -28,6 +29,7 @@ Real Google consent/login, Atlas persistence/index creation, deployed cookie tra
 - [Phase 3 — Super Admin and college administration](#phase-3--super-admin-and-college-administration)
 - [Phase 4 — Student identity, verification and permanent QR](#phase-4--student-identity-verification-and-permanent-qr)
 - [Phase 5 — Courses, batches and roll-based enrollment](#phase-5--courses-batches-and-roll-based-enrollment)
+- [Phase 6 — Learning Days and immutable curriculum](#phase-6--learning-days-and-immutable-curriculum)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
@@ -994,6 +996,8 @@ Phase 5 must use the independent StudentProfile, active college and current inst
 
 ## Phase 5 — Courses, batches and roll-based enrollment
 
+Historical Phase 5 handoff snapshot. Phase 6 below supersedes its next-phase status and extends its delivery model.
+
 ### A. What We Built
 
 Implemented reusable scoped Course management, college-specific Batch delivery, permanent batch metadata snapshots, roll-only manual enrollment, bulk paste, CSV/XLSX import, owner-bound preview/confirmation, capacity-safe membership creation, pending registration/verification, durable reconciliation, immediate effective-access checks, withdrawal/transfer/history, real Student course/batch summaries and shared role-aware Admin/Super Admin management screens.
@@ -1248,7 +1252,202 @@ PASS means implemented with the stated local evidence; explicitly blocked live i
 
 Phase 5 is implemented and locally validated, ready for review with explicit live integration gates. This report does not authorize Phase 6 or represent mocked transaction tests as real Atlas verification.
 
-Phase 6 has not started and requires a separate request after review. Before launch, verify the actual Atlas version/indexes/transactions, reserved counters, durable worker recovery, configured Google roles and authenticated responsive flows. Phase 6 content must use fresh effective enrollment checks and immutable course/batch curriculum references. No automatic commit, push or deployment was performed.
+At this historical Phase 5 handoff, Phase 6 had not started. The completed Phase 6 record below supersedes that readiness snapshot. Before launch, verify the actual Atlas version/indexes/transactions, reserved counters, durable worker recovery, configured Google roles and authenticated responsive flows. Phase 6 content must use fresh effective enrollment checks and immutable course/batch curriculum references. No automatic commit, push or deployment was performed.
+
+## Phase 6 — Learning Days and immutable curriculum
+
+Implementation report. Local automated evidence and live integration evidence are distinguished below. Previous phases are preserved in README.md.
+
+### A. What We Built
+
+Course curriculum draft/clone/review/publish, arbitrary positive Learning Day numbers, ordered objectives/topics/resources/problem assignments, reusable canonical problem metadata, structured editorial versions, immutable published snapshots, server-time schedules, reviewed Batch assignments/upgrades, assignment history, audited release restrictions and Student Course/Batch/Day screens. Phase 7 is not implemented.
+
+### B. Backend Architecture
+
+The new curriculum contracts, service, MongoDB repository and router reuse Phase 5 Course, Batch and fresh effective-access services. New reusable authority methods centralize Course editor, Batch manager and catalog permissions. Batch gains nullable curriculumRevisionId; existing documents remain honestly unassigned. MongoCurriculumUnit composes MongoLearningUnit using the same ClientSession, including Student/Admin authority locks and transactional audit writes. Snapshot read concern and majority write concern cover publication and assignment. Storage/index readiness is mandatory; there is no production memory fallback.
+
+### C. Frontend Architecture
+
+New modular features/curriculum components provide a revision sidebar and builder, tabbed Learning Day editor, searchable/filterable problem catalog, structured editorial editor and sanitized preview, Batch impact confirmation/history/release controls, and Student learning screens. They use existing RHF/Zod, TanStack Query, CSRF API client, dialogs, loading/error states, toast notifications, light/dark tokens and protected shells. Responsive CSS collapses the workspace on smaller screens; code snippets scroll locally. Nine new protected pages cover Admin/Super Admin catalog, Course builder, Batch assignment and Student Course/Batch/Day routes. Navigation links integrate with existing Course and Batch pages.
+
+### D. Curriculum Revision Design
+
+CurriculumRevision has Course-local numbered DRAFT/PUBLISHED/ARCHIVED states, source revision, optimistic revision counter, actor/timestamps and Course snapshot. Parent CAS guards every draft edit. Course locks serialize numbering/publication with eligibility changes. Publication atomically writes separate PublishedLearningDay documents containing canonical problem metadata and the exact editorial version/body, then transitions the parent and writes audit. Later catalog/editorial changes cannot alter those documents. Published queries are guarded against writes, snapshot updates/deletes are rejected in Mongoose middleware, and draft-day operations require a DRAFT parent. Published editing clones to distinct draft documents; Batch references never follow the latest revision automatically.
+
+Privileged operators using raw database access or application code bypassing Mongoose middleware can circumvent application constraints. Restrict database privileges, review migrations, protect backups and audit operator access. MongoDB indexes alone cannot prove document immutability. There is no public arbitrary-update, archive, published-delete or snapshot-rewrite endpoint. Draft/Editorial guarded queries require an ID, DRAFT status and numeric expected revision. Snapshot creation requires a DRAFT parent; insertMany bypass is rejected.
+
+### E. Learning Day Management
+
+Day numbers are integers from 1 through one billion, formatted with at least two digits without truncating Day 100 or higher. Total days have no five/six-day business limit. Unique revision/day-number indexes and parent CAS protect edits/reordering. Reorder requires every current ID exactly once, temporarily uses unused positive numbers and then renumbers from 1, including when existing numbers reach the maximum. No hard deletion is permitted after publication.
+
+Objectives and topic/resource/assignment arrays preserve order. Per-day limits: 50 objectives, 100 topics, 100 resources and 100 assignments; title/description/code sizes are bounded. IDs and duplicate assignments are validated. Notes use sanitized Markdown; external links require public HTTPS and no credentials. No server-side URL fetch, preview scrape or file upload exists. INSTRUCTOR_ONLY resources are stripped server-side.
+
+SCHEDULED days store UTC timestamps. Authoring displays local timezone; the backend rejects nonfuture schedules when saved. Every Student read evaluates eligibility using server time, without a process-local timer. Publishing the immutable revision does not automatically expose its DRAFT, UNPUBLISHED or future scheduled days. A Batch-scoped audited overlay can restrict access or restore original release rules; it cannot bypass a schedule or reveal hidden editorials.
+
+### F. Problem Catalog
+
+LEETCODE, CODEFORCES and CODECHEF official exact-host URLs are parsed and canonicalized to platform IDs and stable URLs. Unsupported hosts, credentials, query/fragment redirect tricks, encoded paths, unsupported ports and inconsistent client IDs are rejected. A compound unique index prevents duplicate platform/canonical IDs. Canonical identity and owner are immutable; permitted metadata uses revision CAS. The catalog is reusable across Learning Days. All descriptions are instructor-provided; no copyrighted statement scraping, external platform verification or solved state is claimed.
+
+### G. Editorial System
+
+EditorialRevision stores owner, problem, version number, DRAFT/PUBLISHED status and structured body: overview, multiple approaches, intuition, brute force/optimized explanation, ordered steps, complexities, examples, code linked to approaches and additional notes. Snippets support JAVA/PYTHON/CPP/JAVASCRIPT. Published editorials are immutable; editing clones a new numbered draft. Frozen curriculum captures the exact published version and body. Per-assignment visibility is HIDDEN/VISIBLE. Hidden bodies, editorial identifiers and drafts are absent from Student responses, including direct editorial lookups.
+
+React Markdown skips raw HTML, runs GFM and rehype-sanitize, omits images/task inputs and allows only safe HTTPS links. Prism token rendering escapes code through React and never executes it. The instructor editor is explanatory text only. Editorial body is limited to 256 KiB, individual snippets to 20,000 characters and a frozen day to 1 MiB; authoring JSON is limited to 512 KiB.
+
+Global published editorials are reusable by authorized editors. College-owned versions are visible only within the editor's authorized ownership scope; global drafts remain Super Admin only. Student access to frozen editorials depends on the assigned revision, original visibility, release rules and fresh enrollment.
+
+### H. Batch Curriculum Assignment
+
+Batch managers select only a published revision belonging to the Batch Course. Missing references remain null and display Curriculum not assigned. DRAFT and ACTIVE Batches support explicit assignment/replacement. The server returns an impact summary and digest covering Batch revision/status, previous/new curriculum, new day count and reserved membership count. Confirmation carries expected previous ID, expected Batch revision, digest, reason and confirmed=true; the transaction rechecks all authority/eligibility and rejects stale impact. ACTIVE upgrades retain previous/new assignments in append-only history. COMPLETED/ARCHIVED references cannot change. A new published Course revision never silently changes existing Batch content.
+
+### I. Student Learning Experience
+
+Course overview shows authorized enrolled Batches. Batch view displays College/Course, pinned revision, released day/topic summaries and resource/problem counts. Day view separates objectives, topics, resources and required/optional/challenge problem cards, with official platform links and visible editorial tabs. Empty/unassigned/unavailable states are explicit. Students may open any eligible released day, including Day 100, without completing earlier days. No solved/completed checkboxes, progress records or code execution exists.
+
+### J. Authorization and Security
+
+Every Student content endpoint uses Phase 5 effective access: canonical active verified User, STUDENT role, VERIFIED profile, current roll and College, current ACTIVE enrollment, ACTIVE Batch/College and eligible Course. The assigned revision must be published and match that Course; day schedule and release restrictions are evaluated before projection. Knowing a roll, problem ID, editorial ID or unrelated revision grants no content access.
+
+Current Course ownership and course.manage protect authoring. Sharing a Course for delivery does not grant editing its curriculum. Batch management uses batch.manage plus College authority; it cannot authorize foreign Batch changes. Catalog writes enforce owner scope. Mutations recheck authority with existing account/assignment/College/Course/Batch locks inside the transaction. Sessions, Origin/CSRF checks, strict schemas, bounded inputs, sanitized errors, no-store responses and per-user curriculum rate limiting remain enabled. The limiter is process-local; scaled deployment requires shared enforcement as documented in prior phases.
+
+### K. Database Models and Indexes
+
+| Model | Main constraints and indexes |
+| --- | --- |
+| CurriculumRevision | unique Course/revisionNumber; Course/status/revisionNumber; DRAFT CAS |
+| LearningDay | unique revision/dayNumber; revision/status/publishAt; DRAFT-parent writes |
+| PublishedLearningDay | unique revision/dayNumber and revision/dayId; append-only frozen content |
+| CodingProblem | unique platform/platformProblemId; platform/difficulty; title/topics |
+| EditorialRevision | unique problem/versionNumber; problem/owner/status; DRAFT CAS |
+| BatchCurriculumAssignmentHistory | Batch/createdAt and newRevisionId; append-only history |
+| CurriculumReleaseControl | unique Batch/revision/day; optimistic counter |
+| Existing Batch | optional nullable curriculumRevisionId; existing enrollment/history untouched |
+
+Index initialization is part of storage readiness. Actual Atlas index creation and replica-set transaction behavior remain BLOCKED until authorized real integration.
+
+### L. API Endpoints
+
+All paths use /api/v1, session auth and no-store. Mutation bodies are strict and require Origin/CSRF; privileged mutations are audited. Lists accept bounded pagination; unknown query/body fields are rejected by their contracts.
+
+| Methods and paths | Authorization / contract |
+| --- | --- |
+| GET /courses/:courseId/curriculum | Current Course editor; revision list |
+| POST /courses/:courseId/curriculum/drafts | Course editor; optional published sourceRevisionId |
+| GET /courses/:courseId/curriculum/revisions/:revisionId | Course editor; paginated draft/frozen days |
+| POST .../revisions/:revisionId/clone | Course editor; confirmed published clone |
+| POST .../revisions/:revisionId/publish | Course editor; expectedRevision + confirmed |
+| POST .../revisions/:revisionId/days | Course editor; validated day + expected parent revision |
+| PATCH/DELETE .../revisions/:revisionId/days/:dayId | Course editor; expected parent revision; deletion confirmation |
+| POST .../revisions/:revisionId/days/reorder | Course editor; complete ordered IDs + expected parent revision |
+| GET .../revisions/:revisionId/days/:dayId/preview | Course editor; Student-safe rendering with server schedule metadata |
+| GET/POST /problems | Current curriculum editor; list/create reusable metadata |
+| GET/PATCH /problems/:problemId | Current editor / owning editor CAS update |
+| GET/POST /problems/:problemId/editorials | Scoped editor list/create |
+| GET/PATCH /problems/:problemId/editorials/:editorialId | Scoped editor read / draft CAS update |
+| POST .../editorials/:editorialId/publish | Owner; expectedRevision + confirmed |
+| POST .../editorials/:editorialId/clone | Owner; published version + confirmed |
+| GET /batches/:batchId/curriculum | Batch manager; assigned revision, published options, restrictions |
+| GET /batches/:batchId/curriculum/assignment-preview?revisionId=... | Batch manager; server-generated review impact |
+| POST /batches/:batchId/curriculum/assign | Batch manager; reviewed digest, expected previous/current revisions, reason, confirmation |
+| GET /batches/:batchId/curriculum/history | Batch manager; paginated assignments |
+| GET /batches/:batchId/curriculum/days | Batch manager; minimal assigned-day release metadata, no private bodies |
+| POST /batches/:batchId/curriculum/days/:dayId/release | Batch manager; expected overlay revision, restricted, reason, confirmation |
+| GET /students/me/courses/:courseId | Fresh authorized enrollment; own eligible Batches |
+| GET /students/me/batches/:batchId/curriculum | Fresh effective access; released assigned-day summaries |
+| GET /students/me/batches/:batchId/days/:dayNumber | Fresh effective access; released assigned-day safe projection |
+| GET /students/me/batches/:batchId/days/:dayNumber/problems/:problemId/editorial | Same guards plus assignment and visible editorial |
+
+The day number in the editorial URL disambiguates repeated catalog problems across days. No public editorial or unscoped Student revision endpoint exists.
+
+### M. Audit Logging
+
+Events cover draft creation/cloning; Learning Day create/update/remove/reorder; topics/resources/assignments; problem metadata; editorial draft changes/publication; curriculum publication; Batch assignment/upgrades; release restriction/restoration. They reuse AuditLog and share the corresponding transaction. Summaries contain IDs, states and counts, never full editorial code or resource bodies. Super Admin audit filtering includes new actions. Audit failure aborts the associated mutation and snapshots.
+
+### N. Environment Variables
+
+No new environment variable or secret is required for curriculum. Existing backend names: MONGODB_URI, NODE_ENV, PORT, FRONTEND_URL, CORS_ORIGINS, TRUST_PROXY_HOPS, LOG_LEVEL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, SESSION_TTL; QR_ACTIVE_KEY_ID and QR_ENCRYPTION_KEYS remain backend-only Phase 4 settings. Frontend: BACKEND_API_BASE_URL, NEXT_PUBLIC_API_BASE_URL; RUN_CONNECTIVITY_TEST only opts into the live health check. No raw values, credentials or real email addresses are published.
+
+### O. Testing Results
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| npm run format | PASS | PASS; final stylesheet also formatted after refinement |
+| npm run lint | PASS, no warnings | PASS, no warnings |
+| npm run typecheck | PASS | PASS |
+| npm test | PASS: 356 tests in 20 files with --maxWorkers=2 and local socket permission | PASS: 131 tests, one opt-in health test skipped, using --maxWorkers=1 --testTimeout=20000 |
+| Optional real client health test | Real built API listener | PASS: one additional test with RUN_CONNECTIVITY_TEST=true |
+| npm run build | PASS | PASS: final Next.js production build with documented local API base configuration |
+| npm audit | PASS: zero vulnerabilities | PASS: zero vulnerabilities |
+
+**488 distinct tests passed: 356 backend + 132 frontend (131 standard + one separately executed live client health test).** This includes prior-phase regressions and 120 new Phase 6 tests. Skipped opt-in tests are not counted as passed in the standard run; the health test was executed separately against the real listener.
+
+Production HTTP smoke: API health 200, readiness 503 while storage remains unconfigured, private curriculum/catalog/Student endpoints 401 with no-store; built frontend rewrite health 200, readiness 503, private catalog 401; Admin, Super Admin and Student deep routes redirect 307 to login without a session. Temporary listeners were closed. No authenticated user, production database or successful storage operation was fabricated.
+
+The initial production frontend invocation without BACKEND_API_BASE_URL correctly failed configuration validation; the configured final builds passed. Initial audit requests were blocked by sandbox DNS and then completed with network permission. The initial HTTP test run failed due to sandbox EACCES; the permitted rerun passed all 356 tests. Concurrent frontend runs hit five-second resource timeouts; the final single-worker run with a 20-second test timeout passed all 131 standard tests. Two new frontend assertions were corrected to match semantic complexity markup and await filtered results.
+
+Publication/privacy verification: git diff --check passes; eligible tracked/untracked source was scanned for credential patterns, local user paths, generated/private artifacts and unexpected Markdown with no findings. README.md remains the only tracked/eligible Markdown document; the detailed local report and generated logs are ignored. Nothing is staged, committed, pushed or deployed.
+
+Tests use injected repositories only. New service tests exercise transactional rollback, optimistic conflicts, snapshot identity, scheduling, hidden projection, fresh eligibility and no sequential lock. HTTP tests use real session/CSRF middleware with temporary local listeners. Repository tests inspect shared sessions/guarded writes; ODM tests reject forbidden updates before any database connection. Frontend tests cover builder, publishing confirmation, Day editor, catalog, editorial tabs, safe Markdown/code, impact review, Student pages and protected deep routes.
+
+Initial sandbox failures are recorded above for transparency; only successful final checks contribute to acceptance.
+
+### P. Known Issues and Blockers
+
+- BLOCKED: real Atlas connection, index creation, transaction/write-conflict behavior and persisted migration/assignment verification. No credentials requested or connection fabricated.
+- BLOCKED: real Google login, configured roles, authenticated visual/browser verification on desktop/mobile and deployed cookie transport. DOM tests and responsive CSS do not establish a visual browser pass.
+- Publication processes an entire revision in one transaction; very large curricula can encounter deployment transaction time/resource limits. It fails atomically without partial publication. There is no fixed five/six-day limit, and no claim of unlimited operational throughput.
+- Student summaries filter visibility using server-side reads; there is no durable job because no persisted scheduled transition is necessary. No editorial timing unlock exists.
+- Existing Batches require explicit assignment. No automatic data backfill, published revision fabrication or active upgrade is run.
+- Raw privileged database access can bypass ODM guards; restrict operator privileges and migration tooling.
+- External links are validated, not fetched or externally verified. No scraping or judge integration exists.
+
+### Q. Files Created or Modified
+
+Backend additions: src/curriculum/contracts.ts, repository.ts, service.ts, router.ts; src/models/curriculum.ts; curriculum fixture, service, HTTP and repository tests. Existing app/database readiness, LearningService authority and own-membership projection, Batch contract/schema, audit contracts/schema were extended.
+
+Frontend additions: features/curriculum/contracts.ts, builder.tsx, day-editor.tsx, problems.tsx, editorials.tsx, render.tsx, batch-assignment.tsx, student.tsx, curriculum.css; nine protected pages; curriculum UI/routing tests. Existing API client accepts guarded DELETE, administration queries, navigation, Course/Batch/Student links, audit filter, root CSS imports, package manifest and lockfile were updated. React Markdown/GFM/sanitize and Prism renderer are frontend-only dependencies. README is the only publishable Markdown record; this separate report is local and ignored.
+
+### R. Acceptance Criteria
+
+| # | Requirement | Status and evidence |
+| --- | --- | --- |
+| 1 | CurriculumRevision model and indexes | PASS — local implementation and automated evidence described above |
+| 2 | Published revisions immutable through guarded writes and snapshots | PASS — local implementation and automated evidence described above |
+| 3 | Draft, clone, review and publish workflow | PASS — local implementation and automated evidence described above |
+| 4 | Revision-aware LearningDay model | PASS — local implementation and automated evidence described above |
+| 5 | Create/edit/remove/reorder draft days | PASS — local implementation and automated evidence described above |
+| 6 | Ordered objectives and topics | PASS — local implementation and automated evidence described above |
+| 7 | Validated resources and sanitized notes | PASS — local implementation and automated evidence described above |
+| 8 | Reusable CodingProblem catalog | PASS — local implementation and automated evidence described above |
+| 9 | Canonical platform URL/ID validation | PASS — local implementation and automated evidence described above |
+| 10 | Required/optional/challenge ordered assignments | PASS — local implementation and automated evidence described above |
+| 11 | Structured editorial authoring | PASS — local implementation and automated evidence described above |
+| 12 | Immutable editorial versions and frozen bodies | PASS — local implementation and automated evidence described above |
+| 13 | Hidden editorials absent from Student responses | PASS — local implementation and automated evidence described above |
+| 14 | Server-time scheduled publication | PASS — local implementation and automated evidence described above |
+| 15 | Reviewed published Batch revision assignment | PASS — local implementation and automated evidence described above |
+| 16 | Honest existing Batch unassigned state | PASS — local implementation and automated evidence described above |
+| 17 | Completed/archived Batch reference and history preservation | PASS — local implementation and automated evidence described above |
+| 18 | Admin curriculum builder | PASS — implemented and DOM/route tested; authenticated visual verification BLOCKED |
+| 19 | Super Admin curriculum builder | PASS — implemented and DOM/route tested; authenticated visual verification BLOCKED |
+| 20 | Student Course page | PASS — implemented and DOM/route tested; authenticated visual verification BLOCKED |
+| 21 | Student Batch page | PASS — implemented and DOM/route tested; authenticated visual verification BLOCKED |
+| 22 | Student Learning Day page | PASS — implemented and DOM/route tested; authenticated visual verification BLOCKED |
+| 23 | Fresh effective-access enforcement on content reads | PASS — local implementation and automated evidence described above |
+| 24 | No sequential unlocking or completion records | PASS — local implementation and automated evidence described above |
+| 25 | Current ownership and cross-college authorization | PASS — local implementation and automated evidence described above |
+| 26 | Transactional privileged audit coverage | PASS — local implementation and automated evidence described above |
+| 27 | Automated tests | PASS — final commands and results recorded in section O |
+| 28 | Formatting/lint/typecheck/production builds | PASS — final commands and results recorded in section O |
+| 29 | No production fake data or successful storage fallback | PASS — local implementation and automated evidence described above |
+| 30 | No Phase 7 functionality | PASS — local implementation and automated evidence described above |
+
+PASS refers to implemented behavior backed by the stated local tests; BLOCKED live integration is separately listed and never represented as a production verification.
+
+### S. Phase 7 Readiness
+
+Phase 6 awaits user review. Phase 7 has not started. Before production delivery, configure authorized Atlas/Google environments, validate indexes/transactions/role scopes/cookies, explicitly assign an intended published revision to each Batch, and complete authenticated responsive visual checks. QR attendance requires its own reviewed Phase 7 work; no scanning/session/submission/payment/certificate/tutor/chat functionality was added. No automatic deployment, commit or push was performed.
+
 
 ## Current local setup
 
@@ -1278,7 +1477,7 @@ npm run dev
 
 Frontend runs at http://localhost:3000; Express at http://localhost:5000/api/v1. Sign-in remains unavailable until its real dependencies/configuration are ready. Do not overwrite an existing environment file when revisiting setup.
 
-Run inside each application: npm run lint, npm run typecheck, npm test and npm run build. Production frontend builds require BACKEND_API_BASE_URL; browser requests use NEXT_PUBLIC_API_BASE_URL=/backend. The optional live health test needs RUN_CONNECTIVITY_TEST=true and the local API running.
+Run inside each application: npm run format, npm run lint, npm run typecheck, npm test, npm run build and npm audit. Production frontend builds require BACKEND_API_BASE_URL; browser requests use NEXT_PUBLIC_API_BASE_URL=/backend. The optional live health test needs RUN_CONNECTIVITY_TEST=true and the local API running.
 
 ## Authentication configuration and contracts
 
@@ -1303,6 +1502,14 @@ Grant course.manage, batch.manage, student.enroll and student.view explicitly to
 Super Admin manages platform curricula and explicit cross-college course sharing. College Admins manage their own College-owned curricula and authorized Batches. Publish an eligible Course, create the College Batch, and activate it when ready. Enrollment uses the current ten-character roll only. Pending records reserve seats but grant no learning access. For paste/CSV/XLSX imports, review the server preview and confirm it; the final operation revalidates eligibility and capacity.
 
 The backend starts its durable reconciliation worker automatically after storage readiness. Super Admin can review failures at /super-admin/reconciliation. Database indexes/transactions, worker restart behavior and configured authenticated workflows must be verified before production use. No additional enrollment secret is required.
+
+### Curriculum and Learning Day setup
+
+Use /admin/problems or /super-admin/problems to author canonical problem metadata and publish immutable editorial versions. Open a Course's curriculum builder, create a draft, add and order Learning Days/topics/resources/assignments, choose exact published editorial versions and visibility, preview, then review and publish. Schedules are authored in local time, stored in UTC and evaluated by the server. Hidden editorials and instructor-only resources never enter Student projections.
+
+Open Batch curriculum management to select a published revision of the same Course, provide a review reason, review server-calculated impact and explicitly confirm assignment. Active Batch upgrades preserve assignment history and require a fresh review; completed/archived references remain unchanged. Existing Batches have no fabricated revision. Batch-specific release restrictions withdraw future access and restore only original release rules. No automatic scheduling worker or new curriculum environment secret is needed.
+
+Verified Students with current effective enrollment open their own Course/Batch learning path and any released Day. Current roll, profile, College, Course and Batch eligibility remain mandatory on every content request. There is no sequential completion or solved-state tracking. Real persisted and authenticated browser checks remain blocked until dependencies are configured.
 
 ### Student identity and QR setup
 

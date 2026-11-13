@@ -82,6 +82,10 @@ const snapshot = new Schema(
 const batch = new Schema(
   {
     courseId: { ...ref('Course'), immutable: true },
+    curriculumRevisionId: {
+      ...ref('CurriculumRevision', false),
+      default: null,
+    },
     collegeId: { ...ref('College'), immutable: true },
     name: { type: String, required: true },
     code: { type: String, required: true },

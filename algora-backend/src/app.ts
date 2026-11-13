@@ -1,3 +1,5 @@
+import { curriculumRouter } from './curriculum/router.js';
+import type { CurriculumRepository } from './curriculum/contracts.js';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -21,6 +23,7 @@ export function createApp(
   administration?: AdminRepository,
   students?: StudentRepository,
   learning?: LearningRepository,
+  curriculum?: CurriculumRepository,
 ) {
   const app = express();
   app.disable('x-powered-by');
@@ -70,8 +73,15 @@ export function createApp(
       ? importJson(req, res, next)
       : next(),
   );
+  const contentJson = express.json({ limit: '512kb' });
+  app.use((req, res, next) =>
+    /^\/api\/v1\/(?:courses\/[^/]+\/curriculum|problems)(?:\/|$)/.test(req.path)
+      ? contentJson(req, res, next)
+      : next(),
+  );
   app.use(express.json({ limit: '32kb' }));
   app.use('/api/v1/auth', authRouter(auth));
+  app.use('/api/v1', curriculumRouter(auth, curriculum, learning));
   app.use('/api/v1', learningRouter(auth, learning));
   app.use('/api/v1', studentsRouter(auth, students));
   app.use('/api/v1', administrationRouter(auth, administration));

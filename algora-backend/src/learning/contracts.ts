@@ -165,6 +165,7 @@ export interface Snapshot {
   courseRevision: number;
 }
 export interface BatchRecord extends z.infer<typeof batchSchema> {
+  curriculumRevisionId?: string | null;
   id: string;
   status: (typeof batchStatuses)[number];
   enrollmentPolicy: 'ADMIN_ROLL_ONLY';

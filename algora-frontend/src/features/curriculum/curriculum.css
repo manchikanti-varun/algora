@@ -1,0 +1,203 @@
+.curriculum-workspace {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+.curriculum-sidebar {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.curriculum-sidebar button {
+  white-space: normal;
+  text-align: left;
+}
+.curriculum-section,
+.curriculum-day-card {
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  margin-block: 1rem;
+  background: var(--card);
+}
+.curriculum-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block: 1rem;
+}
+.curriculum-tabs [aria-selected='true'] {
+  background: #16b89a;
+  color: #101b2b;
+}
+.curriculum-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+}
+.curriculum-markdown {
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.curriculum-markdown pre,
+.curriculum-code {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre;
+  padding: 1rem;
+  border-radius: 0.75rem;
+}
+.curriculum-markdown img {
+  display: none;
+}
+.curriculum-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.curriculum-release-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.curriculum-section textarea {
+  min-height: 7rem;
+  width: 100%;
+}
+.curriculum-section input,
+.curriculum-section select {
+  max-width: 100%;
+}
+.curriculum-problem-card {
+  border: 1px solid var(--border);
+  padding: 1.25rem;
+  border-radius: 1rem;
+  margin-block: 1rem;
+}
+.curriculum-code-input {
+  font-family: monospace;
+  min-height: 220px;
+}
+.curriculum-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.curriculum-properties {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+}
+.curriculum-preview {
+  min-width: 0;
+}
+@media (max-width: 800px) {
+  .curriculum-workspace {
+    grid-template-columns: 1fr;
+  }
+  .curriculum-sidebar {
+    position: static;
+  }
+  .curriculum-release-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .curriculum-tabs button {
+    flex: 1 1 auto;
+  }
+}
+.revision-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-block: 1rem;
+}
+.revision-list > button {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--card);
+  color: var(--foreground);
+}
+.revision-list > button.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.revision-list > button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.curriculum-main {
+  min-width: 0;
+}
+.curriculum-revision-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.curriculum-context {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--soft);
+  border-radius: 1rem;
+  margin-block: 1rem;
+}
+.curriculum-editor .code-input {
+  min-height: 220px;
+  font-family: monospace;
+  tab-size: 2;
+}
+.curriculum-plain-code {
+  overflow: auto;
+  padding: 1rem;
+  background: var(--soft);
+  border-radius: 0.75rem;
+}
+.learning-day-content .problem-card {
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  margin-block: 1rem;
+}
+.learning-day-content .problem-card > header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.problem-platform {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.curriculum-markdown table {
+  display: block;
+  overflow: auto;
+  max-width: 100%;
+}
+.curriculum-markdown th,
+.curriculum-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+}
+.curriculum-section legend {
+  padding-inline: 0.5rem;
+  font-weight: 700;
+}
+.curriculum-sidebar > p {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
