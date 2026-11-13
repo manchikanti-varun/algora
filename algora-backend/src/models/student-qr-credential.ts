@@ -7,6 +7,7 @@ const schema = new Schema(
       required: true,
       immutable: true,
     },
+    attendanceRevision: { type: Number, default: 0 },
     version: { type: Number, required: true, min: 1 },
     tokenHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
     ciphertext: { type: String, required: true },

@@ -42,6 +42,11 @@ export function AdministrationShell({
           },
           { label: 'Batches', href: '/super-admin/batches', icon: Users },
           {
+            label: 'Attendance',
+            href: '/super-admin/attendance',
+            icon: CheckCheck,
+          },
+          {
             label: 'Reconciliation',
             href: '/super-admin/reconciliation',
             icon: ScrollText,
@@ -65,6 +70,7 @@ export function AdministrationShell({
           { label: 'Courses', href: '/admin/courses', icon: Building2 },
           { label: 'Problems', href: '/admin/problems', icon: ScrollText },
           { label: 'Batches', href: '/admin/batches', icon: Users },
+          { label: 'Attendance', href: '/admin/attendance', icon: CheckCheck },
           { label: 'Students', href: '/admin/students', icon: Users },
         ];
   return (

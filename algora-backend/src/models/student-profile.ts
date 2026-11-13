@@ -4,6 +4,7 @@ import { verificationStatuses } from '../students/contracts.js';
 const schema = new Schema(
   {
     ...reconciliationFields,
+    attendanceRevision: { type: Number, default: 0 },
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',

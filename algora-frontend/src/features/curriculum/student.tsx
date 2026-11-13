@@ -108,6 +108,9 @@ export function StudentBatch({ id }: { id: string }) {
             <section className="student-card">
               <span className="eyebrow">{q.data.batch.courseTitle}</span>
               <h2>{q.data.batch.name}</h2>
+              <Link href={'/student/batches/' + id + '/attendance'}>
+                My attendance →
+              </Link>
               <p>{q.data.batch.collegeName ?? 'Your authorized college'}</p>
               <p>
                 {q.data.revision

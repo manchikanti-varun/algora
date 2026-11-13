@@ -823,6 +823,11 @@ export class CurriculumService {
       const r = await this.parent(tx, d.curriculumRevisionId, b.courseId);
       if (r.status !== 'PUBLISHED')
         fail('REVISION_NOT_PUBLISHED', 'Choose a published revision');
+      if (b.curriculumRevisionId !== r.id && (await tx.hasAttendance(b.id)))
+        fail(
+          'ATTENDANCE_HISTORY_LOCKED',
+          'Curriculum replacement is blocked once attendance exists',
+        );
       const impact = this.impact(b, r);
       if (
         b.revision !== d.expectedBatchRevision ||

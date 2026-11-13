@@ -114,6 +114,59 @@ export class LearningService {
       await this.college(tx, u, ownerCollegeId, 'course.manage', true);
     return { u, owners };
   }
+  async attendanceAuthority(
+    tx: LearningUnit,
+    id: string,
+    batchId: string,
+    write = false,
+    historical = false,
+  ) {
+    const u = await this.actor(tx, id, false, write),
+      b = need(await tx.batch(batchId));
+    if (
+      u.role !== 'SUPER_ADMIN' &&
+      !(await this.scopes(tx, u, 'college.view'))?.includes(b.collegeId)
+    )
+      fail('COLLEGE_FORBIDDEN', 'College visibility is required', 403);
+    await this.college(tx, u, b.collegeId, 'attendance.manage', write);
+    const c = need(await tx.course(b.courseId));
+    if (write) {
+      if (!historical && (b.status !== 'ACTIVE' || !eligible(c, b.collegeId)))
+        fail(
+          'BATCH_INELIGIBLE',
+          'Current active Batch and eligible Course required',
+          403,
+        );
+      await tx.lockBatch(b.id);
+      await tx.lockCourse(c.id);
+    }
+    return { u, b, c };
+  }
+  async effectiveIn(
+    tx: LearningUnit,
+    id: string,
+    batchId: string,
+    lock = false,
+  ) {
+    await this.actor(tx, id, true, lock);
+    const p = need(await tx.students.own(id)),
+      b = need(await tx.batch(batchId)),
+      e = await tx.current(b.id, p.rollNumber, p.id);
+    if (
+      !e ||
+      e.studentProfileId !== p.id ||
+      e.collegeId !== p.collegeId ||
+      e.rollNumber !== p.rollNumber ||
+      e.status !== 'ACTIVE' ||
+      (await this.state(tx, b, e.rollNumber, p.id, lock)).status !== 'ACTIVE'
+    )
+      fail(
+        'ENROLLMENT_REQUIRED',
+        'Current verified active enrollment is required',
+        403,
+      );
+    return { batch: b, enrollment: e!, profile: p };
+  }
   private async actor(
     tx: LearningUnit,
     id: string,

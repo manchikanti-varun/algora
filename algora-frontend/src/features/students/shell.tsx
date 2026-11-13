@@ -42,6 +42,7 @@ export function StudentShell({
         <nav aria-label="Student navigation">
           <Link href="/student/courses">My courses</Link>
           <Link href="/student/batches">My batches</Link>
+          <Link href="/student/attendance">My attendance</Link>
           <Link href="/student/profile">Profile</Link>
           <Link href="/student/my-qr">My QR</Link>
           <Link href="/request-admin-access">Request Admin access</Link>

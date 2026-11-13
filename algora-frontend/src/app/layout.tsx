@@ -9,6 +9,7 @@ import '@/features/administration/administration.css';
 import '@/features/students/students.css';
 import '@/features/learning/learning.css';
 import '@/features/curriculum/curriculum.css';
+import '@/features/attendance/attendance.css';
 import { Providers } from '@/providers';
 export const metadata: Metadata = {
   title: { default: 'Algora — Where Logic Grows', template: '%s | Algora' },

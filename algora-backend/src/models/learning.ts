@@ -122,6 +122,7 @@ batch.index({ enrollmentReconciliationPending: 1, reconciliationNextAt: 1 });
 export const Batch = model('Batch', batch);
 const enrollment = new Schema(
   {
+    attendanceRevision: { type: Number, default: 0 },
     batchId: { ...ref('Batch'), immutable: true },
     collegeId: { ...ref('College'), immutable: true },
     rollNumber: {

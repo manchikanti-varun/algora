@@ -18,7 +18,8 @@ No credentials, authentication tokens, private keys, personal email addresses or
 | Phase 4 | Student registration, verification, profiles, corrections and permanent QR | Implemented locally; 275 tests passed (200 backend, 75 frontend including separate real API health test); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
 | Phase 5 | Course/Batch management, roll-only enrollment and reconciliation | Implemented locally; 368 tests passed (270 backend, 98 frontend including separate live API health); lint, types and production builds passed; both audits reported zero vulnerabilities. Live Google/Atlas verification remains blocked. |
 | Phase 6 | Immutable curricula, Learning Days, problem/editorial authoring and Student learning | Implemented locally; 488 tests passed (356 backend, 132 frontend including separate live API health); formatting, lint, types and production builds passed; both audits reported zero vulnerabilities. Live Atlas/Google and authenticated visual verification remain blocked. |
-| Phase 7 | QR attendance | Not started; awaiting review and a separate implementation request. |
+| Phase 7 | QR attendance, durable rosters, finalization, corrections and exports | Implemented locally; 616 tests passed (445 backend, 171 frontend including separate live API health); both builds/format/lint/types passed and audits found zero vulnerabilities. Live Atlas/Google, authenticated visual and real-camera acceptance remain blocked. |
+| Phase 8 | Verified coding progress | Not started; awaiting Phase 7 review and a separate request. |
 
 Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
@@ -30,6 +31,7 @@ Real Google consent/login, Atlas persistence/index creation, deployed cookie tra
 - [Phase 4 — Student identity, verification and permanent QR](#phase-4--student-identity-verification-and-permanent-qr)
 - [Phase 5 — Courses, batches and roll-based enrollment](#phase-5--courses-batches-and-roll-based-enrollment)
 - [Phase 6 — Learning Days and immutable curriculum](#phase-6--learning-days-and-immutable-curriculum)
+- [Phase 7 — QR-based attendance management](#phase-7--qr-based-attendance-management)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
@@ -1256,6 +1258,8 @@ At this historical Phase 5 handoff, Phase 6 had not started. The completed Phase
 
 ## Phase 6 — Learning Days and immutable curriculum
 
+Historical Phase 6 handoff snapshot. The Phase 7 record below supersedes its next-phase status and records the required Phases 1–6 GitHub push.
+
 Implementation report. Local automated evidence and live integration evidence are distinguished below. Previous phases are preserved in README.md.
 
 ### A. What We Built
@@ -1449,6 +1453,232 @@ PASS refers to implemented behavior backed by the stated local tests; BLOCKED li
 Phase 6 awaits user review. Phase 7 has not started. Before production delivery, configure authorized Atlas/Google environments, validate indexes/transactions/role scopes/cookies, explicitly assign an intended published revision to each Batch, and complete authenticated responsive visual checks. QR attendance requires its own reviewed Phase 7 work; no scanning/session/submission/payment/certificate/tutor/chat functionality was added. No automatic deployment, commit or push was performed.
 
 
+## Phase 7 — QR-based attendance management
+
+Local implementation report. Live integration and physical-camera evidence are distinguished from automated checks.
+
+### A. GitHub Push Verification
+
+The actual workspace is one existing Git repository containing two independent applications, rather than two nested repositories. Existing history, main branch and origin were preserved; no repository was split and no remote was changed.
+
+| Application | Branch | Existing remote | Pushed commit | Verification |
+| --- | --- | --- | --- | --- |
+| Frontend | main | https://github.com/manchikanti-varun/algora.git | 9a11e572cb53a2c35720879d89769cb9e3dbb6fe | PASS — remote main equals local HEAD |
+| Backend | main | https://github.com/manchikanti-varun/algora.git | 9a11e572cb53a2c35720879d89769cb9e3dbb6fe | PASS — same shared repository and commit |
+
+Stage A committed 47 reviewed files as `feat: complete Algora platform through phase 6`, preserving all prior history. The complete committed tree contained 234 files, including application source/tests/lockfiles/configuration/assets and cumulative README. Five preceding commits and pending content were checked for credential patterns; no findings. Staged files were separately reviewed: no private environment files, real rosters, generated output, dependencies, local logs or Markdown other than README. The existing Git author used a GitHub noreply address. Push succeeded, independent ls-remote verification matched HEAD, and the working tree was clean before Phase 7 began.
+
+Stage A checks: format, lint, types, tests, build and audit in both applications; 488 distinct tests passed including the separately executed real API health test; both audits found zero vulnerabilities. One frontend asynchronous-loading test failed during a busy concurrent run and the complete suite passed on rerun with all assertions unchanged. Only after push verification did Phase 7 development begin. Phase 7 changes remain uncommitted and unpushed.
+
+### B. What We Built
+
+Batch-pinned Morning/Afternoon attendance, DRAFT/OPEN/CLOSED/FINALIZED lifecycle, permanent QR credential reuse, continuous authorized camera scanning, immutable roster admission snapshots, reviewed additive roster refresh, idempotent marks, explicit finalization, excusing unmarked members, audited corrections/history, own Student attendance including completed Batches, reports/comparisons and private CSV/XLSX exports. No Phase 8, deployment or production fake data was added.
+
+### C. Backend Architecture
+
+New attendance contracts, models, MongoDB repository, service and router compose the existing curriculum, LearningUnit, StudentUnit and AdminUnit using one MongoDB ClientSession. Existing Course, Batch, enrollment, QR, session/CSRF and audit systems are retained. New reusable LearningService methods authorize College-scoped attendance and evaluate fresh effective access inside the attendance transaction. Attendance indexes join the existing database readiness gate; unavailable storage fails honestly.
+
+All privileged mutations are transactional with snapshot read concern and majority write concern. Operational writes lock the current actor/College/Batch/Course, session and relevant Student User/profile/enrollment/QR document. These writes conflict with permission revocation, withdrawal, QR rotation and closure instead of trusting a stale read. Session transitions and corrections additionally compare expected revisions. There is no transactionless fallback.
+
+### D. Frontend Architecture
+
+Shared Admin/Super Admin features include an attendance Batch hub with College/Course filters, Learning Day dashboard, Morning/Afternoon cards, roster review/history, reasoned confirmation dialogs, live scanner and report/export views. Student attendance has a self-only Batch history hub and per-Batch screen. Twelve new protected pages reuse existing role shells, backend-verified server guards, Query/RHF-era UI primitives, loading/error states, toast notifications and light/dark tokens. Responsive CSS stacks camera and session panels on mobile; status labels and colors distinguish unmarked/absent/present/excused.
+
+The scanner uses the installed @yudiel/react-qr-scanner 2.6.0 library. Its documented camera/continuous-scanning API was checked against the [official project documentation](https://github.com/yudielcurbelo/react-qr-scanner). The locked ZXing decoder and license are copied to same-origin public assets by predev/prebuild. Generated decoder assets remain ignored. No third-party CDN is needed for decoding, and camera frames are not uploaded by the attendance client.
+
+### E. Attendance Session Lifecycle
+
+| State/action | Behavior |
+| --- | --- |
+| Create DRAFT | Actual assigned released day and authorized active Batch required; no roster or absence created |
+| DRAFT → OPEN | Transactionally admits the current verified eligible enrollment roster |
+| OPEN → CLOSED | Stops scanning; existing marks remain draft/reviewable |
+| CLOSED → OPEN | Explicit reason/confirmation; original roster and marks retained |
+| CLOSED → FINALIZED | Official records created atomically; cannot ordinarily reopen |
+
+Every lifecycle transition after creation requires a meaningful reason, confirmation, expected session revision, current authority and audit/history. Exactly MORNING and AFTERNOON are supported; canonical uniqueness is Batch + LearningDay + sessionType. There are no fixed clock times or sequential attendance prerequisites. New/reopened scanning requires the pinned day's original publication/schedule and current release control. Closing/finalizing an already admitted session remains possible after the day is restricted, without exposing learning content.
+
+### F. QR Scanning
+
+The browser sends only the bounded opaque token in a CSRF-protected POST body. Backend hashes it using the existing Phase 4 QrVault.hash, reads the existing current credential hash/version/profile relationship, verifies the profile credential version and rechecks canonical User, verified profile, current roll/College, ACTIVE enrollment/Batch/College and eligible Course. Snapshot membership is required, but is never sufficient authority by itself.
+
+The existing current-credential model replaces the old lookup hash at rotation. Consequently unknown and rotated-away hashes return INVALID_OR_REVOKED_QR; the system does not pretend it can distinguish them without retained historical hashes. A known mismatched version returns REVOKED_QR. Error responses do not expose identities. Successful authorized feedback contains only name/roll/status.
+
+Camera controls prefer the rear camera, allow device selection, pause/resume/stop, handle insecure/unsupported/permission failures and release streams on unmount/device changes. Scanning continues automatically after responses. The client suppresses repeated frames for four seconds using an in-memory SHA-256 value and serializes in-flight requests; raw QR values are not placed in React Query mutation caches, localStorage, sessionStorage, URLs, logs or analytics. Sound is disabled. The backend's unique record identity and transactional state checks remain authoritative.
+
+Scanning additionally requires an existing server-issued staff session less than eight hours old, or its earlier configured expiry. Renewal requires signing out and signing in again; ordinary token refresh preserves the original creation time and does not bypass this check. Account, role and College grants are rechecked on each request. No new authentication system was created.
+
+### G. Roster Snapshots
+
+Opening creates one immutable admission row per eligible profile: original enrollment ID, profile ID, roll/name snapshots, eligibility and timestamp. No automatic future enrollment admission occurs. A refresh preview computes the eligible additions and a fingerprint bound to session revision and current profile/enrollment revisions. Confirmation requires that digest, reason and expected session revision; the transaction recomputes it. Refresh only appends rows and never rewrites identities or removes withdrawn members.
+
+Withdrawal/transfer after opening preserves historical admission but prevents new scans unless current effective eligibility is valid again. Current roll binding is checked against the current canonical profile/enrollment; historical roster identity stays unchanged. A later legitimate enrollment can authorize a currently eligible admitted profile without rewriting its admission snapshot; the attendance record retains the enrollment used for that mark.
+
+### H. Finalization
+
+Only CLOSED sessions may finalize. The durable admitted roster defines official membership. Existing PRESENT/EXCUSED records are preserved; unmarked roster members become ABSENT, with per-record history. Session state changes to FINALIZED only in the same committed transaction as all required records, history and audit. Empty rosters finalize with no invented marks and N/A percentage. Failure rolls everything back.
+
+The implementation supports up to 2,000 admitted members per session with an atomic transaction and validates oversized cohorts before official publication. The 120-member fixture is tested. Actual Atlas latency/timeouts and production load remain unverified; larger transactional volumes require measured sizing or a future resumable/chunked design, not a partial official result.
+
+### I. Corrections and History
+
+A CLOSED unmarked member may be explicitly excused with reason, confirmation and session revision. Present marks are not silently changed before finalization. After FINALIZED, an authorized correction can change among PRESENT, ABSENT and EXCUSED, requiring reason, confirmation, session revision and record revision. Identity/Batch/session relationships are immutable. Same-status and stale corrections fail.
+
+History preserves previous/new status, actor ID/name, reason and timestamp. Completed/archived Batches permit reasoned historical corrections by a currently authorized staff member in an ACTIVE College; current learning eligibility is not granted by that exception. Ordinary scanning/opening/finalization still require an ACTIVE eligible Batch. Append-only history and roster ODM guards prohibit updates/deletes; raw privileged database access can bypass application guards and must be restricted.
+
+### J. Student Attendance
+
+An active canonical STUDENT account may read only attendance linked to its own canonical profile and roster anchors. Before finalization, current effective enrollment remains mandatory; unmarked is not official absent. Finalized self-history stays available after Batch completion, enrollment withdrawal, roll/College changes or Course archival, without granting access to private learning content or other members. Suspended/archived accounts cannot use the exception.
+
+The Student history hub discovers their original Batch associations from durable roster anchors. Session history is paginated in MongoDB with a self-only roster lookup; it does not impose the report session-count limit on long Batch histories. Individual record reads use the session/profile compound identity. No Student marking/correction/export/foreign-roster endpoint exists.
+
+### K. Reports and Exports
+
+College/Course/Batch selection is scoped through the staff Batch hub. Per-Batch reports filter Learning Day, Morning/Afternoon, session state, Student roll/name and date range. Dates are explicitly session creation dates in UTC. Views include session roster/counts, Student summaries/history, Batch totals, Morning/Afternoon comparison and day totals.
+
+Official percentage is PRESENT / (PRESENT + ABSENT) × 100, rounded to two decimals, using finalized rows only. EXCUSED is excluded; zero denominator is null/N/A. OPEN, DRAFT and unfinalized CLOSED records never create official absence or inflate the denominator.
+
+CSV/XLSX support Session, Batch and Student scopes. Exports contain roll/name, College/Course/Batch, day/session/state/status, marked/finalized times and official counts/percentage. CSV quotes delimiters/newlines and neutralizes formula prefixes; XLSX cells are explicit strings, never formula objects. QR material and Google identity identifiers are excluded. Current authority is rechecked and locked; export audit shares its transaction. The export is a confirmed CSRF-protected POST, then a private browser Blob download with URL revocation. No public file or cloud upload is created.
+
+Reports are limited to 1,000 selected sessions and 10,000 selected detail rows; exports have the same row bound. Oversized requests fail with a filter/refinement error. UI tables are paginated, and day filter choices have their own pagination.
+
+### L. Permissions and Security
+
+The existing reserved attendance.manage permission is now enforced for staff reads and writes, together with current college.view and ACTIVE assignment/College scope. Optional attendance.view was not introduced: this phase uses the stricter attendance.manage policy throughout. Existing grants are not automatically expanded. Super Admin uses existing global authority and respects all content/history constraints.
+
+Attendance inherits HttpOnly sessions, exact-Origin/CSRF checks, strict schemas, safe envelopes and no-store. The global IP limiter permits up to 480 attendance requests/minute while retaining existing limits elsewhere; attendance also has an authenticated-user limit of 600/minute. This accommodates scan/roster traffic without removing the unauthenticated IP bound. The existing limiter store is process-local; scaled deployments require shared enforcement.
+
+A permanent QR is a bearer credential. A copied screenshot can be presented by someone else. Authorized scanning, current eligibility, session age/state, duplicates, auditing and rotation reduce abuse; they do not independently prove physical presence or prevent screenshot sharing. There is no public QR resolution, dynamic identity replacement or Student self-attendance.
+
+### M. Database Models and Indexes
+
+| Model | Constraints/indexes |
+| --- | --- |
+| AttendanceSession | unique Batch/LearningDay/type; Batch/status; College/status; LearningDay/type; guarded revision/state transitions |
+| AttendanceRecord | unique session/profile; session/status; profile/session; immutable identity; guarded finalized corrections |
+| AttendanceRosterSnapshot | unique session/profile; session/enrollment; session/roll; profile/session; append-only rows |
+| AttendanceHistory | session/time; record/time; actor/time; append-only events |
+| Existing QR/profile/enrollment | existing canonical identity reused; internal attendance lock counters serialize concurrent changes |
+
+Session metadata snapshots preserve original College/Course/Batch/day labels and pinned revision. Once any attendance session exists, Phase 6 curriculum replacement is blocked, including otherwise-reviewed active upgrades; there is no silent day mapping or migration. Readiness initializes all new indexes. Tests of schemas and query guards do not prove actual Atlas index enforcement or write-conflict behavior.
+
+### N. API Endpoints
+
+All paths use /api/v1, session auth and no-store. All mutations require exact Origin/CSRF and strict bodies; list queries are bounded. Staff paths require current attendance.manage/College visibility; Student paths are self-only.
+
+| Method/path | Contract |
+| --- | --- |
+| GET /attendance/batches | Authorized Batch selection; College/Course/search/pagination |
+| GET /batches/:batchId/attendance | Pinned day cards and real session counts |
+| POST /batches/:batchId/attendance/sessions | learningDayId + MORNING/AFTERNOON; creates DRAFT |
+| GET .../sessions/:sessionId | Scoped session metadata/counts |
+| POST .../sessions/:sessionId/open | expectedRevision + confirmed + reason; captures roster |
+| POST .../sessions/:sessionId/close | Stops scanning |
+| POST .../sessions/:sessionId/reopen | Reviewed CLOSED reopening |
+| POST .../sessions/:sessionId/finalize | Reviewed CLOSED official finalization |
+| POST .../sessions/:sessionId/scan | credential only; current staff session and eligibility |
+| GET .../sessions/:sessionId/roster | Search/status/pagination; unmarked remains distinct |
+| GET .../sessions/:sessionId/roster/refresh-preview | Current additive roster impact and digest |
+| POST .../sessions/:sessionId/roster/refresh | Expected session revision, digest, reason, confirmation |
+| POST .../sessions/:sessionId/roster/:profileId/excuse | CLOSED unmarked roster member; reasoned admission-row-bound exception |
+| POST .../sessions/:sessionId/records/:recordId/correct | Finalized record status, expected session/record revisions, reason, confirmation |
+| GET .../sessions/:sessionId/history | Paginated immutable event history |
+| GET /batches/:batchId/attendance/reports | Scoped filtered rows/summaries/comparisons |
+| POST /batches/:batchId/attendance/export | CSV/XLSX + scope/filters + confirmed; audited private download |
+| GET /students/me/attendance/batches | Self-only historical Batch discovery |
+| GET /students/me/batches/:batchId/attendance | Self-only current/past attendance |
+
+No export GET mutates audit state, no QR appears in URL paths, and no arbitrary session/record update endpoint exists.
+
+### O. Audit Logging
+
+Nine audit actions cover session creation/opening/closing/reopening/finalization, QR marks, roster refresh, record corrections and report exports. Session-level history and per-member mark/absence/correction history retain sanitized transition context. Duplicate frames do not emit duplicate mark/history events. Audit failures abort critical changes. Export audit targets the Batch; session mutations target their AttendanceSession. Neither logs nor audit contain raw QR, hashes, encrypted material, full request bodies or private exports.
+
+### P. Environment Variables
+
+No new secret or environment variable is required. Existing backend names remain MONGODB_URI, NODE_ENV, PORT, FRONTEND_URL, CORS_ORIGINS, TRUST_PROXY_HOPS, LOG_LEVEL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI and SESSION_TTL. Existing QR_ACTIVE_KEY_ID/QR_ENCRYPTION_KEYS remain necessary for QR issuance/reveal, but scanning performs hash lookup without decrypting credentials. Frontend uses BACKEND_API_BASE_URL and NEXT_PUBLIC_API_BASE_URL; RUN_CONNECTIVITY_TEST opts into the live client health test. No raw environment values or real credentials were introduced.
+
+### Q. Testing Results
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| npm run format | PASS | PASS |
+| npm run lint | PASS, no warnings | PASS, no warnings |
+| npm run typecheck | PASS | PASS |
+| npm test | PASS: 445 tests / 23 files, --maxWorkers=2 --testTimeout=20000 | PASS: 170 tests / 16 passing files; one optional test skipped, --maxWorkers=1 --testTimeout=20000 |
+| Optional real client health | Compiled API listener | PASS: one separately executed health test |
+| npm run build | PASS | PASS with documented local API transport settings; decoder prebuild succeeded |
+| npm audit | PASS: zero vulnerabilities | PASS: zero vulnerabilities |
+
+**616 distinct tests passed: 445 backend + 171 frontend (170 standard + one separately executed live health test).** This includes all prior-phase regressions and 128 new Phase 7 tests. A skipped optional test is not counted as passed in the standard run; it was executed separately against the real compiled API listener.
+
+The production HTTP smoke passed: API liveness 200; readiness 503 while storage is unconfigured; private staff/Student attendance APIs 401/no-store; built frontend API rewrite works; protected Admin/Super Admin attendance, scanner and Student history routes redirect 307 to login without a session. The same-origin decoder returned 200 with the valid WebAssembly module signature. Temporary listeners were closed. This does not establish a real authenticated camera or Atlas pass.
+
+Full test coverage includes fresh QR/enrollment/role/College checks, rotation, duplicates, simultaneous scan/close/finalize/correction operations, roster admission/refresh, immutable identities, audit/history rollback, 120-member finalization, completed-Batch self history, CSV injection/XLSX string cells, scoped HTTP/CSRF, repository session/version locks, database-paginated self queries, report bounds, camera lifecycle/device selection, malformed/duplicate/closed-session feedback, staff-session age renewal and protected routes.
+
+No tests were deleted or disabled to obtain these results. Real MongoDB and physical-camera validation remain explicitly blocked/unexecuted. Final Git/privacy review: 269 eligible source/config/test files scanned with no credential-pattern, private-path, generated-artifact or unexpected-Markdown findings; git diff --check passes. README.md is the only tracked Markdown document. No Phase 7 files are staged or committed. Local HEAD and remote main remain 9a11e572cb53a2c35720879d89769cb9e3dbb6fe; all Phase 7 changes remain local.
+
+Test storage and camera doubles exist only in test files and dependency injection. Production always uses MongoDB and actual browser camera APIs. Earlier fixture failures were corrected to use valid names under the existing registration schema; two Student UI assertions were corrected for the existing human-readable lowercase status component. No validation was weakened, no test was deleted and no production success was fabricated.
+
+### R. Known Issues and Blockers
+
+- BLOCKED: real Atlas connection/index creation, persisted snapshots, transaction/write-conflict verification and production throughput. No credentials requested and no production fallback added.
+- BLOCKED/NOT TESTED: actual Google login, configured staff grants, real phone/webcam decoding, permission/device behavior and authenticated desktop/mobile visual verification. DOM camera lifecycle tests do not constitute a physical-camera pass.
+- The permanent QR screenshot-sharing limitation remains. Human in-person supervision remains necessary; this system does not prove physical presence.
+- Atomic roster admission/finalization is bounded to 2,000 members. Reports/exports require narrowing beyond their documented caps. Real transaction timeouts fail atomically; no resumable finalization worker is claimed.
+- Staff scanning requires re-sign-in after eight hours from original server session issuance; shorter normal expiry still applies. Current account/grants remain mandatory even within that window.
+- Existing Batches require an explicitly assigned published curriculum. Any attendance session prevents curriculum replacement; no automatic migration/mapping is implemented.
+- Raw database operators or application code bypassing ODM middleware can violate history constraints. Restrict operational privileges and migration tooling; indexes alone cannot enforce full immutability.
+- Distributed rate limiting, production camera HTTPS/CSP/device validation and export performance remain deployment acceptance gates. No automatic deployment was performed.
+
+### S. Files Created or Modified
+
+Backend additions: attendance/contracts.ts, repository.ts, service.ts, router.ts; models/attendance.ts; test-only attendance fixture/setup and service/concurrency/repository tests. Existing app/database readiness, audit enums/targets, LearningService transaction-aware authority, profile/credential/enrollment lock fields, enrollment DTO projection and curriculum replacement guard were extended. Existing auth/QR storage and Course/Batch models were reused.
+
+Frontend additions: attendance contracts, Batch dashboard/hub, roster review, scanner/camera, reports, Student views, shared counts, responsive styles, twelve protected pages and three test files. Existing staff/Student navigation, Batch/Curriculum links, audit filter, API timeouts for bounded long operations and CSS imports were updated. Package manifest/lockfile add the scanner dependency and prebuild/predev decoder-copy script. .gitignore excludes generated decoder assets. README is the only tracked Markdown; this complete local report is ignored.
+
+### T. Acceptance Criteria
+
+| # | Criterion | Status / evidence |
+| --- | --- | --- |
+| 1 | Existing QR credentials reused | PASS — implemented with the local evidence described above |
+| 2 | Morning/Afternoon sessions | PASS — implemented with the local evidence described above |
+| 3 | AttendanceSession model | PASS — implemented with the local evidence described above |
+| 4 | AttendanceRecord model | PASS — implemented with the local evidence described above |
+| 5 | Immutable roster snapshot | PASS — implemented with the local evidence described above |
+| 6 | Session lifecycle | PASS — implemented with the local evidence described above |
+| 7 | Continuous camera scanning | BLOCKED for physical-device acceptance; implementation and camera lifecycle/continuous-flow DOM tests PASS |
+| 8 | Secure QR resolution | PASS — implemented with the local evidence described above |
+| 9 | Verification/enrollment checks | PASS — implemented with the local evidence described above |
+| 10 | Idempotent duplicate scans | PASS — implemented with the local evidence described above |
+| 11 | Draft attendance does not mark absence | PASS — implemented with the local evidence described above |
+| 12 | Finalization creates official absence | PASS — implemented with the local evidence described above |
+| 13 | Corrections preserve history | PASS — implemented with the local evidence described above |
+| 14 | Curriculum changes cannot rewrite attendance | PASS — implemented with the local evidence described above |
+| 15 | Admin dashboard | PASS in DOM, route and build checks; authenticated visual acceptance BLOCKED |
+| 16 | Scanner interface | PASS in DOM, route and build checks; authenticated visual acceptance BLOCKED |
+| 17 | Roster review | PASS in DOM, route and build checks; authenticated visual acceptance BLOCKED |
+| 18 | Student own attendance/history | PASS in DOM, route and build checks; authenticated visual acceptance BLOCKED |
+| 19 | Reports | PASS in DOM, route and build checks; authenticated visual acceptance BLOCKED |
+| 20 | CSV exports | PASS — implemented with the local evidence described above |
+| 21 | XLSX exports | PASS — implemented with the local evidence described above |
+| 22 | Super Admin oversight | PASS — implemented with the local evidence described above |
+| 23 | College-scoped permissions | PASS — implemented with the local evidence described above |
+| 24 | Transactional audit events | PASS — implemented with the local evidence described above |
+| 25 | Concurrent operations | PASS locally through race/lock contracts; actual Atlas concurrency BLOCKED |
+| 26 | Automated tests | PASS — 616 distinct tests |
+| 27 | Lint/typecheck/build | PASS — both applications |
+| 28 | No production fake behavior | PASS — implemented with the local evidence described above |
+| 29 | Phase 8 not implemented | PASS — implemented with the local evidence described above |
+| 30 | Phases 1–6 pushed before Phase 7 | PASS — verified shared-repository commit 9a11e572cb53a2c35720879d89769cb9e3dbb6fe before Phase 7 source edits |
+
+PASS refers to the stated implementation and local automated evidence. Blocked live integration and untested physical devices are never represented as verified production behavior.
+
+### U. Phase 8 Readiness
+
+Phase 7 is ready for user review with explicit live-integration gates. Before production attendance, validate real Atlas indexes/transactions and load, configure Google/staff authority and existing QR issuance, verify real HTTPS camera behavior on target phones/browsers, and complete authenticated responsive/export workflows. Phases 1–6 were pushed before this implementation; Phase 7 remains uncommitted/unpushed. Phase 8 has not started. No verified coding progress, submissions, code execution, payments, certificates, AI tutoring or chat was added.
+
+
 ## Current local setup
 
 Use Node.js 22 LTS and npm in the complete local workspace. Two independent applications are retained: algora-frontend and algora-backend.
@@ -1510,6 +1740,14 @@ Use /admin/problems or /super-admin/problems to author canonical problem metadat
 Open Batch curriculum management to select a published revision of the same Course, provide a review reason, review server-calculated impact and explicitly confirm assignment. Active Batch upgrades preserve assignment history and require a fresh review; completed/archived references remain unchanged. Existing Batches have no fabricated revision. Batch-specific release restrictions withdraw future access and restore only original release rules. No automatic scheduling worker or new curriculum environment secret is needed.
 
 Verified Students with current effective enrollment open their own Course/Batch learning path and any released Day. Current roll, profile, College, Course and Batch eligibility remain mandatory on every content request. There is no sequential completion or solved-state tracking. Real persisted and authenticated browser checks remain blocked until dependencies are configured.
+
+### Attendance setup
+
+Super Admin explicitly grants college.view and attendance.manage to the relevant College staff; no existing grant is expanded automatically. Open /admin/attendance or /super-admin/attendance, select the authorized College/Course/Batch, and use a released Learning Day from its pinned published revision. Create Morning and Afternoon slots separately, open a session to capture its durable verified roster, then start the continuous scanner over HTTPS or localhost. Use the existing permanent Student QR. Camera permission and a supported device are required; QR screenshots remain shareable bearer credentials.
+
+Close scanning to review PRESENT/UNMARKED members. New enrollments require an explicit reviewed additive roster refresh. Unmarked members can be reasonedly excused while CLOSED. Review and confirm finalization to create official ABSENT records for the remaining durable roster. Subsequent status changes use audited corrections. Attendance sessions prevent curriculum replacement. Staff scans require sign-in within eight hours of the original session issuance; sign out/in to renew, and use a shorter SESSION_TTL if required by your deployment policy.
+
+Students use /student/attendance to discover their own roster history, including finalized attendance after a Batch completes. Staff reports calculate percentages only from finalized PRESENT/ABSENT rows, exclude EXCUSED and use N/A for zero denominator. CSV/XLSX exports are private and audited. Admission/finalization is capped at 2,000 members; reports at 1,000 selected sessions/10,000 detail rows. No automatic migration, database connection, deployment or Phase 7 push has occurred. npm dev/build lifecycle hooks generate the same-origin decoder asset from the locked dependency; keep those generated public assets ignored.
 
 ### Student identity and QR setup
 

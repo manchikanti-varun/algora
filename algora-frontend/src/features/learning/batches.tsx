@@ -365,6 +365,9 @@ export function BatchDetail({
             </dl>
             <p className="learning-prose">{q.data.snapshot.description}</p>
             <div className="student-actions">
+              <Link href={prefix + '/batches/' + id + '/attendance'}>
+                Attendance sessions
+              </Link>
               {(q.data.canEnroll || q.data.canViewRoster) && (
                 <Button asChild>
                   <Link href={prefix + '/batches/' + id + '/enrollments'}>
@@ -399,8 +402,9 @@ export function BatchDetail({
               )}
             </div>
             <p>
-              Assign a published curriculum to deliver Learning Days. Attendance
-              and verified coding progress are reserved for later phases.
+              Assign a published curriculum to deliver Learning Days. Use
+              attendance sessions for authorized scanning and finalized records.
+              Verified coding progress remains a later phase.
             </p>
           </section>
         )}

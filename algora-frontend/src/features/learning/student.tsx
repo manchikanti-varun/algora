@@ -98,6 +98,13 @@ export function StudentLearning({
                       </Link>
                     </div>
                   )}
+                  {item.batchId && (
+                    <Link
+                      href={'/student/batches/' + item.batchId + '/attendance'}
+                    >
+                      My attendance history →
+                    </Link>
+                  )}
                 </article>
               ))}
             </div>

@@ -20,14 +20,20 @@ export async function apiRequest<T>(
     body?: unknown;
   } = {},
 ): Promise<T> {
+  const timeoutMs =
+    /\/attendance.*\/(?:open|finalize|refresh|export|reports)(?:\?|$)/.test(
+      path,
+    )
+      ? 60000
+      : 8000;
   let response: Response;
   try {
     response = await fetch(
       env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '') + path,
       {
         signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
-          : AbortSignal.timeout(8000),
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
         credentials: 'include',
         cache: 'no-store',
         method: options.method ?? 'GET',

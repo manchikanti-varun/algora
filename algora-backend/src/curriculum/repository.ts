@@ -1,3 +1,4 @@
+import { AttendanceSession } from '../models/attendance.js';
 import mongoose, { type ClientSession } from 'mongoose';
 import {
   CurriculumRevision,
@@ -71,6 +72,11 @@ export class MongoCurriculumUnit implements CurriculumUnit {
   learning: MongoLearningUnit;
   constructor(private session: ClientSession | null = null) {
     this.learning = new MongoLearningUnit(session);
+  }
+  async hasAttendance(batchId: string) {
+    return !!(await AttendanceSession.exists({ batchId }).session(
+      this.session,
+    ));
   }
   private get options() {
     return {
@@ -270,6 +276,13 @@ export class MongoCurriculumUnit implements CurriculumUnit {
       await PublishedLearningDay.countDocuments(filter).session(this.session),
       q,
     );
+  }
+  async frozenDayById(curriculumRevisionId: string, dayId: string) {
+    const d = await PublishedLearningDay.findOne({
+      curriculumRevisionId,
+      dayId,
+    }).session(this.session);
+    return d ? (d.data as FrozenDay) : null;
   }
   async frozenDay(curriculumRevisionId: string, dayNumber: number) {
     const d = await PublishedLearningDay.findOne({

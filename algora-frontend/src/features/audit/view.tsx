@@ -11,6 +11,15 @@ import {
 import { auditSchema, pageSchema } from '@/features/administration/contracts';
 import { listPath, useAdministration } from '@/features/administration/queries';
 const actions = [
+  'ATTENDANCE_SESSION_CREATED',
+  'ATTENDANCE_SESSION_OPENED',
+  'ATTENDANCE_SESSION_CLOSED',
+  'ATTENDANCE_SESSION_REOPENED',
+  'ATTENDANCE_SESSION_FINALIZED',
+  'ATTENDANCE_QR_MARKED',
+  'ATTENDANCE_ROSTER_REFRESHED',
+  'ATTENDANCE_RECORD_CORRECTED',
+  'ATTENDANCE_REPORT_EXPORTED',
   'CURRICULUM_DRAFT_CREATED',
   'CURRICULUM_CLONED',
   'LEARNING_DAY_CREATED',

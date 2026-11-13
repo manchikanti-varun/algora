@@ -440,6 +440,7 @@ export interface AssignmentHistory {
 }
 export interface CurriculumUnit {
   learning: LearningUnit;
+  hasAttendance(batchId: string): Promise<boolean>;
   revisions(
     course: string,
     q: Query,
@@ -475,6 +476,7 @@ export interface CurriculumUnit {
   freezeDay(revisionId: string, data: FrozenDay): Promise<void>;
   frozenDays(revisionId: string, q: Query): Promise<Page<FrozenDay>>;
   frozenDay(revisionId: string, number: number): Promise<FrozenDay | null>;
+  frozenDayById(revisionId: string, dayId: string): Promise<FrozenDay | null>;
   allFrozenDays(revisionId: string): Promise<FrozenDay[]>;
   problems(q: Query): Promise<Page<ProblemRecord>>;
   problem(id: string): Promise<ProblemRecord | null>;

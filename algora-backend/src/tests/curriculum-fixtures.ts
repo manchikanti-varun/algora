@@ -17,6 +17,7 @@ import type {
 } from '../curriculum/contracts.js';
 const copy = <T>(v: T): T => structuredClone(v);
 export class TestCurriculum implements CurriculumRepository {
+  attendanceBatches = new Set<string>();
   revisions = new Map<string, RevisionRecord>();
   days = new Map<string, DayRecord>();
   frozen = new Map<string, FrozenDay>();
@@ -82,6 +83,7 @@ export class TestCurriculum implements CurriculumRepository {
   get read(): CurriculumUnit {
     return {
       learning: this.learning.read,
+      hasAttendance: async (id) => this.attendanceBatches.has(id),
       revisions: async (c, q, p) =>
         this.page(
           [...this.revisions.values()]
@@ -185,6 +187,12 @@ export class TestCurriculum implements CurriculumRepository {
           [...this.frozen.values()]
             .filter((d) => d.curriculumRevisionId === id)
             .sort((a, b) => a.dayNumber - b.dayNumber),
+        ),
+      frozenDayById: async (rev, id) =>
+        copy(
+          [...this.frozen.values()].find(
+            (d) => d.curriculumRevisionId === rev && d.id === id,
+          ) ?? null,
         ),
       frozenDay: async (id, n) => copy(this.frozen.get(id + ':' + n) ?? null),
       problems: async (q) =>

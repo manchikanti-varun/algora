@@ -58,6 +58,7 @@ const schema = new Schema(
         'LEARNING_DAY',
         'CODING_PROBLEM',
         'EDITORIAL',
+        'ATTENDANCE_SESSION',
       ],
       required: true,
       immutable: true,

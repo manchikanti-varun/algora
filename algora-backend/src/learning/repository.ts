@@ -57,6 +57,7 @@ function record<T>(doc: { toObject(): unknown }): T {
     reconciliationNextAt,
     reconciliationError,
     operationalRevision,
+    attendanceRevision,
     ...safe
   } = raw;
   void __v;
@@ -67,6 +68,7 @@ function record<T>(doc: { toObject(): unknown }): T {
   void reconciliationNextAt;
   void reconciliationError;
   void operationalRevision;
+  void attendanceRevision;
   return { ...safe, id: String(_id) } as T;
 }
 const regex = (v: string) => ({

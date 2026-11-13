@@ -1,3 +1,5 @@
+import { attendanceRouter } from './attendance/router.js';
+import type { AttendanceRepository } from './attendance/contracts.js';
 import { curriculumRouter } from './curriculum/router.js';
 import type { CurriculumRepository } from './curriculum/contracts.js';
 import express from 'express';
@@ -24,6 +26,7 @@ export function createApp(
   students?: StudentRepository,
   learning?: LearningRepository,
   curriculum?: CurriculumRepository,
+  attendance?: AttendanceRepository,
 ) {
   const app = express();
   app.disable('x-powered-by');
@@ -58,7 +61,12 @@ export function createApp(
   app.use(
     rateLimit({
       windowMs: 60000,
-      limit: 120,
+      limit: (req) =>
+        /^\/api\/v1\/(?:batches\/[a-f0-9]{24}\/attendance|attendance)(?:\/|$)/i.test(
+          req.path,
+        )
+          ? 480
+          : 120,
       standardHeaders: 'draft-8',
       legacyHeaders: false,
       skip: (req) =>
@@ -81,6 +89,7 @@ export function createApp(
   );
   app.use(express.json({ limit: '32kb' }));
   app.use('/api/v1/auth', authRouter(auth));
+  app.use('/api/v1', attendanceRouter(auth, attendance, learning));
   app.use('/api/v1', curriculumRouter(auth, curriculum, learning));
   app.use('/api/v1', learningRouter(auth, learning));
   app.use('/api/v1', studentsRouter(auth, students));
