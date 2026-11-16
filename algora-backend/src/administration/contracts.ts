@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { UserRecord } from '../auth/types.js';
-import { AppError } from '../middleware/errors.js';
+import { AppError } from '../middleware/app-error.js';
 export const permissions = [
   'college.view',
   'course.manage',

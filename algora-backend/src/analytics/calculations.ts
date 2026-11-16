@@ -1,3 +1,4 @@
+import { finalizedRates } from '../attendance/metrics.js';
 import { reportMetrics, type ReportRow } from '../coding/reports.js';
 import type {
   AttendanceRow,
@@ -49,11 +50,12 @@ export function attendanceMetrics(rows: Mark[]) {
     absent = official.filter((r) => r.status === 'ABSENT').length;
   // Every eligible finalized snapshot is an opportunity, including EXCUSED.
   return {
-    eligible: official.length,
-    present,
-    absent,
-    excused: official.filter((r) => r.status === 'EXCUSED').length,
-    unmarked: official.filter((r) => r.status === 'UNMARKED').length,
+    ...finalizedRates({
+      present,
+      absent,
+      excused: official.filter((r) => r.status === 'EXCUSED').length,
+      unmarked: official.filter((r) => r.status === 'UNMARKED').length,
+    }),
     corrected: official.filter((r) => r.corrected).length,
     percentage: ratio(present, official.length),
   };

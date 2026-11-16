@@ -1,3 +1,4 @@
+import { API_VERSION } from './operations/checks.js';
 import { analyticsRouter } from './analytics/router.js';
 import type { AnalyticsSource } from './analytics/repository.js';
 import { codingRouter } from './coding/router.js';
@@ -40,6 +41,7 @@ export function createApp(
   app.use((_req, res, next) => {
     res.locals.requestId = randomUUID();
     res.setHeader('X-Request-ID', res.locals.requestId);
+    res.setHeader('X-Algora-API-Version', API_VERSION);
     const start = Date.now();
     res.on('finish', () =>
       logger.info(
@@ -53,6 +55,18 @@ export function createApp(
     );
     next();
   });
+  app.use((req, _res, next) =>
+    req.get('X-Algora-API-Version') &&
+    req.get('X-Algora-API-Version') !== API_VERSION
+      ? next(
+          new AppError(
+            409,
+            'API_VERSION_MISMATCH',
+            'Application versions differ; refresh or contact the operator',
+          ),
+        )
+      : next(),
+  );
   app.use(helmet());
   app.use(
     cors({
@@ -72,7 +86,7 @@ export function createApp(
           req.path,
         )
           ? 480
-          : 120,
+          : env.API_RATE_LIMIT,
       standardHeaders: 'draft-8',
       legacyHeaders: false,
       skip: (req) =>

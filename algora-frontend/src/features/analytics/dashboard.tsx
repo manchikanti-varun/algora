@@ -1,4 +1,7 @@
 'use client';
+import { BatchOperations } from './operations';
+import { AttendanceRates } from '@/features/attendance/rates';
+
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useId, useState } from 'react';
@@ -600,6 +603,7 @@ export function OperationalDashboard({
                     },
                   ]}
                 />
+                <AttendanceRates counts={data.summary.attendance} />
                 <h2>Batch operations</h2>
                 <DataTable
                   items={data.batches}
@@ -759,6 +763,7 @@ export function BatchAnalytics({
     'Learning Days',
     'Students',
     'Reports',
+    'Operations',
   ];
   const filters = Object.fromEntries(api.entries());
   for (const k of [
@@ -822,6 +827,9 @@ export function BatchAnalytics({
               {data.freshness.unavailable}. Attendance is finalized only;
               corrections are reflected.
             </p>
+            {tab === 'Operations' && (
+              <BatchOperations batchId={batchId} superAdmin={superAdmin} />
+            )}
             {tab === 'Overview' && (
               <>
                 <MetricCards
@@ -850,6 +858,7 @@ export function BatchAnalytics({
                   ]}
                 />
                 <CodingCards value={data.summary.coding} />
+                <AttendanceRates counts={data.summary.attendance} />
                 <h3>Daily bootcamp attendance</h3>
                 <SessionTable
                   data={data.sessions}
@@ -1177,9 +1186,9 @@ export function BatchAnalytics({
                 </Link>
                 <p>
                   The analytics download uses this dashboard selection and its
-                  all eligible finalized opportunities denominator. The older
-                  attendance report screen retains its Phase 7 policy excluding
-                  EXCUSED.
+                  all eligible finalized opportunities denominator. Both screens
+                  show Attendance Rate and Participation Rate separately. Legacy
+                  percentage fields retain their documented meaning.
                 </p>
               </>
             )}
@@ -1434,6 +1443,7 @@ export function PersonalAnalytics() {
                     },
                   ]}
                 />
+                <AttendanceRates counts={b.attendance} />
                 <h3>Learning Day progress</h3>
                 <DataTable
                   items={b.days}

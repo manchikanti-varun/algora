@@ -97,6 +97,7 @@ export function AttendanceScanner({
           setRecent((rows) => [data, ...rows].slice(0, 6));
         void client.invalidateQueries({ queryKey: ['administration'] });
       } catch (e) {
+        last.current = { hash: '', time: 0 };
         if (!live.current) return;
         setResult(null);
         if (
@@ -230,9 +231,16 @@ export function AttendanceScanner({
                   <Camera
                     paused={paused}
                     onScan={(value) => void scanned(value)}
-                    onError={() => {
+                    onError={(error) => {
+                      const name = error instanceof Error ? error.name : '';
                       setCameraError(
-                        'Camera access failed. Check permission, camera availability and HTTPS, then retry.',
+                        name === 'NotAllowedError'
+                          ? 'Camera permission denied. Allow camera access in browser settings, then retry.'
+                          : name === 'NotFoundError'
+                            ? 'No camera found. Connect a camera or use a supported mobile browser.'
+                            : name === 'NotReadableError'
+                              ? 'Camera is busy. Close other camera apps, then retry.'
+                              : 'Camera access failed. Check permission, camera availability and HTTPS, then retry.',
                       );
                       setActive(false);
                     }}

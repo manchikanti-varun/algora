@@ -4,6 +4,32 @@ const schema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
+  API_RATE_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(120)
+    .max(10000)
+    .default(process.env.NODE_ENV === 'production' ? 2400 : 120),
+  LOGIN_RATE_LIMIT: z.coerce
+    .number()
+    .int()
+    .min(20)
+    .max(2000)
+    .default(process.env.NODE_ENV === 'production' ? 480 : 20),
+  APP_REPLICAS: z.coerce.number().int().min(1).max(1).default(1),
+  DB_MAX_POOL_SIZE: z.coerce.number().int().min(2).max(100).default(20),
+  DB_SELECTION_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .max(30000)
+    .default(5000),
+  DB_SOCKET_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(5000)
+    .max(120000)
+    .default(30000),
   PORT: z.coerce.number().int().min(1).max(65535).default(5000),
   FRONTEND_URL: z
     .url()

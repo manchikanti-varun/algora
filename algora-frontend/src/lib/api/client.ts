@@ -40,6 +40,7 @@ export async function apiRequest<T>(
         method: options.method ?? 'GET',
         headers: {
           Accept: 'application/json',
+          'X-Algora-API-Version': '1',
           ...(options.csrfToken ? { 'X-CSRF-Token': options.csrfToken } : {}),
           ...(options.body !== undefined
             ? { 'Content-Type': 'application/json' }
@@ -53,6 +54,13 @@ export async function apiRequest<T>(
     if (signal?.aborted) throw error;
     throw new ApiError(0, 'NETWORK_ERROR', 'Backend is unreachable');
   }
+  const version = response.headers.get('X-Algora-API-Version');
+  if (version && version !== '1')
+    throw new ApiError(
+      503,
+      'API_VERSION_MISMATCH',
+      'Application versions differ. Refresh the page or contact the operator.',
+    );
   let body: unknown;
   try {
     body = await response.json();

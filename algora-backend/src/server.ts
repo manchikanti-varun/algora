@@ -1,3 +1,7 @@
+import {
+  permanentDatabaseFailure,
+  startupRetryDelay,
+} from './operations/database.js';
 import { startCodingWorker } from './coding/worker.js';
 const stopCoding = startCodingWorker();
 import { createApp } from './app.js';
@@ -10,14 +14,35 @@ const server = createApp().listen(env.PORT, '0.0.0.0', () =>
   logger.info({ port: env.PORT }, 'HTTP server started'),
 );
 let stopping = false;
+let retryWait: (() => void) | undefined;
 async function connect() {
+  let attempt = 0;
   while (!stopping) {
     try {
       await connectDatabase();
       return;
-    } catch {
-      logger.warn('Database unavailable; retrying in 5 seconds');
-      await new Promise((r) => setTimeout(r, 5000));
+    } catch (error) {
+      await disconnectDatabase().catch(() => undefined);
+      if (stopping) return;
+      if (permanentDatabaseFailure(error)) {
+        logger.fatal(
+          'Database authorization, transaction or index conflict requires operator repair',
+        );
+        return;
+      }
+      const delay = startupRetryDelay(attempt++);
+      logger.warn(
+        { retryDelayMs: delay },
+        'Database unavailable; retry scheduled',
+      );
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        timer.unref();
+        retryWait = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
     }
   }
 }
@@ -25,15 +50,21 @@ void connect();
 async function shutdown() {
   if (stopping) return;
   stopping = true;
-  stopReconciliation();
-  stopCoding();
+  retryWait?.();
+  const workers = Promise.all([stopReconciliation(), stopCoding()]);
   logger.info('Shutting down');
   const deadline = setTimeout(() => process.exit(1), 10000);
   deadline.unref();
-  server.close(async () => {
-    await disconnectDatabase();
-    clearTimeout(deadline);
-    process.exit(0);
+  server.close(() => {
+    void (async () => {
+      await workers;
+      await disconnectDatabase();
+      clearTimeout(deadline);
+      process.exit(0);
+    })().catch(() => {
+      logger.error('Shutdown could not complete');
+      process.exit(1);
+    });
   });
 }
 process.on('SIGTERM', () => void shutdown());

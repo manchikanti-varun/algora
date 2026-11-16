@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { SyncRecovery } from '@/features/analytics/operations';
 import { ReportDownloads } from './report-downloads';
 import { CollegePicker, CoursePicker } from '@/features/learning/options';
 import { useState } from 'react';
@@ -390,6 +391,7 @@ function StudentProgressContent({
             />
             <details>
               <summary>Recent sync jobs</summary>
+              <SyncRecovery batchId={batchId} jobs={q.data.jobs} />
               {q.data.jobs.map((j) => (
                 <p key={j.id}>
                   <Status value={j.status} /> · Coverage{' '}
@@ -755,6 +757,7 @@ export function StaffProgress({ batchId }: { batchId: string }) {
                   items={student.items}
                   studentProfileId={student.id}
                 />
+                <SyncRecovery batchId={batchId} jobs={student.jobs} />
                 {student.jobs.map((j) => (
                   <p key={j.id}>
                     <Status value={j.status} /> {j.coverage} {j.error}

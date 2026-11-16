@@ -368,6 +368,11 @@ export function BatchDetail({
             </dl>
             <p className="learning-prose">{q.data.snapshot.description}</p>
             <div className="student-actions">
+              <Link
+                href={prefix + '/batches/' + id + '/analytics?tab=Operations'}
+              >
+                Bootcamp readiness
+              </Link>
               <Link href={prefix + '/batches/' + id + '/analytics'}>
                 Batch analytics
               </Link>

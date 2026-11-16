@@ -459,6 +459,7 @@ export async function buildProgressReport(
     ]);
   }
   let buffer: Buffer;
+  let csvRecordCount: number | null = null;
   if (format === 'CSV') {
     const sheet =
       type === 'COMPLETE'
@@ -470,6 +471,7 @@ export async function buildProgressReport(
             : type === 'PROBLEM' && includeDetails
               ? detailed
               : sheets[0]!;
+    csvRecordCount = sheet.rows.length;
     const cell = (value: Value, column: number) => {
       let text: string;
       if (value === null) text = 'N/A';
@@ -570,6 +572,12 @@ export async function buildProgressReport(
         : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     base64: buffer.toString('base64'),
     rowCount: rows.length,
+    assignmentOpportunityCount: rows.length,
+    csvRecordCount,
+    worksheetRowCounts:
+      format === 'XLSX'
+        ? Object.fromEntries(sheets.map((s) => [s.name, s.rows.length]))
+        : null,
     studentCount: students.length,
     reportType: type,
   };

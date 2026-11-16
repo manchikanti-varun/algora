@@ -1,3 +1,4 @@
+import { keyFromRing, qrKeyAvailable } from './keyring.js';
 import {
   randomBytes,
   createHash,
@@ -12,34 +13,17 @@ export class QrVault {
     private raw = process.env.QR_ENCRYPTION_KEYS,
   ) {}
   private key(id: string) {
-    try {
-      const keys: unknown = JSON.parse(this.raw ?? '{}');
-      const value =
-        keys && typeof keys === 'object'
-          ? (keys as Record<string, unknown>)[id]
-          : undefined;
-      if (typeof value !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(value))
-        throw new Error();
-      const key = Buffer.from(value, 'base64');
-      if (key.length !== 32) throw new Error();
-      return key;
-    } catch {
+    const key = keyFromRing(id, this.raw);
+    if (!key)
       throw new AppError(
         503,
         'QR_UNAVAILABLE',
         'QR credential encryption is unavailable',
       );
-    }
+    return key;
   }
   available() {
-    try {
-      if (!this.active || !/^[a-zA-Z0-9_-]{1,40}$/.test(this.active))
-        return false;
-      this.key(this.active);
-      return true;
-    } catch {
-      return false;
-    }
+    return qrKeyAvailable(this.active, this.raw);
   }
   issue(profileId: string, version: number) {
     if (!this.available())

@@ -1,14 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { logger } from '../utils/logger.js';
-export class AppError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { AppError } from './app-error.js';
+export { AppError } from './app-error.js';
 export const notFound: RequestHandler = (_req, _res, next) =>
   next(new AppError(404, 'NOT_FOUND', 'Route not found'));
 export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {

@@ -75,7 +75,7 @@ export function authRouter(
   });
   const loginLimit = rateLimit({
     windowMs: 600000,
-    limit: 20,
+    limit: env.LOGIN_RATE_LIMIT,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     handler: (_req, _res, next) =>

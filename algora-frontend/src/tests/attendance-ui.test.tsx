@@ -662,3 +662,20 @@ it('scanner requests sign-in renewal when the staff session is too old', async (
     ),
   ).toBeInTheDocument();
 });
+it('scanner retries an unconfirmed network failure immediately without deduping the failed request', async () => {
+  mocks.scanError = 'NETWORK_ERROR';
+  mount(<AttendanceScanner batchId={batch} sessionId={sessionId} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Start camera' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Detect QR frame' }));
+  await screen.findByText(
+    'Network error. Attendance was not confirmed; retry the scan.',
+  );
+  mocks.scanError = '';
+  fireEvent.click(screen.getByRole('button', { name: 'Detect QR frame' }));
+  await screen.findByText('Attendance recorded');
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith('/scan')),
+  ).toHaveLength(2);
+});

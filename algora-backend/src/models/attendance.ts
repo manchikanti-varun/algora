@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { AppError } from '../middleware/errors.js';
+import { AppError } from '../middleware/app-error.js';
 import {
   sessionTypes,
   sessionStatuses,

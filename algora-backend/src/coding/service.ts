@@ -868,6 +868,33 @@ export class CodingService {
           true,
         ),
         account = need(await tx.accountFor(current.profile.id, d.platform));
+      if (d.retryJobId) {
+        const previous = need(await tx.job(d.retryJobId));
+        if (
+          previous.batchId !== batchId ||
+          previous.accountId !== account.id ||
+          previous.accountRevision !== account.revision ||
+          previous.enrollmentId !== current.enrollment.id ||
+          previous.curriculumRevisionId !== current.batch.curriculumRevisionId
+        )
+          reject(
+            'SYNC_CONTEXT_CHANGED',
+            'Sync context changed; review the current account and enrollment',
+            409,
+          );
+        if (!['FAILED', 'PARTIAL'].includes(previous.status))
+          reject(
+            'SYNC_RETRY_NOT_DUE',
+            'Only failed or partial jobs can be manually retried; active jobs retain their backoff',
+            409,
+          );
+        if (Date.parse(previous.nextAt) > this.now().getTime())
+          reject(
+            'SYNC_RETRY_NOT_DUE',
+            'Wait for the scheduled retry window',
+            429,
+          );
+      }
       const after = eligibleAfter(current.batch, current.enrollment);
       if (!owned(account, this.now()))
         reject(
@@ -905,6 +932,16 @@ export class CodingService {
           j.accountRevision === account.revision &&
           j.curriculumRevisionId === current.batch.curriculumRevisionId,
       );
+      if (
+        previous &&
+        ['FAILED', 'PARTIAL'].includes(previous.status) &&
+        Date.parse(previous.nextAt) > this.now().getTime()
+      )
+        reject(
+          'SYNC_RETRY_NOT_DUE',
+          'Wait for the scheduled retry window',
+          429,
+        );
       const resume =
         previous?.status === 'PARTIAL' && previous.offset > 1
           ? previous.offset
@@ -953,6 +990,45 @@ export class CodingService {
       );
       return { id: result.id, status: result.status };
     });
+  }
+  async retry(
+    actor: string,
+    batchId: string,
+    jobId: string,
+    input: unknown,
+    request: string,
+  ) {
+    confirmSchema.pick({ confirmed: true }).parse(input);
+    await this.repo.ensureReady();
+    const tx = this.repo.read,
+      u = need(await tx.curriculum.learning.students.admin.user(actor)),
+      job = need(await tx.job(jobId));
+    if (u.role === 'STUDENT') {
+      await this.student(tx, actor);
+      if (job.userId !== actor)
+        reject('FORBIDDEN', 'Only your own sync jobs may be retried', 403);
+    } else
+      await this.learning.progressAuthority(
+        tx.curriculum.learning,
+        actor,
+        batchId,
+      );
+    if (job.batchId !== batchId)
+      reject('FORBIDDEN', 'Job does not belong to this Batch', 403);
+    const account = need(await tx.account(job.accountId));
+    return this.refresh(
+      actor,
+      batchId,
+      {
+        confirmed: true,
+        platform: account.platform,
+        retryJobId: job.id,
+        ...(u.role === 'STUDENT'
+          ? {}
+          : { studentProfileId: job.studentProfileId }),
+      },
+      request,
+    );
   }
   async refreshBatch(
     actor: string,

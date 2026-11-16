@@ -1,3 +1,4 @@
+import { finalizedRates, asPercent } from './metrics.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { attendanceFile } from './file.js';
@@ -39,9 +40,10 @@ const page = <T>(rows: T[], o: List) => ({
   totalPages: Math.ceil(rows.length / o.pageSize),
 });
 export const percentage = (present: number, absent: number) =>
-  present + absent
-    ? Math.round((present / (present + absent)) * 10000) / 100
-    : null;
+  asPercent(
+    finalizedRates({ present, absent, excused: 0, unmarked: 0 })
+      .participationRate,
+  );
 export const csvCell = (value: unknown) => {
   let s = String(value ?? '');
   if (/^[\s\u0000-\u001f]*[=+@-]/.test(s) || /^[\t\r\n]/.test(s)) s = "'" + s;
@@ -1000,6 +1002,16 @@ export class AttendanceService {
         });
       }
     }
+    const rates = (data: typeof rows) =>
+      finalizedRates({
+        present: data.filter((r) => r.official && r.status === 'PRESENT')
+          .length,
+        absent: data.filter((r) => r.official && r.status === 'ABSENT').length,
+        excused: data.filter((r) => r.official && r.status === 'EXCUSED')
+          .length,
+        unmarked: data.filter((r) => r.official && r.status === 'UNMARKED')
+          .length,
+      });
     const summary = (data: typeof rows) => {
       let present = 0,
         absent = 0,
@@ -1035,6 +1047,23 @@ export class AttendanceService {
       }),
     );
     return {
+      rates: rates(rows),
+      comparisonRates: {
+        MORNING: rates(rows.filter((r) => r.sessionType === 'MORNING')),
+        AFTERNOON: rates(rows.filter((r) => r.sessionType === 'AFTERNOON')),
+      },
+      studentRates: Object.fromEntries(
+        [...new Set(rows.map((r) => r.studentProfileId))].map((id) => [
+          id,
+          rates(rows.filter((r) => r.studentProfileId === id)),
+        ]),
+      ),
+      dayRates: Object.fromEntries(
+        [...new Set(rows.map((r) => r.dayNumber))].map((id) => [
+          id,
+          rates(rows.filter((r) => r.dayNumber === id)),
+        ]),
+      ),
       rows: page(rows, o),
       summary: summary(rows),
       students: page(students, o),
@@ -1044,7 +1073,7 @@ export class AttendanceService {
         AFTERNOON: summary(rows.filter((r) => r.sessionType === 'AFTERNOON')),
       },
       policy:
-        'Finalized sessions only. EXCUSED excluded from denominator. Zero denominator is N/A.',
+        'Finalized only. Attendance Rate includes all eligible snapshots; Participation Rate excludes EXCUSED and missing marks. Legacy percentage is Participation Rate. Zero denominator is N/A.',
     };
   }
   async export(
@@ -1099,7 +1128,9 @@ export class AttendanceService {
         'Official present',
         'Official absent',
         'Official excused',
-        'Attendance percentage',
+        'Attendance percentage (legacy participation)',
+        'Attendance Rate (%)',
+        'Participation Rate (%)',
       ];
       const data = rows.map((r) => [
         r.rollNumber,
@@ -1125,6 +1156,12 @@ export class AttendanceService {
         report.students.items.find(
           (s) => s.studentProfileId === r.studentProfileId,
         )?.percentage ?? 'N/A',
+        asPercent(
+          report.studentRates[r.studentProfileId]?.attendanceRate ?? null,
+        ) ?? 'N/A',
+        asPercent(
+          report.studentRates[r.studentProfileId]?.participationRate ?? null,
+        ) ?? 'N/A',
       ]);
       const file = await attendanceFile(headers, data, d.format);
       const auditTarget = { id: b.id, collegeId: b.collegeId } as SessionRecord;

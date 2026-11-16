@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { AttendanceRates } from './rates';
 import { useState } from 'react';
 import { useAdministration } from '@/features/administration/queries';
 import { StudentShell } from '@/features/students/shell';
@@ -41,6 +42,23 @@ export function StudentAttendance({ batchId }: { batchId: string }) {
               {q.data.message ||
                 'PRESENT, ABSENT and EXCUSED become official only after finalization. Unscanned members remain UNMARKED beforehand.'}
             </div>
+            <AttendanceRates
+              scope="Displayed finalized sessions"
+              counts={{
+                present: q.data.items.filter(
+                  (r) => r.official && r.status === 'PRESENT',
+                ).length,
+                absent: q.data.items.filter(
+                  (r) => r.official && r.status === 'ABSENT',
+                ).length,
+                excused: q.data.items.filter(
+                  (r) => r.official && r.status === 'EXCUSED',
+                ).length,
+                unmarked: q.data.items.filter(
+                  (r) => r.official && r.status === 'UNMARKED',
+                ).length,
+              }}
+            />
             <DataTable
               items={q.data.items}
               empty="No attendance history yet"

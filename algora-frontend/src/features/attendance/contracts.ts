@@ -133,7 +133,20 @@ export const reportRow = z.object({
   finalizedAt: z.string().nullable(),
   official: z.boolean(),
 });
+const namedRates = z.object({
+  present: z.number(),
+  absent: z.number(),
+  excused: z.number(),
+  unmarked: z.number(),
+  eligible: z.number(),
+  attendanceRate: z.number().nullable(),
+  participationRate: z.number().nullable(),
+});
 export const reportSchema = z.object({
+  rates: namedRates.optional(),
+  comparisonRates: z
+    .object({ MORNING: namedRates, AFTERNOON: namedRates })
+    .optional(),
   rows: page(reportRow),
   summary: summarySchema,
   students: page(

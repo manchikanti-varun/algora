@@ -10,7 +10,7 @@ No credentials, authentication tokens, private keys, personal email addresses or
 
 ## Current status
 
-Phase 9 is the validated handoff baseline. Earlier implementation snapshots and handoff counts are historical records. Earlier login-only visual checks do not establish authenticated Phase 9 browser acceptance.
+Phase 10 operational readiness is implemented locally and awaits review. Phase 9 was safely committed and pushed before this work. Phase 10 remains uncommitted, unpushed and undeployed. Critical live acceptance is BLOCKED; the platform is not production-accepted. Earlier phase snapshots and handoff counts are historical.
 
 | Phase | Scope | Implementation and verification |
 | --- | --- | --- |
@@ -22,7 +22,9 @@ Phase 9 is the validated handoff baseline. Earlier implementation snapshots and 
 | Phase 6 | Immutable curricula, Learning Days, problem/editorial authoring and Student learning | Implemented locally; 488 tests passed (356 backend, 132 frontend including separate live API health); formatting, lint, types and production builds passed; both audits reported zero vulnerabilities. Live Atlas/Google and authenticated visual verification remain blocked. |
 | Phase 7 | QR attendance, durable rosters, finalization, corrections and exports | Implemented and pushed as commit 2894b05; 616 tests passed (445 backend, 171 frontend including separate live API health); both builds/format/lint/types passed and audits found zero vulnerabilities. Live Atlas/Google, authenticated visual and real-camera acceptance remain blocked. |
 | Phase 8 | Verified coding progress, complete reports and registration enhancements | Implemented and validated for the Phase 8 delivery commit: 842 distinct tests (620 backend, 222 frontend including local health). Source, tests, lockfiles and sanitized configuration are included. Live provider/database acceptance remains BLOCKED. See the delivery record below. |
-| Phase 9 | Operational dashboards, learning analytics and Student follow-up | Implemented locally; 918 distinct tests passed (673 backend, 245 frontend including local health); both builds and checks passed; audits found zero vulnerabilities. Live acceptance remains LIMITED/BLOCKED. Validated for the authorized Phase 9 handoff; see its delivery record. |
+| Phase 9 | Operational dashboards, learning analytics and Student follow-up | Implemented and pushed as commit 7992f40; 918 distinct tests passed (673 backend, 245 frontend including local health); both builds and checks passed; audits found zero vulnerabilities. Live acceptance remains LIMITED/BLOCKED. Validated for the authorized Phase 9 handoff; see its delivery record. |
+
+| Phase 10 | Production preflight, bootcamp acceptance and operational recovery | Implemented locally; 979 distinct tests passed (713 backend, 266 frontend including separate local health) across full/focused validation. Both builds, format/lint/types and zero-vulnerability audits passed. Uncommitted/unpushed; critical live acceptance remains BLOCKED. |
 
 Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
@@ -39,6 +41,7 @@ Real Google consent/login, Atlas persistence/index creation, deployed cookie tra
 - [Phase 8 enhancements — Complete reports and registration](#phase-8-enhancements--complete-reports-and-registration)
 - [Phase 8 delivery — Validated publication](#phase-8-delivery--validated-publication)
 - [Phase 9 — Operational dashboards and learning analytics](#phase-9--operational-dashboards-and-learning-analytics)
+- [Phase 10 — Operational readiness and bootcamp acceptance](#phase-10--operational-readiness-and-bootcamp-acceptance)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
@@ -2390,6 +2393,179 @@ The Phase 10 request authorized a Phase 9 delivery commit, and the user explicit
 
 This README accompanies commit `feat: implement phase 9 analytics and operational dashboards`; its immutable hash is recorded in Git history and the subsequent Phase 10 implementation record. Push outcome is verified before any Phase 10 source work. No credentials, generated output or other Markdown documents belong in this handoff. Phase 10 must remain uncommitted and unpushed.
 
+## Phase 10 — Operational readiness and bootcamp acceptance
+
+### A. Phase 9 Git handoff and commit verification
+
+Phase 9 was revalidated before Phase 10 source edits: 673 backend tests, 244 regular frontend tests and one separately enabled local health test (918 distinct), both applications' formatting/lint/types/builds and zero-vulnerability audits, and the compiled HTTP/rewrite boundary smoke. The actual staged tree was reviewed for credentials, generated artifacts and unexpected Markdown; 322 eligible text files had no privacy findings. The authorized commit [`7992f40449a911798615b93e6b40574cc8d887e3`](https://github.com/manchikanti-varun/algora/commit/7992f40449a911798615b93e6b40574cc8d887e3) was pushed to origin/main and independently verified against the remote. The working tree was clean before Phase 10. This section supersedes earlier local Phase 9 handoff snapshots.
+
+### B. Implementation summary
+
+Added configuration and read-only database preflight, explicit startup transaction/index readiness, bounded connection pools/timeouts and reconnect backoff, worker shutdown draining, API version compatibility checks, named attendance rates, authorized Batch/session readiness and end-of-day views, guarded coding-job retry, clearer camera/network recovery, and export record-count metadata. Existing architecture, role scopes, permanent QR identity, immutable curriculum, durable attendance and evidence-based coding remain in use. No fake production account, production fixture insertion, deployment or Phase 11 work occurred.
+
+### C. Production preflight results
+
+Run `npm run preflight --prefix algora-backend -- --database --http` from the repository root with operator-supplied configuration. Production checks are the default; `--local` relaxes deployment-only requirements. The script loads the backend environment file but never prints its values. Supply frontend deployment variable names to the operator process as needed; it does not read or display another application's private environment file. Statuses are PASS, FAIL, BLOCKED, NOT CONFIGURED and NOT TESTED. Exit 1 means a failed check, 2 means incomplete checks, and 0 requires every reported check to pass. `productionAccepted` remains false because this command cannot certify real browser/provider acceptance.
+
+The actual unconfigured local invocation produced `configurationReady=false` and `productionAccepted=false`; missing MongoDB, Google, QR and Codeforces configuration was reported, deployment-only settings failed as expected, and live database/OAuth/camera/provider acceptance was BLOCKED. The API check was NOT TESTED without an endpoint. This expected preflight result is not a successful production certification. Tests separately cover valid and invalid sanitized configuration without exposing secrets.
+
+### D. MongoDB readiness
+
+Runtime disables implicit model buffering and automatic collection/index creation. Startup verifies a bounded read-only snapshot transaction, creates only missing known application collections, invokes existing non-destructive index initializers, and checks declared compound key order, unique/sparse/TTL/partial/collation options. No collection drop, index drop or destructive synchronization is used. A conflicting schema stops readiness and requires operator repair. Preflight itself only pings, reads index metadata and commits a read-only transaction; it never creates collections or inserts fixtures. Transaction-capable MongoDB is required; standalone local MongoDB is insufficient. [MongoDB transaction documentation](https://www.mongodb.com/docs/manual/core/transactions/) describes the deployment requirements.
+
+`/api/v1/ready` remains 503 until connection, transactions, indexes and storage gates pass; disconnect resets readiness. Connection pool, selection/socket/queue timeouts are bounded. Transient startup failures use exponential 1–30 second backoff; authorization, unsupported transactions and index conflicts require operator action. Workers stop scheduling and drain active work before database disconnection, within the process shutdown deadline. Actual Atlas connectivity, persistence, permissions, first deployment/index initialization and recovery under load are BLOCKED without an authorized database.
+
+### E. Google OAuth readiness
+
+Existing Google authorization-code flow, state/PKCE/nonce validation, verified identity, durable opaque sessions, CSRF, role checks, suspension, refresh and revocation remain intact. Preflight checks the complete Google variable group and exact same-origin callback. Automated fixtures include production cookie options and authorization regression; they do not perform Google consent. Live acceptance must exercise consent/callback, invalid state/nonce, expired/replayed callbacks, verified-email policy, suspended users, session expiry/refresh, logout/logout-all-devices and every role. Google credentials and a deployed acceptance environment are unavailable, so these checks remain BLOCKED.
+
+### F. Vercel/Railway deployment compatibility
+
+Use the frontend application as Vercel root and backend application as Railway root; retain their package build/start scripts and supported Node 22–26 engine range. Supply backend `MONGODB_URI`, Google/QR/provider configuration and exact `FRONTEND_URL`/`CORS_ORIGINS`. Frontend build and runtime need `BACKEND_API_BASE_URL`; browser API path remains `/backend`. Changing the rewrite destination requires rebuilding. Register callbacks on the frontend `/backend` origin. Production uses HttpOnly, Secure, SameSite=Lax, host-only cookies with Path=/ and no Domain. Verify actual deployed Set-Cookie forwarding, server-side requests, CSRF, no-store responses, redirects and logout in a real browser; local fixtures do not certify this transport.
+
+Railway health checks now use `/api/v1/ready` with a 120-second startup window. Railway's deployment health gate expects a successful response; [Railway health check documentation](https://docs.railway.com/deployments/healthchecks) explains this behavior. The frontend uses existing external rewrites; [Vercel rewrite documentation](https://vercel.com/docs/routing/rewrites) describes their proxy behavior. Neither documentation establishes this project's live cookie acceptance. Keep one HTTP replica until a shared rate-limit store is implemented and reviewed. Verify `TRUST_PROXY_HOPS=1` against actual staging routing before launch. No deployment was performed.
+
+### G. Bootcamp lifecycle acceptance
+
+The isolated service acceptance scenario exercises Admin request/approval, Student registration, staff verification, roll enrollment, canonical problems and Java editorial publication, immutable 5-Day curriculum assignment, Student learning access, permanent QR lookup, session scanning/finalization/correction, coding ownership/evidence, analytics and exports. It uses existing in-memory test repositories and controlled provider responses. There is no production in-memory fallback and no database fixture insertion. Browser visual and physical-device acceptance remain separate gates.
+
+### H. 120-Student scenario
+
+One College, Course and Batch contain 120 verified/enrolled Students, five Learning Days and 15 assigned problems per Day: 75 assignments, 9,000 Student-problem opportunities and 1,200 Morning/Afternoon attendance opportunities. Ten sessions record 900 PRESENT and 300 ABSENT; one audited ABSENT-to-EXCUSED correction yields 900 PRESENT, 299 ABSENT and one EXCUSED. Duplicate QR detection is idempotent and duplicate roll enrollment is rejected. Pagination returns 20 Students on the third 50-row page. A controlled official Codeforces response establishes one verified solve and coverage for 50 supported assignments for one account. The other 8,950 opportunities remain unavailable, rather than becoming invented failures or solves.
+
+### I. QR attendance reliability
+
+Existing permanent credential validation, current authority and eligible membership checks, OPEN-only scanning, durable session rosters, duplicate protection, transactional finalization and audited correction remain authoritative. Scanner errors distinguish denied permission, missing camera and busy camera. A failed/unconfirmed request clears the temporary frame suppression so an immediate retry can reach the server; successful scans remain duplicate-protected. Automated UI tests exercise network failure followed by immediate retry. No offline mark queue or client-side accepted attendance exists. Manually test HTTPS Android Chrome and iOS Safari permission/denial/retry, pause/resume, invalid and duplicate QR, connection loss, closed/finalized sessions and corrections. Physical camera and authenticated responsive visual acceptance are NOT TESTED/BLOCKED.
+
+### J. Attendance calculation consistency
+
+The shared finalized-only calculator defines **Attendance Rate = PRESENT / (PRESENT + ABSENT + EXCUSED + unmarked finalized roster opportunities)** and **Participation Rate = PRESENT / (PRESENT + ABSENT)**. Unfinalized sessions never create confirmed absence. Morning and Afternoon are independent opportunities. Zero denominators are null/N/A; corrected current records are authoritative. The scenario reconciles Attendance Rate 75% and Participation Rate 75.06% (900/1199).
+
+Role dashboards, Batch and personal analytics, readiness/end-of-day views, legacy report screens and exports use the named definitions. Student history explicitly labels rates as covering the displayed finalized page. Older Phase 7 `summary.percentage` remains its historical participation percentage; analytics' existing percentage remains its attendance fraction. Additive `rates`, `comparisonRates`, `studentRates` and `dayRates` avoid breaking existing contracts. Named export columns make both meanings explicit. Historical phase formula descriptions above record their original handoff behavior; this section defines current behavior.
+
+### K. Coding verification reliability
+
+Only supported, owned Codeforces accounts and authoritative accepted submissions produce verified solves. LeetCode/CodeChef remain verification-unavailable. A failed sync or empty provider response cannot erase a verified solve. Retry accepts only a current failed/partial job for the same account revision, enrollment, Batch and pinned curriculum; ownership, role permissions and CSRF are enforced. The private `POST /api/v1/batches/:batchId/progress/jobs/:jobId/retry` contract accepts only `{ "confirmed": true }`; target account/platform/profile are derived on the server. Students may retry their own current jobs; staff need current College progress authority. It returns the existing sanitized queued-job representation and standard error envelope. Retry respects durable next-at windows, the existing refresh cooldown and active-job exclusion, including attempts through generic refresh. No insecure scrape, unverifiable manual completion or automatic UI retry loop was added. Real Codeforces ownership/exchange/rate-limit/provider behavior remains BLOCKED.
+
+### L. Batch readiness
+
+The Operations tab uses private `GET /api/v1/analytics/batches/:batchId/readiness` with existing analytics filters and current combined analytics permissions. It checks Course eligibility/publication, ACTIVE Batch, pinned curriculum, eligible Students, released Days, published problems, QR configuration, ownership configuration, worker enablement and trusted platform coverage. Authority is checked again before response. Readiness does not confer new management permissions or certify infrastructure/camera acceptance. Mixed unsupported-platform curricula truthfully retain blocked full coding readiness.
+
+### M. Session readiness
+
+Each released Day displays separate Morning and Afternoon rows, actual session IDs/status, current eligible count, durable snapshot count, scan link only when scanning is permitted, and explicit camera NOT TESTED guidance. Missing sessions show NOT CREATED. Closed/finalized sessions direct staff to finalization or audited corrections. Configuration readiness cannot establish device permission or network quality.
+
+### N. End-of-day summary
+
+The same Operations view shows each Day's published assignment count, coding solve/coverage/unavailable totals, separate Morning/Afternoon attendance rates, finalized and pending sessions, and missing-session/finalization/verification issues. It reuses analytics projections and current authoritative corrections rather than maintaining a competing cached total.
+
+### O. Reports and export acceptance
+
+All five coding report types (Day, Problem, Student, Batch and Complete) pass CSV and XLSX generation and reconciliation. Day opportunity count is 1,800; the other fixture selections cover 9,000 opportunities. Actual CSV data-record counts are Day 120, Problem 75, Batch 84, Student 9,000 and Complete 9,000. Complete XLSX has five worksheets; detailed sheet has 9,000 data rows and Students sheet 120. Attendance CSV/XLSX both contain 1,200 records with separately named rates. Unavailable verification remains explicit.
+
+Legacy coding export `rowCount` means matching assignment opportunities. Additive `assignmentOpportunityCount`, `csvRecordCount` and `worksheetRowCounts` distinguish logical opportunities from physical records (excluding headers); UI download feedback uses these when available. Selection-wide totals repeated in analytics detail exports are reference values and must not be summed. Existing scope, size, audit, private-cache and safe-cell protections remain.
+
+### P. Error handling and recovery
+
+Preflight emits fixed guidance rather than raw connection/provider exceptions. Runtime startup errors use static safe logs. HTTP responses expose `X-Algora-API-Version: 1`; a supplied incompatible request version is rejected with 409 before mutation. The frontend sends version 1 and asks users to refresh on a mismatched response. Existing clients without a header remain compatible. Staff/Students can retry eligible failed syncs, refresh readiness, and retry camera/network failures without reissuing permanent QR identities. Existing API envelopes, CSRF, no-store and rate limits remain.
+
+### Q. Security findings
+
+New tests cover sanitized preflight, invalid origin/TLS/proxy/replica/callback configuration, bounded database probes, index-option compatibility, authorization, CSRF, mass assignment, stale/cross-user retry contexts, cooldown bypass, version mismatch before mutation, safe production cookie attributes and evidence preservation. Fixtures use synthetic/runtime-generated values only. No security control was intentionally weakened. Publication review and exact final check results are recorded below; real infrastructure security acceptance remains blocked.
+
+### R. Performance measurements
+
+Measured with performance.now in the isolated in-memory service scenario on this local run, not Atlas, HTTP, browser or concurrent production latency. Values depend on host load and are single-run observations; they are not throughput guarantees.
+
+| Operation | Milliseconds |
+| --- | ---: |
+| registration verification enrollment 119 | 1815.69 |
+| enrollment lookup | 0.08 |
+| batch roster page | 40.44 |
+| qr mark mean ms | 28.52 |
+| finalization mean ms | 30.04 |
+| batch analytics | 538.96 |
+| day analytics | 445.28 |
+| student performance page | 602.80 |
+| export DAY CSV | 364.30 |
+| export DAY XLSX | 511.42 |
+| export PROBLEM CSV | 327.98 |
+| export PROBLEM XLSX | 500.71 |
+| export STUDENT CSV | 423.06 |
+| export STUDENT XLSX | 3834.37 |
+| export BATCH CSV | 779.77 |
+| export BATCH XLSX | 749.52 |
+| export COMPLETE CSV | 538.87 |
+| export COMPLETE XLSX | 4690.21 |
+
+### S. Backend test counts
+
+**713 distinct backend tests passed across the full regression and final focused rerun.** The final operational suite passed all 39 tests, including both new index-error classification cases. The 120-Student lifecycle passed. The sandbox initially prevented HTTP loopback connections (EACCES); the unchanged HTTP tests passed with local networking enabled. One full-run operational check had loaded the earlier classification code; its final rerun passed after the implementation fix. A new subprocess test exceeded its startup timeout during resource contention; only its startup allowance was increased, and its secret-safety assertions remain unchanged. No existing tests were removed or disabled.
+
+### T. Frontend test counts
+
+**265 regular frontend tests passed across the full regression and affected-suite rerun.** All 20 new Operations UI cases passed. The final rerun of attendance, coding and administration UI suites passed all 65 cases, including the immediate scanner retry. The full run had three asynchronous UI lookup failures under load and a helper-name typo in the new scanner test; the typo was corrected and all affected suites passed without changing existing assertions. The separately enabled connectivity test passed against the compiled local API through the real frontend client, bringing frontend acceptance to **266 distinct tests**. Total acceptance is **979 distinct tests** (713 backend + 266 frontend), without double-counting reruns.
+
+### U. Format/lint/typecheck/build/audit results
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| Format | PASS | PASS |
+| Lint | PASS | PASS |
+| Typecheck | PASS | PASS after correcting the new test helper typo |
+| Production build | PASS | PASS |
+| Tests | 713 distinct passed across full/focused runs | 265 regular + 1 actual local health passed across full/focused runs |
+| npm audit | 0 vulnerabilities | 0 vulnerabilities |
+
+The sandbox denied loopback networking in the initial backend run, registry access for the initial audits, and a Turbopack CSS compiler child process in the initial frontend build. Rerunning those unchanged checks with the required networking/process permissions succeeded. This was local validation, not deployment. The compiled HTTP smoke passed private readiness authorization, all protected route redirects and private API boundaries, the incompatible request version 409 guard, same-origin rewrite health, truthful dependency readiness 503 without MongoDB, and the QR WASM signature. It executed the opt-in health test once and stopped both temporary listeners. The existing foundation React script-tag warning is informational; no tests were disabled. Final privacy review scanned 334 eligible text files with no findings; git diff --check passed.
+
+### V. Files created or modified
+
+New backend modules: `operations/checks.ts`, `operations/database.ts`, `operations/models.ts`, `scripts/preflight.ts`, `attendance/metrics.ts`, pure `middleware/app-error.ts`, pure `students/keyring.ts`, and `tests/operations.test.ts` / `tests/bootcamp-acceptance.test.ts`. Updated database/env/startup/app/auth limits, coding contracts/service/router/reports/worker, analytics calculator/service/router, attendance service and learning worker. Model and domain-contract imports now use the pure AppError module so preflight can run before runtime environment validation; existing errors-module re-export preserves class identity. Backend package scripts, sanitized environment template and Railway health configuration changed.
+
+New frontend modules: `features/analytics/operations.tsx`, `features/attendance/rates.tsx` and `tests/operations-ui.test.tsx`. Updated analytics schemas/dashboard, attendance schemas/reports/history/scanner, coding progress/download feedback, Batch links, API client and scanner regression test. Root README is cumulative; no additional Markdown or generated report is tracked. Existing lockfiles/dependencies were retained.
+
+### W. Known blockers
+
+Missing authorized Atlas, Google and Codeforces configuration prevents live persistence/index/transaction load, consent/ownership exchange and provider acceptance. No deployed Vercel/Railway environment was supplied for cookie/redirect/proxy/rate-limit verification. No physical camera or authenticated responsive visual acceptance was performed. In-memory timings are not production capacity evidence; shared campus IP and reconnect/shutdown behavior need staging load validation. Unsupported coding platforms remain unavailable by design. Critical live gates prevent production acceptance.
+
+### X. Acceptance criteria
+
+| # | Criterion | Status and evidence |
+| --- | --- | --- |
+| 1 | Phase 9 safely validated and handed off | PASS — verified commit and remote match before Phase 10 |
+| 2 | Production preflight | PASS — safe CLI and configuration tests |
+| 3 | Atlas readiness | BLOCKED — checks implemented; authorized live database unavailable |
+| 4 | Google OAuth readiness | BLOCKED — configuration checks implemented; real consent unavailable |
+| 5 | Deployment compatibility | LIMITED — configuration reviewed and local HTTP boundary checked; deployed transport untested |
+| 6 | 120-Student scenario | PASS — isolated service lifecycle; not a live load claim |
+| 7 | Attendance reliability | LIMITED — automated domain/UI recovery; physical camera acceptance blocked |
+| 8 | Consistent attendance definitions | PASS — shared calculator, named rates, compatibility aliases |
+| 9 | Coding distinctions | PASS — supported evidence and unavailable states preserved; live provider blocked |
+| 10 | Export reconciliation | PASS — five report types in both formats and attendance records |
+| 11 | Batch readiness visible | PASS — authorized Operations tab and private API |
+| 12 | Session readiness visible | PASS — separate types, roster counts and device caveat |
+| 13 | End-of-day summary | PASS — authoritative attendance/coding and outstanding issues |
+| 14 | Safe recovery | PASS — bounded retries, cooldown, camera retry and compatibility errors |
+| 15 | Security regressions | PASS — final automated evidence in sections S–U; live limits remain explicit |
+| 16 | Existing functionality | PASS — final automated evidence in sections S–U; live limits remain explicit |
+| 17 | Both production builds | PASS — final automated evidence in sections S–U; live limits remain explicit |
+| 18 | Dependency audits | PASS — final automated evidence in sections S–U; live limits remain explicit |
+| 19 | No production fake data | PASS — in-memory fixtures only; read-only operator probe |
+| 20 | Phase 10 uncommitted/unpushed | PASS — local changes only; no deployment |
+
+### Y. Final Git status
+
+Branch remains main and HEAD remains the authorized Phase 9 commit `7992f40449a911798615b93e6b40574cc8d887e3`, independently matched to origin/main before Phase 10. The index is empty. Phase 10 source/tests/configuration and README are modified or untracked locally; no Phase 10 commit, push, deployment or Phase 11 work occurred. README.md remains the only tracked Markdown. Environment files, dependencies, generated builds, local timing reports and validation logs remain ignored. This implementation awaits user review.
+
+### Z. Recommended next phase
+
+Phase 10 is ready for review subject to the explicit live gates above. Next work should configure authorized staging integrations, execute the real OAuth/cookie/Atlas/camera/provider acceptance checklist, then measure representative concurrent bootcamp traffic and recovery. Resolve those results before any production-readiness claim. No Phase 11 implementation was started; await user review.
+
+### Phase 10 handoff revalidation for Phase 11
+
+Fresh pre-handoff validation passed both complete regular suites (713 backend and 265 frontend), one separately enabled real local API health test, both applications’ format/lint/typecheck/production builds and zero-vulnerability dependency audits. The compiled API/rewrite/QR boundary smoke passed. All baseline source files remained unchanged during validation. Privacy review scanned 334 eligible text files with no findings; git diff --check passed. The proposed Phase 10 commit is `feat: complete phase 10 operational readiness`. Commit and push require explicit authorization; Phase 11 must remain uncommitted and unpushed.
+
 ## Current local setup
 
 Use Node.js 22 LTS and npm in the complete local workspace. Two independent applications are retained: algora-frontend and algora-backend.
@@ -2419,6 +2595,12 @@ npm run dev
 Frontend runs at http://localhost:3000; Express at http://localhost:5000/api/v1. Sign-in remains unavailable until its real dependencies/configuration are ready. Do not overwrite an existing environment file when revisiting setup.
 
 Run inside each application: npm run format, npm run lint, npm run typecheck, npm test, npm run build and npm audit. Production frontend builds require BACKEND_API_BASE_URL; browser requests use NEXT_PUBLIC_API_BASE_URL=/backend. The optional live health test needs RUN_CONNECTIVITY_TEST=true and the local API running.
+
+### Phase 10 operations setup
+
+Run the preflight with operator-managed environment configuration: `npm run preflight --prefix algora-backend -- --database --http`. It is read-only; missing configuration is expected to return a nonzero status. Review the Phase 10 live acceptance checklist before deployment. `npm run test:bootcamp --prefix algora-backend` runs the isolated 120-Student scenario without inserting application data into MongoDB.
+
+New bounded runtime variables are `API_RATE_LIMIT` (production default 2400 per 60-second API window), `LOGIN_RATE_LIMIT` (production default 480 per 10-minute login window), `APP_REPLICAS` (must be 1), `DB_MAX_POOL_SIZE` (default 20), `DB_SELECTION_TIMEOUT_MS` (default 5000) and `DB_SOCKET_TIMEOUT_MS` (default 30000). Development/test rate defaults remain 120 and 20. These are budgets, not demonstrated throughput guarantees. Keep provider `CODING_SYNC_ENABLED` disabled until configuration is accepted, retain historical QR keys, disable preview routes, and use transaction-capable MongoDB. Railway uses `/api/v1/ready`; `/health` only establishes HTTP liveness. Do not publish real environment files or actual values.
 
 ### Phase 9 analytics setup
 
@@ -2462,7 +2644,7 @@ Super Admin explicitly grants college.view and attendance.manage to the relevant
 
 Close scanning to review PRESENT/UNMARKED members. New enrollments require an explicit reviewed additive roster refresh. Unmarked members can be reasonedly excused while CLOSED. Review and confirm finalization to create official ABSENT records for the remaining durable roster. Subsequent status changes use audited corrections. Attendance sessions and Phase 8 coding sync/progress prevent curriculum replacement. Staff scans require sign-in within eight hours of the original session issuance; sign out/in to renew, and use a shorter SESSION_TTL if required by your deployment policy.
 
-Students use /student/attendance to discover their own roster history, including finalized attendance after a Batch completes. Staff reports calculate percentages only from finalized PRESENT/ABSENT rows, exclude EXCUSED and use N/A for zero denominator. CSV/XLSX exports are private and audited. Admission/finalization is capped at 2,000 members; reports at 1,000 selected sessions/10,000 detail rows. No automatic migration, database connection or deployment has occurred. Phase 7 was subsequently pushed and independently verified as recorded in Phase 8 section A. npm dev/build lifecycle hooks generate the same-origin decoder asset from the locked dependency; keep those generated public assets ignored.
+Students use /student/attendance to discover their own roster history, including finalized attendance after a Batch completes. Reports show Attendance Rate and Participation Rate separately using finalized rows. EXCUSED is included in Attendance Rate and excluded from Participation Rate. Legacy percentage fields retain their historical meaning; zero denominators show N/A. CSV/XLSX exports are private and audited. Admission/finalization is capped at 2,000 members; reports at 1,000 selected sessions/10,000 detail rows. No automatic migration, database connection or deployment has occurred. Phase 7 was subsequently pushed and independently verified as recorded in Phase 8 section A. npm dev/build lifecycle hooks generate the same-origin decoder asset from the locked dependency; keep those generated public assets ignored.
 
 ### Coding ownership and progress setup
 

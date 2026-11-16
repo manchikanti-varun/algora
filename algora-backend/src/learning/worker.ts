@@ -98,10 +98,11 @@ export async function runReconciliationPass() {
 }
 export function startReconciliationWorker() {
   let running = false;
+  let active: Promise<void> | undefined;
   const tick = () => {
     if (running) return;
     running = true;
-    void runReconciliationPass()
+    active = runReconciliationPass()
       .catch(() => logger.warn('Reconciliation pass unavailable'))
       .finally(() => {
         running = false;
@@ -110,7 +111,10 @@ export function startReconciliationWorker() {
   const timer = setInterval(tick, 5000);
   timer.unref();
   tick();
-  return () => clearInterval(timer);
+  return async () => {
+    clearInterval(timer);
+    await active;
+  };
 }
 export async function reconciliationStatus() {
   const queues = [];

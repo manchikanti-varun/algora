@@ -1,3 +1,8 @@
+import { codingOwnership } from '../coding/ownership.js';
+import { env } from '../config/env.js';
+import { QrVault } from '../students/crypto.js';
+import { eligible } from '../learning/service.js';
+import type { OperationalCheck } from '../operations/checks.js';
 import { attendanceFile } from '../attendance/file.js';
 import { AppError } from '../middleware/errors.js';
 import type { ProgressRepository } from '../coding/contracts.js';
@@ -44,6 +49,11 @@ export class AnalyticsService {
     private repo: ProgressRepository,
     private source: AnalyticsSource,
     private now = () => new Date(),
+    private capabilities = {
+      qr: () => new QrVault().available(),
+      coding: () => codingOwnership.configured(),
+      worker: () => env.CODING_SYNC_ENABLED === 'true',
+    },
   ) {}
   async scope(user: string, q: AnalyticsQuery, superOnly = false) {
     await this.repo.ensureReady();
@@ -424,6 +434,150 @@ export class AnalyticsService {
     await this.authorize(user, batch, q);
     return output;
   }
+  async readiness(user: string, batch: string, input: unknown) {
+    const q = analyticsQuery.parse(input),
+      b = await this.authorize(user, batch, q),
+      v = await this.data(user, b, q),
+      c = await this.repo.read.curriculum.learning.course(b.courseId);
+    const check = (
+      name: string,
+      ok: boolean,
+      guidance: string,
+    ): OperationalCheck => ({
+      check: name,
+      status: ok ? 'PASS' : 'BLOCKED',
+      guidance,
+    });
+    const checks: OperationalCheck[] = [
+      check(
+        'Course assigned and published',
+        !!c && eligible(c, b.collegeId),
+        'Review the assigned Course and College access.',
+      ),
+      check(
+        'Active Batch',
+        b.status === 'ACTIVE',
+        'Activate an eligible Batch before live sessions.',
+      ),
+      check(
+        'Pinned curriculum',
+        !!b.curriculumRevisionId,
+        'Assign a published immutable curriculum revision.',
+      ),
+      check(
+        'Eligible Students',
+        v.students.length > 0,
+        'Enroll and verify Students before opening attendance.',
+      ),
+      check(
+        'Released Learning Days',
+        v.days.length > 0,
+        'Publish and release Learning Days.',
+      ),
+      check(
+        'Published problems',
+        v.data.assignments.length > 0,
+        'Publish assignments on the pinned Learning Days.',
+      ),
+      check(
+        'Permanent QR configuration',
+        this.capabilities.qr(),
+        'Configure the key ring and retain historical decryption keys.',
+      ),
+      {
+        check: 'Supported coding ownership',
+        status: this.capabilities.coding() ? 'PASS' : 'NOT CONFIGURED',
+        guidance:
+          'Configure official Codeforces ownership verification. Unsupported platforms remain unavailable.',
+      },
+      {
+        check: 'Coding worker enabled',
+        status: this.capabilities.worker() ? 'PASS' : 'NOT CONFIGURED',
+        guidance:
+          'Enable durable sync only after provider and database acceptance.',
+      },
+      {
+        check: 'Trusted platform coverage',
+        status: v.data.assignments.every((a) => a.platform === 'CODEFORCES')
+          ? 'PASS'
+          : 'BLOCKED',
+        guidance:
+          'LeetCode and CodeChef assignments retain unavailable verification; do not interpret them as failed completion.',
+      },
+    ];
+    const sessions = v.days.flatMap((day) =>
+      (['MORNING', 'AFTERNOON'] as const).map((type) => {
+        const session = v.sessions.find(
+          (s) => s.day === day.day && s.type === type,
+        );
+        return {
+          day: day.day,
+          title: day.title,
+          type,
+          sessionId: session?.id ?? null,
+          status: session?.status ?? 'NOT CREATED',
+          expectedEligibleStudents: v.students.length,
+          snapshotStudents: session?.eligible ?? 0,
+          scanReady:
+            checks.slice(0, 5).every((c) => c.status === 'PASS') &&
+            this.capabilities.qr() &&
+            session?.status === 'OPEN',
+          camera: 'NOT TESTED',
+          guidance: !session
+            ? 'Create and open the session before scanning.'
+            : session.status === 'OPEN'
+              ? 'Confirm camera permission and connectivity on this device.'
+              : 'Scanning requires an OPEN session; finalized records use audited corrections.',
+        };
+      }),
+    );
+    const days = v.days.map((day) => ({
+      day: day.day,
+      title: day.title,
+      assignedProblems: day.publishedAssignments,
+      coding: day.coding,
+      morning: day.morning,
+      afternoon: day.afternoon,
+      finalizedSessions: v.sessions.filter(
+        (s) => s.day === day.day && s.status === 'FINALIZED',
+      ).length,
+      pendingSessions: v.sessions.filter(
+        (s) => s.day === day.day && ['OPEN', 'CLOSED'].includes(s.status),
+      ).length,
+      issues: [
+        ...(sessions.some((s) => s.day === day.day && !s.sessionId)
+          ? ['Morning or Afternoon session not created']
+          : []),
+        ...(!day.publishedAssignments ? ['No published assignments'] : []),
+        ...(v.sessions.some(
+          (s) => s.day === day.day && ['OPEN', 'CLOSED'].includes(s.status),
+        )
+          ? ['Attendance awaits finalization']
+          : []),
+        ...(day.coding.unavailable
+          ? ['Coding verification is incomplete or unavailable']
+          : []),
+      ],
+    }));
+    await this.authorize(user, batch, q);
+    return {
+      batchId: b.id,
+      batchName: b.name,
+      generatedAt: this.now().toISOString(),
+      checks,
+      attendanceReady:
+        checks.slice(0, 5).every((c) => c.status === 'PASS') &&
+        this.capabilities.qr(),
+      codingReady:
+        checks.slice(0, 6).every((c) => c.status === 'PASS') &&
+        this.capabilities.coding() &&
+        this.capabilities.worker() &&
+        checks.at(-1)?.status === 'PASS',
+      blockers: checks.filter((c) => c.status !== 'PASS'),
+      sessions,
+      days,
+    };
+  }
   async overview(user: string, input: unknown, superOnly = false) {
     const q = analyticsQuery.parse(input),
       scope = await this.scope(user, q, superOnly),
@@ -665,6 +819,8 @@ export class AnalyticsService {
       'Finalized present',
       'Finalized absent',
       'Attendance percentage',
+      'Attendance Rate (%)',
+      'Participation Rate (%)',
     ];
     const rows = v.marks.map((m) => [
       v.data.college.name,
@@ -682,6 +838,10 @@ export class AnalyticsService {
       summary.present,
       summary.absent,
       summary.percentage === null ? 'N/A' : summary.percentage * 100,
+      summary.attendanceRate === null ? 'N/A' : summary.attendanceRate * 100,
+      summary.participationRate === null
+        ? 'N/A'
+        : summary.participationRate * 100,
     ]);
     const file = await attendanceFile(headers, rows, format, true);
     if (file.base64.length > 14 * 1024 * 1024)

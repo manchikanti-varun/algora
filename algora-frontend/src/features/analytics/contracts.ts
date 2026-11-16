@@ -9,6 +9,8 @@ export const coding = z.object({
   coverage: z.number().nullable(),
 });
 export const attendance = z.object({
+  attendanceRate: z.number().nullable().optional(),
+  participationRate: z.number().nullable().optional(),
   eligible: z.number(),
   present: z.number(),
   absent: z.number(),

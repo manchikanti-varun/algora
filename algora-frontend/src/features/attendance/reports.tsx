@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { AttendanceRates } from './rates';
 import { useState } from 'react';
 import { apiMutate } from '@/lib/api/client';
 import { useAdministration } from '@/features/administration/queries';
@@ -204,6 +205,11 @@ export function AttendanceReports({
           <>
             <section className="student-card">
               <h3>Official attendance</h3>
+              <AttendanceRates counts={q.data.rates ?? q.data.summary} />
+              <p>
+                The legacy percentage is Participation Rate; both named metrics
+                are exported.
+              </p>
               <p>{q.data.policy}</p>
               <dl className="attendance-counts">
                 {[

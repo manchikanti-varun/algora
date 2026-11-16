@@ -19,6 +19,8 @@ const fileSchema = z.object({
   mime: z.string(),
   base64: z.string().max(14 * 1024 * 1024),
   rowCount: z.number().optional(),
+  assignmentOpportunityCount: z.number().optional(),
+  csvRecordCount: z.number().nullable().optional(),
 });
 export function ReportDownloads({
   batchId,
@@ -82,9 +84,17 @@ export function ReportDownloads({
       setMessage(
         'Download ready: ' +
           result.filename +
-          (result.rowCount !== undefined
-            ? ' · ' + result.rowCount + ' matching assignment rows'
-            : ''),
+          (result.assignmentOpportunityCount !== undefined
+            ? ' · ' +
+              result.assignmentOpportunityCount +
+              ' matching assignment opportunities' +
+              (result.csvRecordCount !== null &&
+              result.csvRecordCount !== undefined
+                ? ' · ' + result.csvRecordCount + ' CSV records'
+                : '')
+            : result.rowCount !== undefined
+              ? ' · ' + result.rowCount + ' matching assignment rows'
+              : ''),
       );
     } catch (error) {
       setFailed(true);

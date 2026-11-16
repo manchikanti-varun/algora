@@ -191,6 +191,18 @@ export function codingRouter(
     ),
   );
   r.post(
+    '/batches/:batchId/progress/jobs/:jobId/retry',
+    send((req, res) =>
+      service.retry(
+        actor(res),
+        id(req, 'batchId'),
+        id(req, 'jobId'),
+        req.body,
+        res.locals.requestId,
+      ),
+    ),
+  );
+  r.post(
     '/batches/:batchId/progress/refresh-batch',
     send((req, res) =>
       service.refreshBatch(

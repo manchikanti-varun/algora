@@ -20,7 +20,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "format": "prettier --write .",
-    "provision:super-admin": "tsx src/scripts/provision-super-admin.ts"
+    "provision:super-admin": "tsx src/scripts/provision-super-admin.ts",
+    "preflight": "tsx src/scripts/preflight.ts",
+    "test:bootcamp": "vitest run src/tests/bootcamp-acceptance.test.ts --maxWorkers=1"
   },
   "dependencies": {
     "cookie": "^2.0.2",

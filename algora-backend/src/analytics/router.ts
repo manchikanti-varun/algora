@@ -97,6 +97,12 @@ export function analyticsRouter(
     },
   );
   r.get(
+    '/batches/:batchId/readiness',
+    send((u, r) =>
+      service.readiness(u, idSchema.parse(r.params.batchId), r.query),
+    ),
+  );
+  r.get(
     '/platform',
     send((u, r) => service.overview(u, r.query, true)),
   );

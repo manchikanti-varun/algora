@@ -49,6 +49,7 @@ export const confirmSchema = z
   .strict();
 export const refreshSchema = z
   .object({
+    retryJobId: idSchema.optional(),
     platform: z.enum(platforms),
     studentProfileId: idSchema.optional(),
     confirmed: z.literal(true),

@@ -33,10 +33,17 @@ export function startCodingWorker() {
       running = false;
     }
   };
-  const timer = setInterval(() => void tick(), 3500);
+  let active: Promise<void> | undefined;
+  const timer = setInterval(() => {
+    if (!active)
+      active = tick().finally(() => {
+        active = undefined;
+      });
+  }, 3500);
   timer.unref();
-  return () => {
+  return async () => {
     stopping = true;
     clearInterval(timer);
+    await active;
   };
 }
