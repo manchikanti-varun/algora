@@ -1,4 +1,8 @@
 import {
+  initializeCodingIndexes,
+  codingStorageReady,
+} from '../coding/repository.js';
+import {
   initializeAttendanceIndexes,
   attendanceStorageReady,
 } from '../attendance/repository.js';
@@ -41,6 +45,7 @@ export async function connectDatabase() {
   await initializeLearningIndexes();
   await initializeCurriculumIndexes();
   await initializeAttendanceIndexes();
+  await initializeCodingIndexes();
   logger.info('Database connected');
 }
 export async function databaseReady() {
@@ -50,6 +55,7 @@ export async function databaseReady() {
     !studentStorageReady() ||
     !learningStorageReady() ||
     !curriculumStorageReady() ||
+    !codingStorageReady() ||
     !attendanceStorageReady()
   )
     return false;

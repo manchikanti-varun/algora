@@ -1,4 +1,5 @@
 'use client';
+import { ProblemProgressBadge } from '@/features/coding/progress';
 import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -201,7 +202,13 @@ export function EditorialView({
     </section>
   );
 }
-export function DayContent({ day }: { day: StudentDay }) {
+export function DayContent({
+  day,
+  batchId,
+}: {
+  day: StudentDay;
+  batchId?: string;
+}) {
   const [section, setSection] = useState('Overview'),
     [editorial, setEditorial] = useState<string | null>(null);
   const sections = ['Overview', 'Topics', 'Resources', 'Problems'];
@@ -313,6 +320,13 @@ export function DayContent({ day }: { day: StudentDay }) {
                       </span>
                     </div>
                     <h3>{a.problem.title}</h3>
+                    {batchId && (
+                      <ProblemProgressBadge
+                        batchId={batchId}
+                        day={day.dayNumber}
+                        problemId={a.problemId}
+                      />
+                    )}
                     <SafeMarkdown text={a.problem.description} />
                     {a.instructorNote && <p>{a.instructorNote}</p>}
                     <div className="student-actions">

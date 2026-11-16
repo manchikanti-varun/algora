@@ -96,6 +96,7 @@ const batch = new Schema(
       default: 'DRAFT',
       required: true,
     },
+    startedAt: { type: String, default: null },
     startDate: { type: String, default: null },
     endDate: { type: String, default: null },
     capacity: { type: Number, default: null, min: 1, max: 10000 },

@@ -161,10 +161,11 @@ export type StudentList = z.infer<typeof studentListSchema>;
 export type IdentityFields = z.infer<typeof changesSchema>;
 export interface StudentProfileRecord extends Pick<
   z.infer<typeof registerSchema>,
-  'fullName' | 'rollNumber' | 'collegeId' | 'department' | 'yearOfStudy'
+  'fullName' | 'rollNumber' | 'collegeId' | 'department'
 > {
   id: string;
   userId: string;
+  yearOfStudy?: number;
   studentUsername: string;
   phoneNumber: string;
   leetCodeUsername: string;

@@ -1,4 +1,5 @@
 'use client';
+import { DayProgress } from '@/features/coding/progress';
 import Link from 'next/link';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -197,7 +198,8 @@ export function StudentLearningDay({
               {q.data.batch.name} · Curriculum revision{' '}
               {q.data.revision.revisionNumber}
             </p>
-            <DayContent day={q.data.day} />
+            <DayContent day={q.data.day} batchId={batchId} />
+            <DayProgress batchId={batchId} day={number} />
           </>
         )}
       </QueryState>

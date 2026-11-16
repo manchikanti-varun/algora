@@ -42,6 +42,16 @@ export function AdministrationShell({
           },
           { label: 'Batches', href: '/super-admin/batches', icon: Users },
           {
+            label: 'Coding Progress',
+            href: '/super-admin/progress',
+            icon: CheckCheck,
+          },
+          {
+            label: 'Progress Reports',
+            href: '/super-admin/progress-reports',
+            icon: ScrollText,
+          },
+          {
             label: 'Attendance',
             href: '/super-admin/attendance',
             icon: CheckCheck,
@@ -70,6 +80,16 @@ export function AdministrationShell({
           { label: 'Courses', href: '/admin/courses', icon: Building2 },
           { label: 'Problems', href: '/admin/problems', icon: ScrollText },
           { label: 'Batches', href: '/admin/batches', icon: Users },
+          {
+            label: 'Coding Progress',
+            href: '/admin/progress',
+            icon: CheckCheck,
+          },
+          {
+            label: 'Progress Reports',
+            href: '/admin/progress-reports',
+            icon: ScrollText,
+          },
           { label: 'Attendance', href: '/admin/attendance', icon: CheckCheck },
           { label: 'Students', href: '/admin/students', icon: Users },
         ];

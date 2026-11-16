@@ -828,6 +828,11 @@ export class CurriculumService {
           'ATTENDANCE_HISTORY_LOCKED',
           'Curriculum replacement is blocked once attendance exists',
         );
+      if (b.curriculumRevisionId !== r.id && (await tx.hasProgress(b.id)))
+        fail(
+          'CODING_HISTORY_LOCKED',
+          'Curriculum replacement is blocked once coding sync or progress exists',
+        );
       const impact = this.impact(b, r);
       if (
         b.revision !== d.expectedBatchRevision ||

@@ -441,6 +441,7 @@ export interface AssignmentHistory {
 export interface CurriculumUnit {
   learning: LearningUnit;
   hasAttendance(batchId: string): Promise<boolean>;
+  hasProgress(batchId: string): Promise<boolean>;
   revisions(
     course: string,
     q: Query,

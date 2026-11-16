@@ -18,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { StudentShell } from './shell';
 import {
+  yearLabel,
   meStudentSchema,
   contactFields,
   academicFields,
@@ -44,9 +45,9 @@ export function ProfileFacts({
         'Permanent student username': p.studentUsername,
         'Verified Google email': email ?? 'Not included in this view',
         Phone: p.phoneNumber,
-        College: college ?? p.collegeId,
+        College: college ?? p.collegeName ?? 'College unavailable',
         Department: p.department,
-        'Year of study': p.yearOfStudy,
+        'Year of study': yearLabel(p.yearOfStudy),
         LeetCode: p.leetCodeUsername,
         Codeforces: p.codeforcesUsername,
         CodeChef: p.codechefUsername,
@@ -134,7 +135,7 @@ function CorrectionEditor({ profile: p }: { profile: StudentProfile }) {
       rollNumber: p.rollNumber,
       collegeId: p.collegeId,
       department: p.department,
-      yearOfStudy: p.yearOfStudy,
+      yearOfStudy: p.yearOfStudy ?? undefined,
       reason: '',
     },
   });
@@ -166,8 +167,9 @@ function CorrectionEditor({ profile: p }: { profile: StudentProfile }) {
       <h2>Request an identity correction</h2>
       <p>
         Name, roll number, college, department and year require review. Your
-        username remains permanent. Approved corrections reset institutional
-        verification. College transfers require Super Admin review.
+        username remains permanent. Identity corrections reset institutional
+        verification; a year-only correction preserves it. College transfers
+        require Super Admin review.
       </p>
       <div className="student-grid">
         {(['fullName', 'rollNumber', 'department'] as const).map((key) => (
@@ -180,9 +182,10 @@ function CorrectionEditor({ profile: p }: { profile: StudentProfile }) {
             aria-label="Correct year of study"
             {...f.register('yearOfStudy', { valueAsNumber: true })}
           >
+            <option value="">Select Year of Study</option>
             {[1, 2, 3, 4].map((y) => (
               <option key={y} value={y}>
-                {y}
+                {yearLabel(y)}
               </option>
             ))}
           </select>

@@ -1,5 +1,10 @@
 'use client';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from '@tanstack/react-query';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import { apiGet, apiMutate, ApiError } from '@/lib/api/client';
@@ -7,11 +12,13 @@ export function useAdministration<T>(
   path: string,
   schema: z.ZodType<T>,
   enabled = true,
+  preservePrevious = false,
 ) {
   return useQuery({
     queryKey: ['administration', path],
     queryFn: ({ signal }) => apiGet(path, schema, signal),
     enabled,
+    placeholderData: preservePrevious ? keepPreviousData : undefined,
     retry: false,
     staleTime: 10000,
   });

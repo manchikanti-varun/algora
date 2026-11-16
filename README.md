@@ -18,8 +18,8 @@ No credentials, authentication tokens, private keys, personal email addresses or
 | Phase 4 | Student registration, verification, profiles, corrections and permanent QR | Implemented locally; 275 tests passed (200 backend, 75 frontend including separate real API health test); lint, types and production builds passed; both dependency audits reported zero vulnerabilities. Live integration remains blocked. |
 | Phase 5 | Course/Batch management, roll-only enrollment and reconciliation | Implemented locally; 368 tests passed (270 backend, 98 frontend including separate live API health); lint, types and production builds passed; both audits reported zero vulnerabilities. Live Google/Atlas verification remains blocked. |
 | Phase 6 | Immutable curricula, Learning Days, problem/editorial authoring and Student learning | Implemented locally; 488 tests passed (356 backend, 132 frontend including separate live API health); formatting, lint, types and production builds passed; both audits reported zero vulnerabilities. Live Atlas/Google and authenticated visual verification remain blocked. |
-| Phase 7 | QR attendance, durable rosters, finalization, corrections and exports | Implemented locally; 616 tests passed (445 backend, 171 frontend including separate live API health); both builds/format/lint/types passed and audits found zero vulnerabilities. Live Atlas/Google, authenticated visual and real-camera acceptance remain blocked. |
-| Phase 8 | Verified coding progress | Not started; awaiting Phase 7 review and a separate request. |
+| Phase 7 | QR attendance, durable rosters, finalization, corrections and exports | Implemented and pushed as commit 2894b05; 616 tests passed (445 backend, 171 frontend including separate live API health); both builds/format/lint/types passed and audits found zero vulnerabilities. Live Atlas/Google, authenticated visual and real-camera acceptance remain blocked. |
+| Phase 8 | Verified coding progress, complete reports and registration enhancements | Implemented and validated for the Phase 8 delivery commit: 842 distinct tests (620 backend, 222 frontend including local health). Source, tests, lockfiles and sanitized configuration are included. Live provider/database acceptance remains BLOCKED. See the delivery record below. |
 
 Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
@@ -32,6 +32,9 @@ Real Google consent/login, Atlas persistence/index creation, deployed cookie tra
 - [Phase 5 — Courses, batches and roll-based enrollment](#phase-5--courses-batches-and-roll-based-enrollment)
 - [Phase 6 — Learning Days and immutable curriculum](#phase-6--learning-days-and-immutable-curriculum)
 - [Phase 7 — QR-based attendance management](#phase-7--qr-based-attendance-management)
+- [Phase 8 — Verified coding progress tracking](#phase-8--verified-coding-progress-tracking)
+- [Phase 8 enhancements — Complete reports and registration](#phase-8-enhancements--complete-reports-and-registration)
+- [Phase 8 delivery — Validated publication](#phase-8-delivery--validated-publication)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
@@ -1455,6 +1458,8 @@ Phase 6 awaits user review. Phase 7 has not started. Before production delivery,
 
 ## Phase 7 — QR-based attendance management
 
+Historical Phase 7 handoff snapshot. Phase 8 section A records its subsequent validation, commit and verified GitHub push.
+
 Local implementation report. Live integration and physical-camera evidence are distinguished from automated checks.
 
 ### A. GitHub Push Verification
@@ -1679,6 +1684,466 @@ PASS refers to the stated implementation and local automated evidence. Blocked l
 Phase 7 is ready for user review with explicit live-integration gates. Before production attendance, validate real Atlas indexes/transactions and load, configure Google/staff authority and existing QR issuance, verify real HTTPS camera behavior on target phones/browsers, and complete authenticated responsive/export workflows. Phases 1–6 were pushed before this implementation; Phase 7 remains uncommitted/unpushed. Phase 8 has not started. No verified coding progress, submissions, code execution, payments, certificates, AI tutoring or chat was added.
 
 
+## Phase 8 — Verified coding progress tracking
+
+Historical base Phase 8 implementation record dated 2026-11-14. The enhancement section below extends this implementation and supersedes its page-only export limitation; Phases 1–7 above are historical snapshots. Phase 8 is local, uncommitted and unpushed. Phase 9 and deployment have not been started.
+
+### A. Phase 7 GitHub push verification
+
+- One repository, two independent applications; branch `main`; existing remote [Algora repository](https://github.com/manchikanti-varun/algora).
+- Previous Phase 6 commit: `9a11e572cb53a2c35720879d89769cb9e3dbb6fe`.
+- Phase 7 commit: [`2894b056f41d6fcb9e153b3e14a0644071a84540`](https://github.com/manchikanti-varun/algora/commit/2894b056f41d6fcb9e153b3e14a0644071a84540), `feat: implement phase 7 QR attendance management`.
+- Push succeeded; an independent `git ls-remote origin refs/heads/main` matched local HEAD. Working tree was clean before Phase 8 began.
+- Pre-push checks passed: backend 445 tests; frontend 170 ordinary tests plus one separately enabled real local API health test; 616 distinct tests total. Both apps passed formatting, lint, types, production builds and audits with zero vulnerabilities. Local production HTTP boundaries, readiness failure without storage, protected redirects and same-origin decoder delivery passed.
+- Reviewed six existing commits and the 60 intended staged Phase 7 files. Credential/private-file scans and staged diff checks found no findings. Generated assets, credentials and other Markdown were excluded. No history rewriting, remote changes, nested repositories or automatic deployment occurred.
+
+### B. Phase 8 summary
+
+Implemented account management, official Codeforces ownership and submission adapters, immutable submission evidence, membership-scoped progress, durable MongoDB jobs/checkpoints, shared provider reservations, current-eligibility reconciliation, Student dashboards and Learning Day badges, College-scoped staff matrices, problem analytics and private paginated CSV/XLSX reports. Other providers deliberately remain unavailable instead of producing unverified achievements.
+
+Local implementation is reviewable. Live acceptance remains **BLOCKED** by unconfigured MongoDB and Codeforces application configuration. No production credential, account login, Atlas connection or external ownership claim was used during implementation.
+
+### C. Platform feasibility matrix
+
+| Platform | Permitted integration established | Ownership | Evidence and canonical matching | Current acceptance |
+| --- | --- | --- | --- | --- |
+| Codeforces | Official public `user.info` and paginated `user.status` APIs | Official OIDC authorization-code integration implemented; requires an operator-configured application | Exact contest/index, individual current author handle, final known verdict, authoritative Unix timestamp; ambiguous/team/ghost/problemset records rejected | **SUPPORTED in code; BLOCKED live**. Public history and bounded backfill are **LIMITED**, never a promise of private history. |
+| LeetCode | No approved authoritative submissions integration configured | No sufficient permitted ownership proof configured | Undocumented/recent-only public mechanisms cannot establish complete, attributable history here; no scraping or cookie-based adapter enabled | **UNAVAILABLE**. Declared handles remain unverified; unavailable coverage is explicit. |
+| CodeChef | No current approved ownership-plus-submission integration established | No sufficient permitted ownership proof configured | No HTML scraping or unsupported inference from problem lists, ranks, ratings, screenshots or totals | **UNAVAILABLE**. Linking a handle does not create trusted progress. |
+
+Research used primary sources: [Codeforces API introduction/rate policy](https://codeforces.com/apiHelp), [methods](https://codeforces.com/apiHelp/methods), [submission/user object contracts](https://codeforces.com/apiHelp/objects), [official OIDC announcement](https://codeforces.com/blog/entry/145566) and [live OIDC metadata](https://codeforces.com/.well-known/openid-configuration). The integration pins the advertised issuer/endpoints, code flow, client-secret-post authentication and HS256 ID-token algorithm. No undocumented PKCE support is assumed. [LeetCode terms](https://leetcode.com/terms/) and [CodeChef terms](https://www.codechef.com/terms) restrict scraping; no bypass is attempted. Capability assessments are scoped to these sources and configured permissions, not a claim that either platform can never offer another permitted integration.
+
+### D. Account ownership verification
+
+- Profile username declarations from Phase 4 do not become verified coding accounts automatically. Link/replace requires a strict platform/handle contract, expected revision and confirmation.
+- Codeforces initiation is an authenticated CSRF-protected POST. The backend creates a high-entropy, five-minute state bound to the canonical Student, exact Algora session token hash and coding-account revision. State is hashed in storage and consumed once before exchanging a code. A rotated/different session, expired/replayed state, changed handle or changed revision fails closed.
+- The backend exchanges the code only at the fixed HTTPS token endpoint. It independently validates the HS256 signature with timing-safe comparison, exact issuer/audience/nonce, bounded issue time, expiry, subject and handle. A bounded official current-handle lookup captures a registration-time fingerprint; subsequent syncs recheck it without historic-handle alias resolution.
+- Only subject/handle, verification timestamps, fingerprint and a proof digest are retained. Access tokens, refresh tokens, raw ID tokens, codes and provider cookies are never persisted or returned to the browser. Transient OAuth state has a TTL index and explicit expiry checks.
+- Proof expires after 30 days. Replacement/reverification increments the binding revision; disconnect/reassignment suspends current attribution and retains immutable historical evidence. Duplicate active trusted subject or normalized handle bindings are rejected by partial unique indexes. There is no Admin “mark verified” shortcut or silent account transfer.
+- Ownership is a time-bounded attestation. Public submission APIs do not expose the OIDC subject on every submission; the current-handle/fingerprint check supplements the verified binding, not a claim of perpetual identity. Reverification and dispute recovery must remain explicit.
+
+### E. Backend architecture
+
+`src/coding/` contains strict contracts, ownership validation, provider adapters, a MongoDB repository, reconciliation/report services, authenticated routes and a readiness-gated worker. It composes the existing Curriculum/Learning/Student/Administration units using the same transaction session. Production has no in-memory queue or repository fallback. Test-only repositories live under `src/tests/`.
+
+Models: `StudentCodingAccount`, `CodingOAuthState`, `SubmissionEvidence`, `StudentProblemProgress`, `CodingSyncJob` and `CodingProviderControl`. Storage readiness includes successful coding index/control initialization. The existing startup/shutdown lifecycle starts/stops the optional worker; leased work survives an interrupted process.
+
+New Batch activations persist an actual UTC `startedAt`. Date-only planned dates are not silently converted into invented start instants. Existing active Batches without an actual timestamp remain unavailable for attribution; no unverified backfill migration or timestamp-correction bypass was added.
+
+### F. Provider adapters
+
+All outbound destinations are fixed official HTTPS endpoints. Handles/cursors are validated; redirects are rejected; timeouts and streamed response-size limits apply. Adapters retain bounded normalized provenance, never submitted source code or raw provider bodies. Unknown/malformed/pending/ambiguous evidence results in partial coverage or a sanitized failure, not acceptance. Unavailable providers have explicit adapters that fail closed.
+
+### G. Codeforces integration
+
+Requests use public `user.info` with current-handle matching and `user.status` pages of at most 100 submissions. Source-code inclusion and privileged API authentication are not requested. Problem matching uses the exact assigned frozen platform/problem identity, not titles, URLs supplied by Students, ratings or total-solved counts. Only final `OK` records qualify as accepted; known unsuccessful final verdicts establish attempts. Missing timestamps, unsupported problemset identities, pretests, pending/unknown verdicts, teams, ghosts and wrong authors are excluded and flagged as partial. No unsupported private/Gym identity is guessed.
+
+The official limit is one API request per two seconds. The shared MongoDB provider lease uses database server time and reserves at least three seconds between requests, including identity checks. Each identity/submission pair waits between requests. HTTP 429 produces a bounded shared Retry-After cooldown; other provider failures open a temporary shared cooldown. This guarantee requires all application workers to share the same control collection and operationally exclusive API budget; unrelated applications using the same egress are outside this process's coordination.
+
+### H. LeetCode integration
+
+Account declarations and capability messaging are implemented, but trusted ownership/submission ingestion is unavailable. No unofficial GraphQL success, recent acceptance list, screenshot or self-reported submission ID is promoted to a solve. The denominator still includes assigned LeetCode problems, with unavailable verification shown separately. Enabling future support requires a permitted authoritative source and defensible ownership proof, followed by live contract/coverage tests.
+
+### I. CodeChef integration
+
+The adapter explicitly returns unavailable until a permitted current integration establishes both ownership and submission provenance. No crawling, anti-bot bypass, passwords, session cookies or solved-total inference is used. Historical developer-site/API references alone are not treated as proof of current permitted access.
+
+### J. Submission evidence
+
+Evidence stores provider submission ID, exact canonical problem, platform, verified account/revision, Student profile, Batch, curriculum revision, enrollment, stable assignment identity, author handle, final verdict, language, submitted/fetched UTC timestamps, source URL/type, confidence, normalized-response digest and adapter version. It contains no source code or provider/session credentials.
+
+Evidence IDs/deduplication are deterministic across refetches and scoped to the binding revision, membership era and assignment. The same submission may independently support the same canonical problem in separate eligible Batches or Learning Days. Application-level immutable schema guards reject update/delete/replacement capabilities; the repository exposes guarded append/upsert only. Database operators retain their normal direct database powers.
+
+Large expansions retain the earliest qualifying attempt/acceptance necessary for each problem rather than archiving every equivalent submission. At most 100 evidence/progress attributions are reconciled per transaction; unchanged progress is skipped on a resumed wide page. The durable job retains its provider offset until that page's reconciliation can advance. This is a bounded evidence store, not a complete provider submission archive.
+
+### K. Progress reconciliation
+
+Stable assignment identity derives from curriculum revision, frozen Learning Day ID and canonical problem ID. Progress uniqueness additionally includes Student profile, Batch and enrollment ID. The threshold is `max(actual Batch startedAt, current enrollment activatedAt)`, using provider submission time rather than fetch time. Missing authoritative activation timestamps block attribution. Solving on a different Learning Day is allowed; pre-Batch/pre-enrollment solves do not count.
+
+Progress states: `NOT_STARTED`, `ATTEMPTED_VERIFIED`, `SOLVED_VERIFIED`, `VERIFICATION_UNAVAILABLE`. Sync health is separate: never checked, queued/running, success/partial, rate limited, failed or provider unavailable. NOT_STARTED requires adequate complete checked public history; partial/pending history remains unavailable. This does not claim knowledge of private or hidden submissions.
+
+Failures, later unsuccessful attempts, empty responses and removed/hidden public submissions do not erase recorded accepted evidence. Accepted status is an as-captured verified achievement; no automatic destructive rejudge policy was invented. Ownership revocation/expiry/replacement suspends current attribution while retaining historic evidence. A fresh verified binding must resync before current attribution returns. Re-enrollment uses its own activation/enrollment identity, never the previous membership's progress.
+
+Current Student reads require fresh effective enrollment; completed-Batch history is limited to the same verified Student/current College and an actual historical activated enrollment. This does not reopen learning content or permit refreshes on completed Batches. Changed College/profile/role/status or withdrawn active-Batch enrollment blocks current access. Staff reads use current College grants. Published revision replacement is blocked once coding sync/progress or attendance exists; no silent migration detaches evidence from its assignment.
+
+### L. Synchronization jobs
+
+MongoDB owns queue state, cursors, due times, active-job deduplication, leases/fencing tokens, retries, coverage and provider reservations. States: QUEUED, RUNNING, SUCCEEDED, PARTIAL, RETRY_WAIT, FAILED, CANCELLED. Atomic claims recover expired leases; stale workers cannot commit another token's work. Evidence, progress, completion/checkpoint and critical audit writes share snapshot/majority transactions. Network calls occur outside transactions, followed by canonical ownership/enrollment/College/actor/grant/revision revalidation and conflict-producing locks before attribution.
+
+Bounds: 1,000 active queued jobs; one active account/Batch job; per-account/Batch manual cooldown; 60-second job lease; 30-second provider lease; 100 submissions per API page; 100 reconciled attributions per transaction; five bounded page/work passes per job; at most 12 claims and five transient-provider retries; capped exponential backoff with jitter. Provider cursors continue through subsequent partial jobs; incomplete scans never become conclusive negative progress. A terminal scan resets to the head for future fresh checks. Offset pagination is public-provider coverage, not an immutable snapshot; wide/backfilled scans conservatively remain partial where completeness is uncertain.
+
+Automatic scheduling is opt-in, bounded to ten due accounts per scheduler pass and twenty enrollment candidates per account; it uses the same queue, eligibility, permissions, deduplication and rate budget as manual requests. Manual staff batch refresh handles one roster page and reports queued/skipped outcomes. Larger membership discovery remains explicitly bounded and requires later scheduling/operational review; no unbounded fan-out occurs. Sync health exposes failure/partial information without raw responses. Worker shutdown stops new claims; interrupted leases recover after restart.
+
+### M. Student UI
+
+Added `/student/coding-accounts`, `/student/progress` and `/student/batches/[batchId]/progress`, all protected on the server and using the existing role shell, theme and accessible controls. Platform cards distinguish linking, ownership, proof expiry and sync health; unsupported platforms and disabled background synchronization have explicit notices. Replacement/disconnect explain suspended attribution.
+
+Batch dashboards include Course/Batch selection, assigned/solved/attempted/unavailable/coverage counts, whole-curriculum completion denominator, platform/Day summaries, filters, pagination, queued refresh, sync history and evidence provenance. Existing Learning Day problem cards display verified badges through a shared bounded Day query; instructor previews do not fetch Student data. Opening an external problem is not a solve. No checkboxes, optimistic solve toggles or fabricated charts were added.
+
+### N. Admin UI
+
+Admin and Super Admin navigation includes Coding Progress and Progress Reports. College/Course selection lists only authorized Batches. Batch matrices paginate the roster and assignments separately, expose current unavailable coverage, and show Student-specific evidence/jobs with permission-checked refresh. Filters cover Student, problem, platform, Learning Day, progress state, ownership and UTC submission date. Filtered exports use the selected roster page and matching assignment counts; primary dashboard completion continues to use the whole released curriculum denominator.
+
+Problem-wise analytics aggregates currently eligible Batch members with a 2,000-member cap and paginated problems; platform and Learning Day filters are explicit. CSV/XLSX downloads are private, bounded, formula-safe and audited. No cross-College automatic grants or fabricated rankings were introduced. Real authenticated desktop/mobile/device/Atlas performance acceptance remains unverified.
+
+### O. API contracts
+
+Paths below are relative to `/api/v1`. All coding/progress responses are private/no-store; all mutations require the existing exact Origin and session-bound CSRF token. JSON inputs/queries are strict Zod contracts with bounded IDs, handles, filters and pagination.
+
+| Method | Endpoint | Contract / authority |
+| --- | --- | --- |
+| GET | `/coding/accounts` | Current verified Student; own sanitized accounts/capabilities/worker status |
+| POST | `/coding/accounts` | Own platform/handle, expected revision or null, explicit confirmation |
+| POST | `/coding/accounts/:accountId/disconnect` | Own account, expected revision, confirmation |
+| POST | `/coding/accounts/:accountId/verify` | Own active Codeforces account/revision; returns fixed authorization URL |
+| GET | `/coding/accounts/codeforces/callback` | Existing same Algora session; one-use state/code; fixed destination redirect |
+| GET | `/students/me/progress/batches` | Paginated own current/eligible completed Batch history |
+| GET | `/students/me/batches/:batchId/progress` | Own current or policy-allowed completed progress; bounded filters |
+| GET | `/students/me/batches/:batchId/progress/days/:day` | Fresh effective enrollment; up to 100 released Day assignments for shared badges |
+| GET | `/coding/batches` | Current staff College visibility and progress.view; College/Course filters |
+| GET | `/batches/:batchId/progress` | College-scoped progress.view; roster/assignment pages and filters |
+| GET | `/batches/:batchId/progress/analytics` | Same scoped read authority; bounded eligible-roster problem analytics |
+| GET | `/batches/:batchId/progress/assignments/:assignmentId/evidence` | Student self-only or scoped staff read; exact released assignment and enrollment |
+| POST | `/batches/:batchId/progress/refresh` | Student self or scoped progress.view + progress.manage staff target; verified owned account |
+| POST | `/batches/:batchId/progress/refresh-batch` | Scoped progress.view + progress.manage; one bounded roster page; queued/skipped outcomes |
+| POST | `/batches/:batchId/progress/export` | Scoped progress.view; format, bounded filters and confirmation; audited base64 file response |
+
+New backend/frontend permissions are `progress.view` and `progress.manage`, alongside `college.view`. Existing grants are not expanded. A current active verified Super Admin uses platform authority; ordinary staff must hold the actual College grants. Suspended/revoked actors are rechecked before worker attribution. Students cannot choose another profile, upload evidence, set progress or mark ownership verified.
+
+### P. Security
+
+Session authentication, canonical user/role/account checks, self-only Student projections, College scope, fresh effective enrollment, CSRF, exact Origin, input bounds, no-store, sanitized errors and request limits apply throughout. Provider destinations and callback destinations are fixed; no user-controlled URLs or redirects enter fetches. Browser links are schema-validated HTTPS provider links and new tabs isolate their opener. CSV formula prefixes are neutralized; XLSX cells are literal values. Blob URLs are revoked after download.
+
+No passwords, provider cookies, source code, OAuth/session tokens, real environment values or personal email addresses were published. Logs contain sanitized operational events, not provider bodies, state/codes or evidence payloads. HTTP request limiting retains the existing application policy; multi-instance HTTP abuse protection still needs a shared/edge limiter. The new provider API limiter itself is MongoDB-shared.
+
+### Q. Database indexes and transactions
+
+- Account unique Student/platform; partial unique active trusted platform/subject and platform/normalized-handle; due-account scheduling index.
+- OAuth state unique hash and TTL expiry.
+- Job partial unique active account/Batch, due/lease claim index and Batch/history index.
+- Progress unique Student/Batch/curriculum/enrollment/assignment, plus Batch/problem/status reporting index.
+- Evidence unique binding revision/provider submission/digest/Batch/enrollment/assignment, plus scoped chronological retrieval.
+- Fixed shared provider/queue control IDs; queue admission serialized through the queue control document.
+- Index initialization is part of storage readiness. Replica-set transactions use snapshot reads and majority writes; provider reservation time is computed with MongoDB server `$$NOW`/date arithmetic. MongoDB 5+ is required for this control update.
+
+Actual index creation, unique-conflict behavior, replica-set transactions, server-time reservation pipelines and recovery against a real database remain **BLOCKED / NOT EXECUTED**. Mocked repository/query tests establish intended contracts only.
+
+### R. Audit logging
+
+Extended the existing transactional audit registry with CODING_ACCOUNT_LINKED, CODING_ACCOUNT_VERIFIED, CODING_ACCOUNT_REVOKED, CODING_SYNC_QUEUED, CODING_SYNC_FINISHED, CODING_PROGRESS_RECONCILED and CODING_REPORT_EXPORTED. Events use canonical actor/target/College IDs and bounded state/count metadata. Critical account mutations, terminal sync/reconciliation and export authorization are audited without raw proof, handles/provider bodies, secrets or excessive polling logs.
+
+### S. Actual validation results
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| `npm run format` | PASS; final affected files also formatted | PASS |
+| `npm run lint` | PASS | PASS |
+| `npm run typecheck` | PASS | PASS |
+| `npm test` | Full run: **570 passed / 28 files**. Final focused coding run after fixes: **126 passed / 5 files**, including one additional interrupted-stream test. **571 distinct backend tests** passed across these runs. | **190 passed / 17 files**; one opt-in connectivity test skipped in the ordinary run, then **1 passed** separately against the real local API. **191 distinct frontend tests** passed. |
+| `npm run build` | PASS, final TypeScript production output | PASS, final Next.js production build including all nine new protected pages |
+| `npm audit` | PASS, **0 vulnerabilities** | PASS, **0 vulnerabilities** |
+
+**762 distinct automated tests passed** across final full/focused/live-health runs; repeated tests are not double-counted. Phase 8 adds 126 backend tests and 20 frontend tests to the Phase 7 baseline. Test repositories/providers are controlled fixtures; this total does not establish live external-provider or MongoDB integration.
+
+Final production HTTP smoke: liveness 200, readiness 503 without storage, protected coding/progress APIs 401 with no-store, all nine new protected pages redirect to login, same-origin API rewrites work, and the existing local WASM decoder is delivered correctly. The separately enabled health client passed. Temporary local listeners were closed. No database connection or authenticated provider flow was performed.
+
+Final privacy/publication review: 296 eligible text files scanned; no credential, private environment, generated artifact, personal machine-path or private-address findings after removing public contact metadata from the lockfile. Two existing URL-userinfo attack fixtures were reviewed as URLs rather than personal addresses. Dependency graph/integrity values remain unchanged. README is the only tracked Markdown; the standalone report and test artifacts remain ignored. No Phase 8 files are staged. GitHub main and local HEAD still match the Phase 7 commit.
+
+
+### T. Environment variable names
+
+New backend variables: `CODEFORCES_CLIENT_ID`, `CODEFORCES_CLIENT_SECRET`, `CODEFORCES_REDIRECT_URI`, `CODING_SYNC_ENABLED`, `CODING_SYNC_INTERVAL_SECONDS`. Existing required names remain `MONGODB_URI`, `FRONTEND_URL`, `CORS_ORIGINS`, `SESSION_TTL`, `NODE_ENV`, `PORT`, `TRUST_PROXY_HOPS`, `LOG_LEVEL`; Google and QR names remain as documented in earlier phases. Frontend continues to use `BACKEND_API_BASE_URL` and `NEXT_PUBLIC_API_BASE_URL`. No new public credential or LeetCode/CodeChef cookie/password variable exists.
+
+Codeforces client settings must be configured together on the backend. Its redirect must exactly equal the frontend origin plus `/backend/coding/accounts/codeforces/callback`. Synchronization is disabled by default and must be explicitly enabled after the database and provider configuration are validated. The sanitized backend environment template documents names only for optional credentials. No production credentials are requested here.
+
+### U. Files and modules
+
+New backend: `src/coding/{contracts,ownership,providers,repository,router,service,worker}.ts`, `src/models/coding.ts`, and `src/tests/coding-{fixtures,http.test,jobs.test,providers.test,repository.test}.ts` plus `coding.test.ts`.
+
+Changed backend: application/startup/database readiness, environment contract/template, permission/audit registries, Batch start timestamp and Learning authority, curriculum replacement safeguards and test fixtures.
+
+New frontend: `src/features/coding/{contracts.ts,accounts.tsx,progress.tsx}`, nine protected Student/Admin/Super Admin route pages, and `src/tests/coding-ui.test.tsx`. Changed navigation shells, cumulative permission contracts, Learning Day cards/content, shared API timeout policy and responsive/theme styles. No new package dependency or generated asset is tracked. A public maintainer contact was removed from dependency deprecation metadata in the backend lockfile; versions, resolved URLs, dependency graph and integrity hashes are unchanged. Existing Git history was not rewritten.
+
+### V. Known issues and blockers
+
+- **Locally tested:** strict contracts, signed proof validation, session/state/revision replay protection, attribution windows, canonical matching, immutable evidence, progress preservation, fake-repository job races/recovery, Mongo query/index contracts, scoped HTTP auth/CSRF/no-store, page bounds, reports and React interactions. Fixtures are explicitly test-only.
+- **Live provider tested:** primary documentation/metadata researched. Real OAuth code exchange, actual handle ownership and live submission ingestion were not run; no claim of provider success is based on mocks.
+- **MongoDB integration tested:** none. Atlas and a local replica set were not configured or contacted. Database persistence/index/transaction/lease claims are implementation and mock-test results, not live integration acceptance.
+- **Not tested:** authenticated browser/device workflows, real consent/callback transport, multi-process crash injection against MongoDB, provider/network timing in production, actual 120-member database performance and deployed cookies. An automated 120-Student/100-assignment fixture checks bounded response/aggregation behavior only.
+- **Blocked:** live Codeforces application and database acceptance; missing historical actual Batch activation timestamps; permitted ownership/submission access for LeetCode and CodeChef. Unconfigured/ineligible cases remain unavailable rather than generating achievements.
+- **Deliberate limits:** page-based reports instead of an unbounded College dump; 2,000-member analytics cap; 10,000 released assignments; bounded public backfill and scheduler discovery. Retained as-captured acceptance is not a destructive live rejudge verdict service. All application instances must share one database/provider budget. Production HTTP limiting still needs existing shared/edge deployment controls.
+
+### W. Acceptance criteria
+
+Statuses distinguish implemented/tested local behavior from external acceptance; PASS below never substitutes for real MongoDB/provider verification.
+
+| # | Criterion | Status |
+| --- | --- | --- |
+| 1 | Phase 7 committed/pushed | PASS |
+| 2 | Independent remote commit verification | PASS |
+| 3 | Existing architecture preserved | PASS |
+| 4 | Three platform capability assessments | PASS |
+| 5 | Coding account management | PASS locally |
+| 6 | Ownership enforcement | PASS locally; Codeforces live BLOCKED |
+| 7 | Unverified accounts cannot create achievements | PASS |
+| 8 | Official Codeforces API adapter | SUPPORTED in code; live BLOCKED |
+| 9 | Honest LeetCode limited-evidence handling | UNAVAILABLE, explicitly represented |
+| 10 | Honest CodeChef limitation handling | UNAVAILABLE, explicitly represented |
+| 11 | Canonical problem matching | PASS locally |
+| 12 | Batch-specific timestamp eligibility | PASS for authoritative timestamps; legacy missing timestamps BLOCKED |
+| 13 | SubmissionEvidence model | PASS in code; live persistence BLOCKED |
+| 14 | StudentProblemProgress model | PASS in code; live persistence BLOCKED |
+| 15 | Durable synchronization jobs | PASS in code/contracts; live database acceptance BLOCKED |
+| 16 | Worker concurrency control | PASS in tests; real multi-process database run BLOCKED |
+| 17 | Provider rate budget | PASS in contracts/tests; live timing BLOCKED |
+| 18 | Retries/checkpoints | PASS locally; bounded public coverage LIMITED |
+| 19 | No self-reported verified solves | PASS |
+| 20 | Failure preserves verified evidence | PASS locally |
+| 21 | Student dashboard | PASS in component/HTTP tests; authenticated live acceptance BLOCKED |
+| 22 | Learning Day progress | PASS in code; authenticated live acceptance BLOCKED |
+| 23 | Admin Batch progress | PASS locally; real database/device acceptance BLOCKED |
+| 24 | Problem-wise analytics | PASS locally within bounds; production performance BLOCKED |
+| 25 | Reports | PASS locally; paginated scope LIMITED |
+| 26 | CSV/XLSX exports | PASS locally |
+| 27 | College-scoped authorization | PASS locally |
+| 28 | Audit logging | PASS locally; database durability BLOCKED |
+| 29 | Automated tests | PASS — 762 distinct tests across final runs |
+| 30 | Formatting/lint/types/build/audit | PASS — both apps; audits 0 vulnerabilities |
+| 31 | No production fake data | PASS |
+| 32 | Phase 9 not implemented | PASS |
+| 33 | Phase 8 uncommitted/unpushed | PASS — HEAD/remote unchanged; no staged Phase 8 files |
+
+### X. Phase 9 readiness
+
+The evidence, assignment/membership identities, status/coverage separation, scoped queries and private report contracts provide a foundation for later analytics. Before production or claiming full external acceptance, configure and validate the authorized MongoDB replica set/indexes and Codeforces client, exercise real ownership/submission/cookie flows, confirm the shared provider budget, review legacy missing timestamps and load-test authenticated reports. LeetCode/CodeChef coverage remains unavailable unless a permitted authoritative integration is established.
+
+Phase 9 has not been started. Phase 8 remains local for review; no commit, push or deployment is performed for this phase.
+
+## Phase 8 enhancements — Complete reports and registration
+
+Historical enhancement handoff dated 2026-11-14. The delivery record below supersedes its local-only Git status. This extends the original Phase 8 implementation above; it does not restart Phase 8 or implement Phase 9. The original page-only export limitation and registration year defaults are superseded by this section. All work remains local, uncommitted and unpushed.
+
+### A. Existing repository state
+
+Inspected the single repository on `main`, with frontend/backend applications and existing uncommitted Phase 8 changes. HEAD remains Phase 7 commit `2894b056f41d6fcb9e153b3e14a0644071a84540`. The existing remote is [Algora on GitHub](https://github.com/manchikanti-varun/algora). Saved a local ignored pre-enhancement status snapshot. No reset, checkout, history rewrite, staging, commit, push or deployment was performed. Existing Phase 8 files and relationships were retained.
+
+### B. Scope and preserved behavior
+
+Added complete bounded report downloads and registration/profile improvements only. Existing provider adapters, Codeforces ownership, attribution windows, immutable evidence, durable synchronization, College grants, Student IDs, usernames, roll numbers, enrollment IDs, attendance and permanent QR behavior remain in place. No provider access, unofficial scraping, new College creation workflow or Phase 9 feature was added.
+
+### C. Report architecture
+
+The existing coding export endpoint and `CodingService.exported` remain the entry point. Exports now traverse every matching roster page in bounded 50-member chunks and reuse the existing progress projection for released canonical assignments. Display page/page-size/assignment-page do not restrict export coverage. The existing permission, evidence and ownership logic is reused; reporting does not invent accepted submissions or change progress states.
+
+`coding/reports.ts` defines strict report contracts, counting, CSV serialization and ExcelJS workbook formatting. No parallel report database, public file service or unbounded export queue was created. Limits are 2,000 scanned roster members, 20,000 matching Student/assignment rows and 10 MiB per prepared file. Exact Student or full-roll filters permit a narrowly scoped lookup. Oversized datasets return `EXPORT_TOO_LARGE` with refinement guidance; no first-page fallback or silent truncation occurs. Output remains in bounded process memory; no sensitive temporary file or public URL is created.
+
+### D. Download types
+
+| Selector | API value | Excel output | CSV output |
+| --- | --- | --- | --- |
+| Day-wise | DAY | Student/Day counts for the selected Learning Day | Flat Student/Day rows; a Day is required |
+| Problem-wise | PROBLEM | One aggregate row per canonical assignment; optional Detailed Progress sheet | Aggregates, or a flat Student/problem breakdown when explicitly selected |
+| Student-wise | STUDENT | Student totals plus Detailed Progress with one row per Student/assignment | Flat Student/assignment rows |
+| Batch-wise | BATCH | Summary, Day-wise Progress, Platform Progress and Problem-wise Progress | Flat OVERALL/DAY/PLATFORM/PROBLEM records with numeric counts and percentages |
+| Complete Batch | COMPLETE | Exactly the five sheets listed below | One documented flat Detailed Progress schema covering every matching assignment row |
+
+College, Course and Batch metadata are resolved from canonical relationships/assigned Batch context, never Student-supplied College names. Filenames use a bounded sanitized Batch component, report type/Day and the actual extension. Old clients may omit reportType and receive the compatible Student report, now across all matching pages.
+
+### E. Excel workbook
+
+Complete Batch contains exactly:
+
+1. **Summary:** canonical College/Course/Batch, UTC export time, matching eligible Students, distinct assignments, Student × assignment opportunities, solved/attempted/checked-no-solve/unavailable totals, completion/coverage and Day/platform summary counts.
+2. **Student Progress:** one row per matching Student; roll, name, canonical College/Course/Batch, numeric Year or missing placeholder, assigned problems, all progress counts, completion/coverage and latest relevant successful sync.
+3. **Day-wise Progress:** one row per Student/Day; academic/context fields, assigned problems, progress counts, completion/coverage and latest relevant successful sync.
+4. **Problem-wise Progress:** one row per stable assigned-problem identity, including Day, title, platform, difficulty, canonical identifier, eligible Student count, all verified/unavailable counts, completion and coverage. Identical canonical problems on different Days remain distinct assignments.
+5. **Detailed Progress:** one row per Student/assignment; roll, name, Year, Day, title, platform, difficulty, canonical/assignment identity, progress and external account verification state, accepted timestamp, evidence reference and last/last-successful sync.
+
+Worksheets have descriptive names, navy/white bold headers, column widths, frozen header rows and auto filters. Summary totals are bold. Counts/Years are numeric; percentages are numeric fractions formatted as percentages. UTC dates are actual Excel date values with consistent UTC-labelled formatting. Missing Years use Not provided; absent timestamps/evidence and zero-denominator percentages use N/A. User/provider text is literal and formula prefixes are neutralized.
+
+### F. CSV implementation
+
+CSV is UTF-8 with BOM, quoted fields, escaped quotes and CRLF records. Dates are ISO UTC. Percent columns use numeric percentage values; N/A replaces missing/zero-denominator values. Formula prefixes, including whitespace followed by spreadsheet operators, are escaped. XLSX values are literal cells, never user-controlled formula objects.
+
+Complete Batch and Student CSV columns are: College, Course, Batch, Roll number, Student, Year of Study, Learning Day, Problem, Platform, Difficulty, Canonical problem identifier, Assignment identity, Progress status, External account verification status, Accepted submission timestamp, Evidence reference, Last synchronization, Last successful synchronization. CSV has no worksheets. Batch CSV uses explicit record types for overall/Day/platform/problem aggregates instead of pretending to be a workbook.
+
+### G. Cross-page verification
+
+The automated Complete Batch fixture uses **120 eligible Students × 100 assignments = 12,000 detailed rows** while requesting display page 4, display page size 1 and assignment page 8. The decoded workbook is checked for all 120 distinct roll numbers, 12,001 rows including the Detailed Progress header, 121 Student Progress rows, all five sheets, correct eligible/opportunity counts and formatting. This verifies roster and assignment coverage across display pagination; it is an isolated test fixture, not a live database load test.
+
+### H. Counting rules
+
+- Verified solved counts only SOLVED_VERIFIED.
+- Verified attempted counts only ATTEMPTED_VERIFIED and excludes already solved rows.
+- **No verified solve (checked)** counts NOT_STARTED plus ATTEMPTED_VERIFIED. Attempted is a subset of this checked count.
+- VERIFICATION_UNAVAILABLE is separate, never converted to NOT_STARTED. The report never states that a Student did not solve a problem.
+- Completion = verified solved / matching assigned opportunities. Student/Student-Day denominators are that Student's matching assigned problems; population totals use matching Student × assignment opportunities. Distinct assigned-problem count is shown separately and is not substituted for the opportunity denominator.
+- Coverage = matching rows with a usable verification result / matching opportunities. Unavailable rows remain in the completion denominator. Zero denominators are N/A.
+- Filters define the reported population. Accepted dates are shown only for current verified solves; date filtering reuses existing accepted/first-verified-attempt semantics, without inferred timestamps for unavailable activity. Repeated problems on different canonical assignments count independently.
+
+### I. Report UI
+
+Admin and Super Admin Batch progress screens now include a visible report-type selector, Download Excel and Download CSV, optional problem breakdown and report Student-name/roll filters. Existing College/Course/Batch selection and Day/platform/Student/problem/progress/ownership/UTC date filters are retained. The export request intentionally omits display pagination.
+
+Generation disables duplicate actions and shows Generating complete report. Download ready appears only after the backend file has been prepared, decoded and offered to the browser. Empty results, denied authority, oversized exports and other failures have explicit messages and retry. Blob URLs are revoked. Existing responsive/theme styles, native accessible selectors and keyboard controls are reused. No optimistic fake export success toast is used.
+
+### J. Registration improvements
+
+Reused the existing searchable College selector and existing canonical numeric yearOfStudy field. Registration no longer silently defaults to first year. Students explicitly choose 1st Year, 2nd Year, 3rd Year or 4th Year; missing, fractional, out-of-range and string years fail validation. Backend validation remains required independently of the form.
+
+College loading/search preserves entered form values and the selected canonical College. Names and existing codes are displayed, with loading, no ACTIVE matches, error/retry and validation states. No institution is hardcoded and no manual MongoDB ID entry is required.
+
+### K. College directory
+
+Reused authenticated `GET /students/registration-options`, already appropriate for Student registration and reviewed corrections. It returns bounded ACTIVE College results with only ID/name/code per College, plus existing form options. Search and pagination remain server-side; directory ordering uses case-insensitive alphabetical collation and an ID tie-breaker. No duplicate endpoint or College identifier was introduced.
+
+Registration revalidates the selected existing College and active status transactionally before creating a profile. Invalid/nonexistent/inactive/archived references fail. Selection does not create a College or persist a College-name substitute. College transfers remain subject to the existing reviewed Super Admin process.
+
+### L. StudentProfile compatibility
+
+Kept exactly one field, yearOfStudy. New registration still requires an integer 1–4. Storage/read contracts permit absence for legacy profiles, with no default or automatic migration; frontend read schemas allow missing/null and show Not provided. Values remain numeric when supplied, and invalid new values are rejected. No destructive or production migration was run.
+
+Year remains a reviewed academic field under the existing profile policy. Students request corrections through the existing endpoint; scoped student.verify reviewers approve them. A truly year-only correction preserves institutional verification and skips enrollment reconciliation markers. Unchanged identity fields in a request are ignored when determining whether a critical identity change occurred. Actual name/roll/College/department changes retain the original verification-reset/transfer safeguards.
+
+### M. Profile and Admin integration
+
+Student profile facts, Admin/Super Admin detail dialogs and authorized Student lists display the canonical College name and friendly Year label or missing-data placeholder. Reports include Year where relevant. Missing College display data uses an unavailable placeholder rather than treating a raw identifier as a College name.
+
+An audited year-only update is tested to preserve Student/profile ID, roll, permanent username, QR credential/version, active enrollment, attendance rows, coding account/revision, immutable evidence and verified progress. It does not grant College access or change coding attribution. Unauthorized College mutation and direct academic-field mass assignment remain blocked.
+
+### N. API contracts
+
+No new endpoint was needed.
+
+| Method / route | Enhancement |
+| --- | --- |
+| POST `/batches/:batchId/progress/export` | Strict reportType DAY/PROBLEM/STUDENT/BATCH/COMPLETE, format CSV/XLSX, optional includeDetails, confirmed and bounded filters. Adds College/Course/roll/name filters; existing Day/platform/Student/problem/status/ownership/date filters are reused. Display pagination is accepted for compatibility but ignored for complete coverage. |
+| GET `/students/registration-options` | Existing authenticated ACTIVE directory reused; alphabetical stable sorting and the existing bounded pagination/search. |
+| POST `/students/register` | Existing canonical College and required numeric Year validation retained; explicit year selection in the form. |
+| GET `/students/me`, staff Student list/detail | Legacy missing-year projections are readable; canonical College/Year display. |
+| Existing correction request/review routes | Reviewed year-only updates preserve verification and relationships; actual critical identity changes retain prior policy. |
+
+The export response contains sanitized filename, MIME, base64 data, matching row/student counts and report type. Legacy page metadata indicates one complete prepared file rather than a display-page extract. There is no public file URL.
+
+### O. Security
+
+Existing authentication, current verified staff authority, College scope, college.view/progress.view, exact Origin, CSRF, strict input validation, private/no-store responses and audit logging are retained. Report readers do not need progress.manage and no grants are expanded. Before releasing a prepared report, authority/curriculum are rechecked and actor/College/Batch conflict-producing locks protect the audit/authorization commit. Heavy exports have an additional five-per-minute authenticated-actor limit.
+
+No QR credentials, OAuth/session/provider tokens, source code or credential hashes enter report rows. Stable evidence/assignment references are non-secret application identifiers required for provenance. No public export directory or sensitive temporary file exists. Output row/byte limits are explicit and fail closed; formula-safe literal cells and sanitized filenames cover spreadsheet/file injection.
+
+### P. Actual tests
+
+- Backend full regression: **620 passed / 30 files**, no failures or skipped tests.
+- Frontend full regression: **221 passed / 19 files**, with the single opt-in health test skipped in that ordinary run. The separately enabled real local API health test then **passed**.
+- **842 distinct tests passed**: 620 backend + 222 frontend, compared with the previous 762-test baseline. This adds **80 tests** (49 backend, 31 frontend); repeated focused runs are not double-counted.
+- The 120-Student × 100-assignment fixture decoded all 12,000 detailed rows, all 120 distinct roll numbers and exactly five correctly formatted workbook sheets. Backend report tests also cover all five report types, zero denominators, explicit limits, filters, formulas, audit and permission failure. Registration/preservation tests cover ACTIVE directory behavior, valid/invalid/missing Years, legacy reads, existing College reference persistence, scoped review and unchanged QR/enrollment/attendance/coding records.
+- Private HTTP tests verify authenticated CSRF exports, no-store, safe payloads, invalid contracts, College denial and the authenticated heavy-export limit. Frontend tests cover selectors, both formats, pagination-free filter preservation, pending generation, empty/limit/denial/failure/retry, searchable College options, missing-year states and explicit Year selection.
+- After final label adjustments, the affected report-layout tests passed again. The existing staff download interaction test was strengthened to assert pagination exclusion and CSRF instead of the superseded page-only behavior. No tests were deleted or security assertions relaxed.
+- Test repositories, signed identities and provider responses remain isolated fixtures. No real MongoDB, Google consent or external-provider success is claimed.
+
+
+### Q. Build validation
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| npm run format | PASS; final affected file also formatted | PASS |
+| npm run lint | PASS | PASS |
+| npm run typecheck | PASS | PASS |
+| npm test | PASS, 620 tests | PASS, 221 ordinary + 1 separate live local health test |
+| npm run build | PASS, final TypeScript output | PASS, Next.js production build |
+| npm audit | PASS, zero vulnerabilities | PASS, zero vulnerabilities |
+| git diff --check | PASS at repository root | Same shared repository check |
+
+Built HTTP smoke passed: health 200, readiness 503 without storage, private coding/registration directory endpoints 401/no-store, protected registration/progress/staff routes redirect to login, same-origin rewrites and the existing WASM decoder work. The real local health client passed separately. Temporary local listeners were stopped. This exercised built transport/auth boundaries without connecting to a database or provider; authenticated real deployment/device acceptance remains blocked.
+
+
+### R. Important files
+
+Backend: `coding/reports.ts` (new), existing coding service/router/contracts, Student contracts/model/repository/service, and existing College directory repository sorting. Added `progress-reports.test.ts` and `registration-enhancements.test.ts`; extended coding HTTP and Student repository tests. The shared coding fixture exposes its existing attendance test repository for preservation assertions.
+
+Frontend: `coding/report-downloads.tsx` (new), existing staff progress screen, Student registration/contracts/profile/management, and opt-in previous-data preservation in the shared query hook. Added report-download and registration-enhancement tests. Existing registration/export interaction tests now perform explicit Year selection and assert pagination-free complete report requests; their validation/security assertions were preserved.
+
+No new dependency, secret, public environment variable or report persistence model was added. README is the only tracked Markdown; the detailed local report and artifacts remain ignored.
+
+### S. Known issues and acceptance boundaries
+
+- **Tested locally:** report generation/round-trip structure/formatting, 120 × 100 cross-page coverage, metrics, filters, empty/limit errors, injection safety, scoped authenticated HTTP/CSRF/no-store/rate limits/audits, directory behavior, Year validation/legacy reads and preservation of related identities/records.
+- **Not live tested:** real MongoDB pagination/collation/indexes/transactions/performance, Google consent/login, authenticated deployed browser/mobile flows and external providers. Multi-query reports describe records read during bounded generation; no global immutable database snapshot is claimed.
+- **Blocked:** previously unconfigured authorized MongoDB/Google/Codeforces live acceptance. LeetCode and CodeChef verification remain unavailable as before. Reports honestly include unavailable coverage.
+- **Deliberate limits:** per-Batch reports, 2,000 roster members, 20,000 matching assignment rows, 10 MiB and per-actor request throttling. Larger selections must be refined; no global unbounded export or automatic production migration was added.
+
+### T. Acceptance criteria
+
+Statuses describe local implementation/testing, not live database or provider acceptance.
+
+| # | Requirement | Status |
+| --- | --- | --- |
+| 1 | Report type selection | PASS locally |
+| 2 | Excel download | PASS locally |
+| 3 | CSV download | PASS locally |
+| 4 | Day-wise report | PASS locally |
+| 5 | Problem-wise report | PASS locally |
+| 6 | Student-wise report | PASS locally |
+| 7 | Batch-wise report | PASS locally |
+| 8 | Complete Batch report | PASS locally |
+| 9 | Five-sheet Complete XLSX | PASS; decoded workbook verified |
+| 10 | All matching pages | PASS; 120 Students, 100 assignments, 12,000 rows |
+| 11 | Backend filters | PASS locally |
+| 12 | Counts | PASS locally |
+| 13 | Separate unavailable coverage | PASS locally |
+| 14 | Completion denominators/percentages | PASS locally; zero is N/A |
+| 15 | No misleading solve claims | PASS |
+| 16 | Explicit export limits | PASS; refinement error, no truncation |
+| 17 | CSV injection protection | PASS locally |
+| 18 | XLSX literal safety | PASS locally |
+| 19 | College permissions | PASS locally; live database acceptance BLOCKED |
+| 20 | Audited exports | PASS locally; real durability BLOCKED |
+| 21 | Backend College dropdown | PASS; reused directory |
+| 22 | ACTIVE Colleges only | PASS locally |
+| 23 | Search | PASS locally |
+| 24 | Canonical College ID stored | PASS locally |
+| 25 | No duplicate College creation | PASS |
+| 26 | Invalid College references rejected | PASS locally |
+| 27 | Required new-registration Year | PASS |
+| 28 | Numeric Years 1–4 | PASS |
+| 29 | Invalid Years rejected | PASS |
+| 30 | Legacy missing-Year compatibility | PASS locally; no data migration run |
+| 31 | Student College/Year display | PASS locally |
+| 32 | Scoped Admin/Super Admin display | PASS locally |
+| 33 | Year updates preserve identity | PASS locally, including evidence/attendance/enrollment/QR |
+| 34 | Controlled College transfers | PASS; existing policy retained |
+| 35 | Registration/verification lifecycle | PASS locally; actual critical changes still reset verification |
+| 36 | Coding progress preserved | PASS regression tests |
+| 37 | Attendance preserved | PASS regression/preservation tests |
+| 38 | Permanent QR preserved | PASS regression/preservation tests |
+| 39 | Existing tests | PASS — 842 distinct tests, +80 from baseline |
+| 40 | New tests | PASS — 842 distinct tests, +80 from baseline |
+| 41 | Lint/types/builds | PASS — both apps; audits zero vulnerabilities |
+| 42 | No secrets exposed | PASS — privacy/publication review clear |
+| 43 | No production fake data | PASS |
+| 44 | No Phase 9 | PASS |
+| 45 | No deployment | PASS |
+| 46 | Local uncommitted/unpushed changes | PASS — local HEAD unchanged; no staging/commit/push |
+
+### U. Git status
+
+Branch remains `main`; HEAD is still Phase 7 commit `2894b056f41d6fcb9e153b3e14a0644071a84540`. The existing Phase 8 work and these enhancements remain modified/untracked locally. No files are staged, no commit or push command was run, and no deployment or Phase 9 work occurred. README is the only tracked Markdown; local reports/artifacts are ignored. Privacy scans of 302 eligible text files found no credentials/private-address/machine-path/generated-file findings. Existing URL-userinfo attack test vectors were reviewed as test URLs, not personal email addresses.
+
+
+### V. Production readiness
+
+Review the local changes before a separate commit/push instruction. Configure and validate the authorized MongoDB replica set and existing authentication/provider applications privately, exercise real authenticated faculty downloads/registration, verify collation/transaction behavior, and load-test permitted report limits on the actual database. No credentials are requested here. Legacy Year completion uses the reviewed workflow; no guessed values or destructive migration is required. Phase 9 and deployment have not started.
+
+## Phase 8 delivery — validated publication
+
+Delivery validation dated 2026-11-16. This record accompanies the commit `feat: implement phase 8 verified coding progress and reporting` on `main`. The earlier local/uncommitted statements are historical handoff snapshots, not the status of this delivery package. Its commit identifier is available in repository history.
+
+- Fresh sequential regression runs passed **620 backend tests** and **221 ordinary frontend tests**. The separately enabled local health client passed, for **842 distinct passing tests**. The five failures from the previous concurrent preflight did not recur; no assertions or timeouts were loosened.
+- Both dependency audits were refreshed and reported **zero vulnerabilities**. Formatting, lint, typecheck and production builds had passed in the prior preflight; application source was unchanged before the sequential rerun. The built API/Next.js HTTP smoke passed again, including no-store/private responses, protected redirects, same-origin rewrites, readiness 503 without configured storage and the local QR decoder.
+- Privacy review covers the intended source, tests, lockfiles and sanitized configuration. Real environment files, credentials, generated assets, dependencies, local reports and all Markdown other than root README remain ignored. Git author metadata uses a GitHub noreply address. No force push or history rewriting is part of this delivery.
+- The implementation covers Phases 1–8 and the Phase 8 enhancements: role-based administration, Student identity/Year/QR, Courses/Batches/enrollment, immutable curricula, attendance, verified coding progress and complete bounded faculty reports.
+- **Phase 9 has not been implemented.** No deployment, live MongoDB acceptance, real Google consent or live Codeforces verification is claimed. LeetCode and CodeChef verification remain explicitly unavailable. Existing provider/configuration/database blockers must be resolved and tested before production use.
+
 ## Current local setup
 
 Use Node.js 22 LTS and npm in the complete local workspace. Two independent applications are retained: algora-frontend and algora-backend.
@@ -1711,7 +2176,7 @@ Run inside each application: npm run format, npm run lint, npm run typecheck, np
 
 ## Authentication configuration and contracts
 
-Phase 2 implements identity and authorization infrastructure only. Database unavailability is intentional until Atlas is configured. There is no production in-memory authentication fallback or privileged development account.
+The Phase 2 identity and authorization infrastructure remains in use. Database unavailability is intentional until an authorized MongoDB replica set is configured. There is no production in-memory authentication fallback or privileged development account.
 
 ### Deployment and cookie strategy
 
@@ -1739,17 +2204,31 @@ Use /admin/problems or /super-admin/problems to author canonical problem metadat
 
 Open Batch curriculum management to select a published revision of the same Course, provide a review reason, review server-calculated impact and explicitly confirm assignment. Active Batch upgrades preserve assignment history and require a fresh review; completed/archived references remain unchanged. Existing Batches have no fabricated revision. Batch-specific release restrictions withdraw future access and restore only original release rules. No automatic scheduling worker or new curriculum environment secret is needed.
 
-Verified Students with current effective enrollment open their own Course/Batch learning path and any released Day. Current roll, profile, College, Course and Batch eligibility remain mandatory on every content request. There is no sequential completion or solved-state tracking. Real persisted and authenticated browser checks remain blocked until dependencies are configured.
+Verified Students with current effective enrollment open their own Course/Batch learning path and any released Day. Current roll, profile, College, Course and Batch eligibility remain mandatory on every content request. There is no sequential completion gating. Phase 8 adds evidence-backed coding progress without self-reported solved states. Real persisted and authenticated browser checks remain blocked until dependencies are configured.
 
 ### Attendance setup
 
 Super Admin explicitly grants college.view and attendance.manage to the relevant College staff; no existing grant is expanded automatically. Open /admin/attendance or /super-admin/attendance, select the authorized College/Course/Batch, and use a released Learning Day from its pinned published revision. Create Morning and Afternoon slots separately, open a session to capture its durable verified roster, then start the continuous scanner over HTTPS or localhost. Use the existing permanent Student QR. Camera permission and a supported device are required; QR screenshots remain shareable bearer credentials.
 
-Close scanning to review PRESENT/UNMARKED members. New enrollments require an explicit reviewed additive roster refresh. Unmarked members can be reasonedly excused while CLOSED. Review and confirm finalization to create official ABSENT records for the remaining durable roster. Subsequent status changes use audited corrections. Attendance sessions prevent curriculum replacement. Staff scans require sign-in within eight hours of the original session issuance; sign out/in to renew, and use a shorter SESSION_TTL if required by your deployment policy.
+Close scanning to review PRESENT/UNMARKED members. New enrollments require an explicit reviewed additive roster refresh. Unmarked members can be reasonedly excused while CLOSED. Review and confirm finalization to create official ABSENT records for the remaining durable roster. Subsequent status changes use audited corrections. Attendance sessions and Phase 8 coding sync/progress prevent curriculum replacement. Staff scans require sign-in within eight hours of the original session issuance; sign out/in to renew, and use a shorter SESSION_TTL if required by your deployment policy.
 
-Students use /student/attendance to discover their own roster history, including finalized attendance after a Batch completes. Staff reports calculate percentages only from finalized PRESENT/ABSENT rows, exclude EXCUSED and use N/A for zero denominator. CSV/XLSX exports are private and audited. Admission/finalization is capped at 2,000 members; reports at 1,000 selected sessions/10,000 detail rows. No automatic migration, database connection, deployment or Phase 7 push has occurred. npm dev/build lifecycle hooks generate the same-origin decoder asset from the locked dependency; keep those generated public assets ignored.
+Students use /student/attendance to discover their own roster history, including finalized attendance after a Batch completes. Staff reports calculate percentages only from finalized PRESENT/ABSENT rows, exclude EXCUSED and use N/A for zero denominator. CSV/XLSX exports are private and audited. Admission/finalization is capped at 2,000 members; reports at 1,000 selected sessions/10,000 detail rows. No automatic migration, database connection or deployment has occurred. Phase 7 was subsequently pushed and independently verified as recorded in Phase 8 section A. npm dev/build lifecycle hooks generate the same-origin decoder asset from the locked dependency; keep those generated public assets ignored.
+
+### Coding ownership and progress setup
+
+Staff progress pages now offer Day-wise, Problem-wise, Student-wise, Batch-wise and Complete Batch downloads in Excel/CSV. Downloads cover all matching authorized roster/assignment pages, within 2,000 scanned roster members, 20,000 matching assignment rows and 10 MiB. Complete Excel has five worksheets; Complete CSV is flat assignment detail. Refine filters when a limit error is returned; no partial first-page file is substituted.
+
+Grant `college.view` and `progress.view` explicitly for authorized College report readers. Add `progress.manage` for staff who may request Student/Batch sync; existing grants are not expanded. Students link accounts at `/student/coding-accounts`, complete the configured official Codeforces ownership flow, and use `/student/progress` or Learning Day problem badges for verified evidence. Staff use `/admin/progress` or `/super-admin/progress` and the corresponding Progress Reports navigation.
+
+On the backend, configure `CODEFORCES_CLIENT_ID`, `CODEFORCES_CLIENT_SECRET` and `CODEFORCES_REDIRECT_URI` together for an authorized Codeforces OIDC application. The exact callback is the frontend origin plus `/backend/coding/accounts/codeforces/callback`. Keep the secret server-only. No credentials are supplied or requested in this phase. LeetCode/CodeChef ownership and authoritative submission integration remain unavailable; do not add passwords or cookies as a workaround.
+
+Validate MongoDB 5+ replica-set transactions, indexes and shared provider-control updates first. Set `CODING_SYNC_ENABLED` explicitly when ready; `CODING_SYNC_INTERVAL_SECONDS` controls bounded automatic scheduling. Synchronization is disabled by default. All workers must use the same control collection/provider budget. Queueing is durable; disabled workers leave jobs queued. Actual database/provider/multi-worker verification remains blocked here.
+
+New Batch activations persist actual UTC `startedAt`. Existing active Batches missing that timestamp remain unavailable for verified attribution; a planned date is not guessed into an actual instant. Assignment windows also require the current enrollment's authoritative activation time. Review older data through an explicitly audited future remediation process rather than a hidden migration. Completed-Batch own history does not unlock learning content or enable new sync jobs.
 
 ### Student identity and QR setup
+
+Registration uses the authenticated searchable ACTIVE College directory, displaying existing names/codes while storing only the canonical relationship. New registrations must explicitly choose numeric Year of Study 1–4. No first-year default is guessed. Legacy missing-year profiles remain readable and can request completion through the existing reviewed correction workflow. A year-only approved correction preserves verification, enrollment, attendance, QR and coding evidence; real identity/College changes retain existing review and transfer safeguards.
 
 Create ACTIVE colleges and explicitly grant student.view/student.verify to authorized college Admins. Students complete mandatory registration after Google login, then enter their profile while institutional verification is pending. Only an authorized separate reviewer may verify identity. Course/Batch delivery and authorized roll-only enrollment are implemented in Phase 5; institutional verification and effective enrollment remain separate requirements.
 
@@ -1782,6 +2261,11 @@ Backend:
 | GOOGLE_CLIENT_SECRET | Backend secret, never sent to the browser. |
 | GOOGLE_REDIRECT_URI | Must equal FRONTEND_URL + `/backend/auth/google/callback`. |
 | SESSION_TTL | Absolute lifetime in seconds; default 604800, permitted range 300–2592000. Rotation does not extend it. |
+| CODEFORCES_CLIENT_ID | Optional official Codeforces OIDC application identifier; configure all three provider settings together. |
+| CODEFORCES_CLIENT_SECRET | Backend-only HS256/token-exchange secret; never expose in public variables, logs or Git. |
+| CODEFORCES_REDIRECT_URI | Exact frontend origin plus `/backend/coding/accounts/codeforces/callback`. |
+| CODING_SYNC_ENABLED | Opt-in worker switch; disabled until authorized storage/provider setup is validated. |
+| CODING_SYNC_INTERVAL_SECONDS | Bounded automatic scheduling interval; validated by the backend environment schema. |
 | CORS_ORIGINS | Exact comma-separated allowlist; must include FRONTEND_URL. Production origins require HTTPS. |
 | NODE_ENV / PORT | Production enables secure host-prefix cookies; PORT is supplied by Railway. |
 | TRUST_PROXY_HOPS | Verified count of trusted reverse proxies; default 0. |
@@ -1851,7 +2335,7 @@ Next.js Proxy checks the relevant Express access endpoint before rendering to is
 
 Unit/integration tests use only test-directory repositories, mocked transport and controlled signed JWT fixtures. They require no live Atlas database. Production imports contain no mock identity provider or in-memory user/session store. The optional Phase 1 live health test requires RUN_CONNECTIVITY_TEST=true and a running API; normal tests skip it.
 
-Actual Google consent/token exchange, Atlas index creation/persistence, QR encrypted durability, deployed cookie transport and authenticated Student/administration browser flows must be verified with real configuration before launch. Login desktop/mobile appearance and light/dark themes were checked locally. Do not represent fixture tests as live Google/Atlas verification. Phase 3 implements Admin approval, explicit Super Admin provisioning and college management. Phase 4 implements registration, independent Student identities, scoped verification, corrections and encrypted permanent QR. Phase 5 implements scoped Courses/Batches, authorized enrollment/import/history and durable reconciliation. Learning Day content, attendance and coding progress remain unimplemented.
+Actual Google consent/token exchange, Atlas index creation/persistence, QR encrypted durability, deployed cookie transport and authenticated Student/administration browser flows must be verified with real configuration before launch. Login desktop/mobile appearance and light/dark themes were checked locally. Do not represent fixture tests as live Google/Atlas verification. Phase 3 implements Admin approval, explicit Super Admin provisioning and college management. Phase 4 implements registration, independent Student identities, scoped verification, corrections and encrypted permanent QR. Phase 5 implements scoped Courses/Batches, authorized enrollment/import/history and durable reconciliation. Phase 6 implements immutable Learning Day delivery, Phase 7 implements QR attendance, and Phase 8 implements evidence-backed coding progress. Their external acceptance limits are recorded in the latest phase sections.
 
 ## Updating this record
 

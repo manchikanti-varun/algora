@@ -1,3 +1,4 @@
+import { CodingSyncJob, StudentProblemProgress } from '../models/coding.js';
 import { AttendanceSession } from '../models/attendance.js';
 import mongoose, { type ClientSession } from 'mongoose';
 import {
@@ -72,6 +73,12 @@ export class MongoCurriculumUnit implements CurriculumUnit {
   learning: MongoLearningUnit;
   constructor(private session: ClientSession | null = null) {
     this.learning = new MongoLearningUnit(session);
+  }
+  async hasProgress(batchId: string) {
+    return (
+      !!(await CodingSyncJob.exists({ batchId }).session(this.session)) ||
+      !!(await StudentProblemProgress.exists({ batchId }).session(this.session))
+    );
   }
   async hasAttendance(batchId: string) {
     return !!(await AttendanceSession.exists({ batchId }).session(

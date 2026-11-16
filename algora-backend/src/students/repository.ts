@@ -47,7 +47,7 @@ function profile(d: InstanceType<typeof StudentProfile>): StudentProfileRecord {
     phoneNumber: d.phoneNumber,
     collegeId: String(d.collegeId),
     department: d.department,
-    yearOfStudy: d.yearOfStudy,
+    yearOfStudy: d.yearOfStudy ?? undefined,
     leetCodeUsername: d.leetCodeUsername,
     codeforcesUsername: d.codeforcesUsername,
     codechefUsername: d.codechefUsername,
@@ -158,7 +158,9 @@ export class MongoStudentUnit implements StudentUnit {
       { _id: id, revision },
       {
         $set: {
-          ...reconciliationPending(),
+          ...(Object.keys(patch).some((key) => key !== 'yearOfStudy')
+            ? reconciliationPending()
+            : {}),
           ...Object.fromEntries(
             Object.entries(patch).filter(([, v]) => v !== undefined),
           ),

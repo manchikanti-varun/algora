@@ -49,6 +49,7 @@ export function Registration() {
       encodeURIComponent(search),
     optionsSchema,
     !!auth.user && !auth.error,
+    true,
   );
   const command = useCommand();
   const form = useForm<RegistrationInput>({
@@ -59,7 +60,7 @@ export function Registration() {
       phoneNumber: '',
       collegeId: '',
       department: '',
-      yearOfStudy: 1,
+      yearOfStudy: undefined,
       leetCodeUsername: '',
       codeforcesUsername: '',
       codechefUsername: '',
@@ -196,6 +197,9 @@ export function Registration() {
                 }}
               />
             </Field>
+            {options.isFetching && (
+              <p role="status">Loading ACTIVE Colleges…</p>
+            )}
             <div className="student-grid">
               <Field
                 label="College"
@@ -203,6 +207,7 @@ export function Registration() {
               >
                 <select
                   aria-label="College"
+                  disabled={options.isFetching}
                   {...form.register('collegeId')}
                   onChange={(e) => {
                     form.setValue('collegeId', e.target.value, {
@@ -226,11 +231,17 @@ export function Registration() {
                     )}
                   {options.data?.colleges.items.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name}
+                      {c.name} ({c.code})
                     </option>
                   ))}
                 </select>
               </Field>
+              {!options.data?.colleges.items.length && (
+                <p role="status">
+                  No ACTIVE Colleges match your search. Try another search or
+                  ask your institution to contact the platform administrator.
+                </p>
+              )}
               <Field
                 label="Department"
                 error={form.formState.errors.department?.message}
@@ -254,9 +265,10 @@ export function Registration() {
                   aria-label="Year of study"
                   {...form.register('yearOfStudy', { valueAsNumber: true })}
                 >
+                  <option value="">Select Year of Study</option>
                   {[1, 2, 3, 4].map((y) => (
                     <option key={y} value={y}>
-                      Year {y}
+                      {['1st Year', '2nd Year', '3rd Year', '4th Year'][y - 1]}
                     </option>
                   ))}
                 </select>

@@ -12,6 +12,16 @@ const schema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   GOOGLE_REDIRECT_URI: z.url().optional(),
+  CODEFORCES_CLIENT_ID: z.string().min(1).optional(),
+  CODEFORCES_CLIENT_SECRET: z.string().min(32).optional(),
+  CODEFORCES_REDIRECT_URI: z.url().optional(),
+  CODING_SYNC_ENABLED: z.enum(['true', 'false']).default('false'),
+  CODING_SYNC_INTERVAL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(86400)
+    .default(900),
   SESSION_TTL: z.coerce.number().int().min(300).max(2592000).default(604800),
   MONGODB_URI: z.string().regex(/^mongodb(?:\+srv)?:\/\//),
   CORS_ORIGINS: z
@@ -64,3 +74,19 @@ if (
     env.CORS_ORIGINS.some((v) => !v.startsWith('https://')))
 )
   throw new Error('Production origins require HTTPS');
+
+const codingOAuth = [
+  env.CODEFORCES_CLIENT_ID,
+  env.CODEFORCES_CLIENT_SECRET,
+  env.CODEFORCES_REDIRECT_URI,
+];
+if (codingOAuth.some(Boolean) && !codingOAuth.every(Boolean))
+  throw new Error('Configure all Codeforces OIDC variables together');
+if (
+  env.CODEFORCES_REDIRECT_URI &&
+  env.CODEFORCES_REDIRECT_URI !==
+    env.FRONTEND_URL + '/backend/coding/accounts/codeforces/callback'
+)
+  throw new Error(
+    'Codeforces callback must use the frontend same-origin backend rewrite',
+  );

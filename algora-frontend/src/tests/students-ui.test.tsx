@@ -4,6 +4,7 @@ import {
   screen,
   fireEvent,
   waitFor,
+  within,
   cleanup,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -215,6 +216,9 @@ it('reviews, confirms and submits backend identity-safe registration JSON', asyn
   fireEvent.change(screen.getByLabelText('College'), {
     target: { value: college },
   });
+  fireEvent.change(screen.getByLabelText('Year of study'), {
+    target: { value: String(input.yearOfStudy) },
+  });
   fireEvent.click(screen.getByRole('button', { name: 'Review registration' }));
   await screen.findByRole('region', { name: 'Registration review' });
   fireEvent.click(screen.getByRole('button', { name: 'Submit registration' }));
@@ -303,6 +307,14 @@ it.each([true, false])(
     expect(
       screen.getByRole('button', { name: 'Correction reviews' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('columnheader', { name: 'Year of Study' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '2nd Year' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View student' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('2nd Year')).toBeInTheDocument();
+    expect(within(dialog).getByText('Example Institute')).toBeInTheDocument();
   },
 );
 

@@ -41,7 +41,11 @@ export const academicFields = {
     .min(2)
     .max(80)
     .regex(/^[\p{L}\p{N} &()./+-]+$/u),
-  yearOfStudy: z.number().int().min(1).max(4),
+  yearOfStudy: z
+    .number({ error: 'Choose 1st, 2nd, 3rd or 4th Year' })
+    .int()
+    .min(1)
+    .max(4),
 };
 export const contactFields = {
   phoneNumber: phoneSchema,
@@ -69,6 +73,7 @@ export const profileSchema = z.object({
   id: z.string(),
   userId: z.string(),
   ...academicFields,
+  yearOfStudy: academicFields.yearOfStudy.nullish(),
   ...contactFields,
   studentUsername: z.string(),
   verificationStatus: z.enum(['PENDING_VERIFICATION', 'VERIFIED', 'REJECTED']),
@@ -123,3 +128,9 @@ export const pageSchema = <T>(item: z.ZodType<T>) =>
     total: z.number(),
     totalPages: z.number(),
   });
+
+export const yearLabel = (year: number | null | undefined) =>
+  year
+    ? (['1st Year', '2nd Year', '3rd Year', '4th Year'][year - 1] ??
+      'Not provided')
+    : 'Not provided';

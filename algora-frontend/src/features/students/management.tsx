@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ProfileFacts } from './profile';
 import {
+  yearLabel,
   profileSchema,
   correctionSchema,
   pageSchema,
@@ -199,7 +200,12 @@ export function StudentManagement({
                       p.collegeName ??
                       colleges.data?.items.find((c) => c.id === p.collegeId)
                         ?.name ??
-                      p.collegeId,
+                      'College unavailable',
+                  },
+                  {
+                    key: 'year',
+                    label: 'Year of Study',
+                    render: (p) => yearLabel(p.yearOfStudy),
                   },
                   {
                     key: 'verification',

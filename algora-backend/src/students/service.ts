@@ -446,7 +446,11 @@ export class StudentService {
       await this.actor(tx, p.userId, ['STUDENT', 'ADMIN', 'SUPER_ADMIN'], true);
       let next = p;
       if (approve) {
-        const changes = c.requestedChanges;
+        const changes = Object.fromEntries(
+          Object.entries(c.requestedChanges).filter(
+            ([key, value]) => p[key as keyof StudentProfileRecord] !== value,
+          ),
+        ) as typeof c.requestedChanges;
         if (changes.collegeId && changes.collegeId !== p.collegeId) {
           if (u.role !== 'SUPER_ADMIN')
             fail(
@@ -462,18 +466,25 @@ export class StudentService {
             fail('ROLL_UNAVAILABLE', 'Requested roll number is unavailable');
           await tx.reserveRoll(changes.rollNumber, p.id);
         }
+        const yearOnly = Object.keys(changes).every(
+          (key) => key === 'yearOfStudy',
+        );
         next = need(
           await tx.update(p.id, p.revision, {
             ...changes,
-            verificationStatus: 'PENDING_VERIFICATION',
-            verifiedBy: undefined,
-            verifiedAt: undefined,
-            verificationMethod: undefined,
-            verificationEvidence: undefined,
-            verificationNote: '',
+            ...(!yearOnly
+              ? {
+                  verificationStatus: 'PENDING_VERIFICATION',
+                  verifiedBy: undefined,
+                  verifiedAt: undefined,
+                  verificationMethod: undefined,
+                  verificationEvidence: undefined,
+                  verificationNote: '',
+                }
+              : {}),
           }),
         );
-        await tx.registration(p.userId, 'PENDING_VERIFICATION');
+        if (!yearOnly) await tx.registration(p.userId, 'PENDING_VERIFICATION');
         await this.audit(
           tx,
           u,
@@ -495,7 +506,7 @@ export class StudentService {
                 next[key as keyof StudentProfileRecord],
               ]),
             ),
-            verificationStatus: 'PENDING_VERIFICATION',
+            verificationStatus: next.verificationStatus,
           }),
         );
       }

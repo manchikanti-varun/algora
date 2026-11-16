@@ -89,3 +89,17 @@ it('retains immutable unique roll reservations and replaces the single indexed Q
   );
   expect(credential).not.toHaveProperty('token');
 });
+
+it('year-only updates do not enqueue enrollment reconciliation or touch immutable identity', async () => {
+  const update = vi
+    .spyOn(StudentProfile, 'findOneAndUpdate')
+    .mockResolvedValue(null);
+  await new MongoStudentUnit().update(newId(), 2, { yearOfStudy: 4 });
+  const change = update.mock.calls[0]?.[1] as {
+    $set: Record<string, unknown>;
+    $inc: Record<string, number>;
+  };
+  expect(change.$set).toEqual({ yearOfStudy: 4 });
+  expect(change.$inc).toEqual({ revision: 1 });
+  expect(change.$set).not.toHaveProperty('enrollmentReconciliationPending');
+});

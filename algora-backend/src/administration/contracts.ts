@@ -9,6 +9,8 @@ export const permissions = [
   'student.verify',
   'student.enroll',
   'attendance.manage',
+  'progress.view',
+  'progress.manage',
   'report.view',
 ] as const;
 export type Permission = (typeof permissions)[number];
@@ -20,6 +22,13 @@ export const requestStatuses = [
   'CANCELLED',
 ] as const;
 export const auditActions = [
+  'CODING_ACCOUNT_LINKED',
+  'CODING_ACCOUNT_VERIFIED',
+  'CODING_ACCOUNT_REVOKED',
+  'CODING_SYNC_QUEUED',
+  'CODING_SYNC_FINISHED',
+  'CODING_PROGRESS_RECONCILED',
+  'CODING_REPORT_EXPORTED',
   'ATTENDANCE_SESSION_CREATED',
   'ATTENDANCE_SESSION_OPENED',
   'ATTENDANCE_SESSION_CLOSED',
@@ -161,7 +170,10 @@ export interface AuditRecord {
     | 'LEARNING_DAY'
     | 'CODING_PROBLEM'
     | 'EDITORIAL'
-    | 'ATTENDANCE_SESSION';
+    | 'ATTENDANCE_SESSION'
+    | 'CODING_ACCOUNT'
+    | 'CODING_SYNC'
+    | 'CODING_PROGRESS';
   targetId: string;
   collegeId?: string;
   metadata: {

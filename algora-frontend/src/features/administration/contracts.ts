@@ -7,6 +7,8 @@ export const permissionKeys = [
   'student.verify',
   'student.enroll',
   'attendance.manage',
+  'progress.view',
+  'progress.manage',
   'report.view',
 ] as const;
 export const permissionSchema = z.enum(permissionKeys);

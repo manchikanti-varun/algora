@@ -83,6 +83,7 @@ export class TestCurriculum implements CurriculumRepository {
   get read(): CurriculumUnit {
     return {
       learning: this.learning.read,
+      hasProgress: async () => false,
       hasAttendance: async (id) => this.attendanceBatches.has(id),
       revisions: async (c, q, p) =>
         this.page(

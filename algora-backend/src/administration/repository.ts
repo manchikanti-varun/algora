@@ -251,8 +251,9 @@ export class MongoAdminUnit implements AdminUnit {
           ? { status: o.status }
           : {}),
     };
-    const docs = await College.find(filter)
-      .sort(order(o))
+    const directory = College.find(filter).sort({ ...order(o), _id: 1 });
+    if (eligibleOnly) directory.collation({ locale: 'en', strength: 2 });
+    const docs = await directory
       .skip((o.page - 1) * o.pageSize)
       .limit(o.pageSize)
       .session(this.session);

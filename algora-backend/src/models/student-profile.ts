@@ -23,7 +23,7 @@ const schema = new Schema(
     phoneNumber: { type: String, required: true, match: /^\+[1-9]\d{6,14}$/ },
     collegeId: { type: Schema.Types.ObjectId, ref: 'College', required: true },
     department: { type: String, required: true, maxlength: 80 },
-    yearOfStudy: { type: Number, required: true, min: 1, max: 4 },
+    yearOfStudy: { type: Number, min: 1, max: 4, validate: Number.isInteger },
     leetCodeUsername: { type: String, required: true },
     codeforcesUsername: { type: String, required: true },
     codechefUsername: { type: String, required: true },

@@ -1,3 +1,5 @@
+import { startCodingWorker } from './coding/worker.js';
+const stopCoding = startCodingWorker();
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
@@ -24,6 +26,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   stopReconciliation();
+  stopCoding();
   logger.info('Shutting down');
   const deadline = setTimeout(() => process.exit(1), 10000);
   deadline.unref();

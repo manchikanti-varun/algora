@@ -114,6 +114,26 @@ export class LearningService {
       await this.college(tx, u, ownerCollegeId, 'course.manage', true);
     return { u, owners };
   }
+  async progressAuthority(
+    tx: LearningUnit,
+    id: string,
+    batchId: string,
+    write = false,
+  ) {
+    const u = await this.actor(tx, id, false, write),
+      b = need(await tx.batch(batchId));
+    await this.college(tx, u, b.collegeId, 'college.view', write);
+    await this.college(tx, u, b.collegeId, 'progress.view', write);
+    if (write) {
+      await this.college(tx, u, b.collegeId, 'progress.manage', true);
+      const c = need(await tx.course(b.courseId));
+      if (b.status !== 'ACTIVE' || !eligible(c, b.collegeId))
+        fail('BATCH_INELIGIBLE', 'An active eligible Batch is required', 403);
+      await tx.lockBatch(b.id);
+      await tx.lockCourse(c.id);
+    }
+    return { u, b };
+  }
   async attendanceAuthority(
     tx: LearningUnit,
     id: string,
@@ -587,6 +607,9 @@ export class LearningService {
         await tx.updateBatch(b.id, b.revision, {
           status,
           snapshot: snap,
+          ...(status === 'ACTIVE'
+            ? { startedAt: new Date().toISOString() }
+            : {}),
           updatedBy: u.id,
         }),
       );
