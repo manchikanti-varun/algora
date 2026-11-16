@@ -21,7 +21,7 @@ export async function apiRequest<T>(
   } = {},
 ): Promise<T> {
   const timeoutMs =
-    /\/progress(?:\/|\?|$)/.test(path) ||
+    /\/(?:progress|analytics)(?:\/|\?|$)/.test(path) ||
     /\/attendance.*\/(?:open|finalize|refresh|export|reports)(?:\?|$)/.test(
       path,
     )

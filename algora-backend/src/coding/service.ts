@@ -461,6 +461,28 @@ export class CodingService {
       q,
     );
   }
+  async personalData(
+    user: string,
+    batchId: string,
+    input: unknown,
+    unit: ProgressUnit = this.repo.read,
+  ) {
+    const q = querySchema.parse(input);
+    await this.repo.ensureReady();
+    const current = await this.progressContext(unit, user, batchId);
+    const projection = await this.projection(
+      unit,
+      current.batch,
+      current.enrollment,
+      current.profile.id,
+      { ...q, page: 1, pageSize: 10000 },
+    );
+    return {
+      current,
+      projection,
+      accounts: (await unit.accounts(current.profile.id)).map(publicAccount),
+    };
+  }
   async day(user: string, batchId: string, day: number) {
     const q = querySchema.parse({ day });
     await this.repo.ensureReady();
@@ -1559,34 +1581,31 @@ export class CodingService {
       totalPages: Math.ceil(total / q.pageSize),
     };
   }
-  async exported(
+  async reportData(
     user: string,
     batchId: string,
     input: unknown,
-    format: 'CSV' | 'XLSX',
-    request: string,
-    reportType: ReportType = 'STUDENT',
-    includeDetails = false,
+    unit: ProgressUnit = this.repo.read,
+    includeEmpty = false,
   ) {
     const filters = exportFilters.parse(input);
     const q = querySchema.parse(
       Object.fromEntries(
         Object.entries(filters).filter(
           ([key]) =>
-            !['collegeId', 'courseId', 'rollNumber', 'studentName'].includes(
-              key,
-            ),
+            ![
+              'collegeId',
+              'courseId',
+              'rollNumber',
+              'studentName',
+              'year',
+              'search',
+            ].includes(key),
         ),
       ),
     );
-    if (reportType === 'DAY' && !q.day)
-      reject(
-        'DAY_REQUIRED',
-        'Choose a Learning Day for a Day-wise report',
-        400,
-      );
     await this.repo.ensureReady();
-    const tx = this.repo.read,
+    const tx = unit,
       l = tx.curriculum.learning,
       b = (await this.learning.progressAuthority(l, user, batchId)).b;
     if (
@@ -1637,6 +1656,11 @@ export class CodingService {
           !p ||
           (filters.rollNumber &&
             !p.rollNumber.includes(filters.rollNumber.toUpperCase())) ||
+          (filters.year && p.yearOfStudy !== filters.year) ||
+          (filters.search &&
+            !(p.rollNumber + ' ' + p.fullName)
+              .toLowerCase()
+              .includes(filters.search.toLowerCase())) ||
           (filters.studentName &&
             !p.fullName
               .toLocaleLowerCase()
@@ -1675,7 +1699,8 @@ export class CodingService {
             q.verification ||
             q.from ||
             q.to) &&
-          !projection.items.length
+          !projection.items.length &&
+          !includeEmpty
         )
           continue;
         students.push({
@@ -1719,6 +1744,39 @@ export class CodingService {
       }
       if (page >= roster.totalPages) break;
     }
+    return {
+      b,
+      college,
+      rows,
+      students,
+      assignments: selectedAssignments.filter(
+        (a) =>
+          (!q.day || a.dayNumber === q.day) &&
+          (!q.platform || a.platform === q.platform) &&
+          (!q.problemId || a.problemId === q.problemId),
+      ),
+    };
+  }
+  async exported(
+    user: string,
+    batchId: string,
+    input: unknown,
+    format: 'CSV' | 'XLSX',
+    request: string,
+    reportType: ReportType = 'STUDENT',
+    includeDetails = false,
+  ) {
+    const { b, college, rows, students } = await this.reportData(
+      user,
+      batchId,
+      input,
+    );
+    if (reportType === 'DAY' && !exportFilters.parse(input).day)
+      reject(
+        'DAY_REQUIRED',
+        'Choose a Learning Day for a Day-wise report',
+        400,
+      );
     const result = await buildProgressReport(
       {
         college: college.name,

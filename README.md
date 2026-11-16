@@ -10,6 +10,8 @@ No credentials, authentication tokens, private keys, personal email addresses or
 
 ## Current status
 
+Phase 9 is the validated handoff baseline. Earlier implementation snapshots and handoff counts are historical records. Earlier login-only visual checks do not establish authenticated Phase 9 browser acceptance.
+
 | Phase | Scope | Implementation and verification |
 | --- | --- | --- |
 | Phase 1 | Project foundation and branded UI | Implemented; 22 tests passed at handoff; lint, types and builds passed. Real Atlas/browser verification remained blocked. |
@@ -20,6 +22,7 @@ No credentials, authentication tokens, private keys, personal email addresses or
 | Phase 6 | Immutable curricula, Learning Days, problem/editorial authoring and Student learning | Implemented locally; 488 tests passed (356 backend, 132 frontend including separate live API health); formatting, lint, types and production builds passed; both audits reported zero vulnerabilities. Live Atlas/Google and authenticated visual verification remain blocked. |
 | Phase 7 | QR attendance, durable rosters, finalization, corrections and exports | Implemented and pushed as commit 2894b05; 616 tests passed (445 backend, 171 frontend including separate live API health); both builds/format/lint/types passed and audits found zero vulnerabilities. Live Atlas/Google, authenticated visual and real-camera acceptance remain blocked. |
 | Phase 8 | Verified coding progress, complete reports and registration enhancements | Implemented and validated for the Phase 8 delivery commit: 842 distinct tests (620 backend, 222 frontend including local health). Source, tests, lockfiles and sanitized configuration are included. Live provider/database acceptance remains BLOCKED. See the delivery record below. |
+| Phase 9 | Operational dashboards, learning analytics and Student follow-up | Implemented locally; 918 distinct tests passed (673 backend, 245 frontend including local health); both builds and checks passed; audits found zero vulnerabilities. Live acceptance remains LIMITED/BLOCKED. Validated for the authorized Phase 9 handoff; see its delivery record. |
 
 Real Google consent/login, Atlas persistence/index creation, deployed cookie transport and authenticated dashboard browser flows remain unverified. The real login entry was visually checked on desktop in light theme and mobile in dark theme. Automated fixtures do not establish a live Google/Atlas integration.
 
@@ -35,6 +38,7 @@ Real Google consent/login, Atlas persistence/index creation, deployed cookie tra
 - [Phase 8 — Verified coding progress tracking](#phase-8--verified-coding-progress-tracking)
 - [Phase 8 enhancements — Complete reports and registration](#phase-8-enhancements--complete-reports-and-registration)
 - [Phase 8 delivery — Validated publication](#phase-8-delivery--validated-publication)
+- [Phase 9 — Operational dashboards and learning analytics](#phase-9--operational-dashboards-and-learning-analytics)
 - [Current local setup](#current-local-setup)
 - [Authentication configuration and contracts](#authentication-configuration-and-contracts)
 - [Updating this record](#updating-this-record)
@@ -2144,6 +2148,248 @@ Delivery validation dated 2026-11-16. This record accompanies the commit `feat: 
 - The implementation covers Phases 1–8 and the Phase 8 enhancements: role-based administration, Student identity/Year/QR, Courses/Batches/enrollment, immutable curricula, attendance, verified coding progress and complete bounded faculty reports.
 - **Phase 9 has not been implemented.** No deployment, live MongoDB acceptance, real Google consent or live Codeforces verification is claimed. LeetCode and CodeChef verification remain explicitly unavailable. Existing provider/configuration/database blockers must be resolved and tested before production use.
 
+## Phase 9 — Operational dashboards and learning analytics
+
+Historical implementation snapshot before Git handoff. The Phase 9 delivery record below supersedes its local-only Git statements.
+
+### A. Repository baseline and delivery status
+
+The verified local baseline was `main` at `f3ec0484bfce3fc05ed210f3cde27d40c6594d8f`, the published Phase 8 delivery. The working tree was clean before Phase 9. Previous phase sections are historical snapshots; this section describes the current local implementation. Phase 9 remains **uncommitted and unpushed**. No Git history was changed, deployment performed or Phase 10 started.
+
+### B. Implementation summary and architecture
+
+Added on-demand, backend-calculated operations and learning analytics for Super Admin, authorized College Admins and individual Students. The implementation reuses existing identity, enrollment, pinned curricula, release controls, durable attendance rosters, authoritative attendance records, account ownership and verified evidence attribution. It creates no new database, analytics collection, persisted analytics snapshot or production mock dataset.
+
+`CodingService.reportData` is the shared collection path for Phase 8 downloads and Phase 9 staff coding analytics. `reportMetrics` remains the common coding calculator. Existing report rendering, auditing and size controls remain in place. `CodingService.personalData` exposes the existing self-authorized projection to personal analytics without changing verification rules.
+
+### C. Super Admin dashboard
+
+The existing workspace now includes platform KPI cards with management links, College comparison, Batch operations and completion comparison, plus actionable alerts. Inventory includes College and active College counts, registered/verified Students, Courses, active Batches and current enrollment records. Learning metrics include released Day deliveries, assigned problem identities, finalized attendance sessions, verified completion and verification coverage. College rows show registration, active Batches, distinct eligible enrolled Students, comparable attendance/coding rates and latest relevant activity. Existing College, administrator and approval functionality remains accessible.
+
+Alerts derive from actual records: missing pinned curriculum, released Days without published problems, sessions awaiting finalization, failed/stale synchronization, pending Student verification and active Colleges without an active authorized Admin. No alert is synthesized from random or sample data.
+
+### D. College Admin dashboard
+
+Admin operations use the same calculations within current authorized ACTIVE Colleges. Full combined analytics requires `college.view`, `student.view`, `attendance.manage` and `progress.view`; an incomplete or revoked grant does not grant partial access to the combined payload. The existing Admin scope view is preserved. Daily Batch/Day views show separate Morning/Afternoon sessions, eligible roster counts, actual present marks, confirmed finalized absences, session state and coding opportunities.
+
+### E. Student dashboard
+
+The Student landing workspace now shows own Courses, active Batches, current released Learning Day, assignment counts, verified solves/attempts, unavailable verification, finalized attendance and account freshness. Batch sections include Day-wise learning totals, assignment/editorial navigation, Morning/Afternoon rates, finalized history, corrected marks and coding account status/errors. Personal analytics derives identity exclusively from the session. A browser-supplied Student ID is rejected by the strict query contract.
+
+Personal coding eligibility follows Phase 8's existing enrollment rules; the dashboard does not grant coding access to a withdrawn enrollment in an ACTIVE Batch. Existing historical attendance screens remain available through their established self-only APIs.
+
+### F. Batch analytics
+
+Dedicated routes under `/admin/batches/[batchId]/analytics` and `/super-admin/batches/[batchId]/analytics` provide Overview, Attendance, Coding Progress, Learning Days, Students and Reports views. Overview shows canonical College/Course/Batch context, Batch state, pinned revision, eligible Students, released Days, assigned problems, attendance and coding rates, pending finalization and follow-up evidence.
+
+Attendance includes separate session rows, a finalized-rate trend and a paginated Student/session matrix. Coding includes counts, Day trends, platform coverage, problem rates and sufficient-coverage low-solve review links. Students have search, Year filtering, stable sorting, bounded pagination, relevant metrics and authorized detail navigation.
+
+### G. Learning Day analytics
+
+Dedicated `/analytics/days/[day]` frontend routes display the released Day title, published assignments, eligible Students, separate session information and problem-level coding results. Empty published Days remain visible and display N/A for completion. Pinned revision and restriction controls are reused; hidden/restricted Days are excluded from released curriculum metrics. Historical attendance snapshots retain their original Day identity and are not rewritten.
+
+### H. Attendance calculation rules
+
+Phase 9 attendance is `finalized PRESENT marks / all eligible finalized Student-session snapshot opportunities`. Morning and Afternoon remain distinct opportunities. EXCUSED marks remain in this Phase 9 denominator; unfinalized sessions never establish confirmed absence. Zero opportunities produce null/N/A. Current authoritative corrected records determine marks; missing or withdrawn current enrollments do not erase finalized snapshot history. Year filtering uses current stored Year only for profiles still in the Batch College; snapshot names and rolls remain historical.
+
+Phase 7 attendance reports retain their existing policy excluding EXCUSED from their denominator. A dedicated Phase 9 attendance download uses the new formula and reconciles with the analytics response. The two policies are explicitly described in the UI. The analytics detail file repeats selection-wide summary counts/rate as reference columns; these are not per-row contributions and must not be summed across detail rows.
+
+### I. Coding calculation rules
+
+- Completion: `SOLVED_VERIFIED / matching eligible assigned opportunities`.
+- Coverage: `opportunities with a usable verification outcome / matching eligible assigned opportunities`.
+- ATTEMPTED_VERIFIED is counted separately from solved.
+- Checked no verified accepted submission includes NOT_STARTED plus ATTEMPTED_VERIFIED, so it overlaps the attempted count and must not be added to it as a disjoint category.
+- VERIFICATION_UNAVAILABLE remains separate and does not establish that a Student failed to solve a problem.
+- Zero denominators return null/N/A. Repeated canonical problems on different Day assignments retain distinct identities.
+
+The existing Phase 8 projection determines account revisions, ownership expiry, provider availability, complete coverage, enrollment activation and assignment evidence attribution. Date filters retain Phase 8's accepted/first-verified-attempt timestamp semantics: unknown activity timestamps cannot be assigned to a selected period. Published assignment inventory and eligible Student context can remain visible even when no matching activity rows exist; the coding opportunity denominator is the matching report-row population.
+
+### J. Student follow-up rules
+
+Central documented constants specify at least 2 finalized ABSENT session marks; completion below 40% only with at least 5 opportunities and at least 80% verification coverage; missing/expired account ownership; latest failed synchronization; synchronization older than 24 hours since success; active jobs unchanged for more than 24 hours or with an expired running lease; pending registration verification; and legacy missing Year. Missing success timestamps alone are not fabricated stale successes. Job signals respect account revision, Batch, enrollment and pinned revision.
+
+The follow-up table includes Student, roll, Batch where available, reason, relevant counts/rates or timestamps, update time and authorized detail links. Pending registration and missing Year can also surface for Students without a selected Batch. Reasons are review signals, not grades or predictions. There is no messaging, notification or automated outreach.
+
+### K. Charts and visualizations
+
+Responsive SVG charts provide finalized attendance trends, Day completion, platform coverage, problem solve rates and Batch comparisons. They use actual backend values, a fixed 0–100 percent scale, light/dark theme styles, accessible titles/descriptions, exact-value descriptions and native tooltips. Line segments do not bridge unavailable values. Tables provide precise records. No chart dependency was added.
+
+### L. Filters and navigation
+
+Applicable screens support College, Course, Batch, Learning Day, platform, paired UTC dates, Student Year, Student search, coding ownership verification status and follow-up reason. Existing College/Course selectors are reused. URL query parameters preserve filters, active view, pagination and sorting. Dependent College/Course selections clear stale Batch/Day choices; filter changes reset pagination.
+
+Dates must be supplied together, ordered and within 366 days. Pagination is limited to 50 rows per page with stable ID tie-breaks. Coding-specific platform/ownership filters do not change attendance marks. Date filtering uses session creation dates for attendance. Entity inventory remains scoped to the selected College/Course/Batch; cohort filters narrow applicable Student measures. Loading, empty, error/retry and download states are implemented.
+
+### M. Report and export integration
+
+The Reports view reuses `ReportDownloads` and Phase 8's DAY, PROBLEM, STUDENT, BATCH and COMPLETE report types in Excel/CSV. Shared coding data and counts reconcile independently of visible pagination. A small reusable attendance file writer is extracted from the existing attendance export, retaining the old export contract. The Phase 9 attendance endpoint uses the same writer with matching analytics filters and the Phase 9 denominator; it does not create a second report storage service.
+
+Downloads are backend generated, private, bounded, audited and CSRF/Origin protected. Filenames are fixed/sanitized, CSV spreadsheet prefixes are neutralized, XLSX text remains literal, and temporary browser Blob URLs are revoked. Phase 9 attendance exports allow at most 10,000 matching rows and a bounded encoded payload. Existing coding export limits remain 2,000 roster members, 20,000 assignment rows and 10 MiB prepared files. Oversized requests fail explicitly instead of silently exporting the first page.
+
+### N. Backend API contracts
+
+All paths below are relative to `/api/v1`. Success responses use `{ success: true, data }`; errors retain the existing safe error envelope. All analytics responses are `no-store, private`.
+
+| Method | Path | Contract and authority |
+| --- | --- | --- |
+| GET | `/analytics/platform` | Super Admin only; inventory, College comparison, Batch metrics, alerts and follow-up |
+| GET | `/analytics/overview` | Current authorized staff scope; operational dashboard |
+| GET | `/analytics/follow-up` | Same staff scope and validated filters; paginated evidence-based follow-up |
+| GET | `/analytics/batches/:batchId` | Current combined Batch authority; summaries, Days, sessions, coding, paginated matrices/follow-up and freshness |
+| GET | `/analytics/batches/:batchId/days/:day` | Same authority with validated Day filter |
+| GET | `/analytics/me` | Session-derived Student only; own eligible Batch learning, account and attendance information |
+| POST | `/analytics/batches/:batchId/attendance/export` | Staff authority, CSRF, exact Origin and export rate limit; `{ format, filters, confirmed: true }`; file metadata/base64, row count and reconciled summary |
+
+Strict Zod filters reject unknown fields, malformed IDs, forged identity fields, invalid ranges and unbounded pagination. Existing Phase 8 coding export filters additionally accept `year` and `search`, preserving existing defaults. Display pagination never limits the exported population.
+
+### O. MongoDB queries and indexes
+
+`analytics/repository.ts` provides bounded catalog reads and request-local Batch prefetching. Profiles, Student authority records, accounts, progress and recent jobs are loaded in bulk; the shared Phase 8 projection then operates on that prepared read unit instead of querying each Student's data repeatedly. Coding-job reference filters retain the existing String schema types. Recent jobs use a MongoDB aggregation with `$firstN` per account, preserving the existing 20-job history policy; the deployment database must support that operator. Attendance fetches session IDs, rosters and records in bulk and resolves authoritative marks by key.
+
+Existing College, profile, enrollment, Batch, account, progress and job indexes support the query prefixes. No index, model or persisted analytics source of truth was added. Explicit limits include 500 Colleges, 100 Batches per overview, 10,000 profiles, 4,000 enrollment-history rows per prepared Batch, 2,000 current roster members, 20,000 progress/attendance rows, 40,000 recent job rows and 50,000 coding opportunities across an overview. Oversized selections return an explicit error. Some preparation bounds apply to the whole stored Batch before display filters, so a Day filter cannot bypass every Batch history/progress bound. These bounds support controlled initial deployment; they are not proof of production query latency.
+
+### P. Security and authorization
+
+Existing Google OAuth, HttpOnly sessions, CSRF and exact Origin checks are preserved. Staff analytics rechecks current user status, role, ACTIVE College grants and Batch permissions; direct URLs do not bypass backend checks. Exports reauthorize and lock current actor/College/Batch before audit and delivery. Personal responses never accept a target Student ID. Analytics output selects public academic and operational fields and excludes email, provider subjects, credential material, tokens, private proof data and phone numbers.
+
+### Q. Actual tests
+
+- Backend full regression: **673 passed / 32 files**; no failures or skips.
+- Frontend full regression: **244 passed / 20 files**; the single opt-in health test was skipped in the ordinary run and **passed separately** against the real local API.
+- **918 distinct tests passed**, including local health: 673 backend + 245 frontend. This preserves the 842-test Phase 8 baseline and adds **76 tests**. Repeated runs are not double-counted. Existing assertions and verification rules were not weakened.
+- The production bulk-reader regression checks 120 Students, actual String-valued coding-job references, bounded per-account job aggregation, one bulk read per domain and reconciled evidence-derived counts. It mocks database I/O and is not a live Atlas integration test.
+
+The new tests cover scope denial, forged filters and IDs, revoked grants, inactive Colleges, suspended users, Student self-only access, separate sessions, finalization, corrections, withdrawn-roster history, zero denominators, pinned restrictions, unsupported verification, attempts versus solves, stale/failed jobs, Year/search/pagination/sorting, report reconciliation and safe downloads. The realistic fixture includes 120 Students, 100 assignments, 12,000 coding opportunities and 240 finalized Student-session opportunities. It verifies full summaries while displaying only page 3 of the Student table. This is an isolated fixture, not an Atlas load test.
+
+### R. Formatting lint types and production builds
+
+| Check | Backend | Frontend |
+| --- | --- | --- |
+| npm run format | PASS | PASS |
+| npm run lint | PASS with zero warnings | PASS with zero warnings |
+| npm run typecheck | PASS | PASS |
+| npm test | PASS | PASS plus separate local health |
+| npm run build | PASS | PASS |
+| git diff --check | PASS for the final change set | Shared repository check |
+
+The frontend production build uses the existing required `BACKEND_API_BASE_URL` with the sanitized local setup example and same-origin public API path. Configuration validation was preserved. Compiled HTTP smoke verified health 200, intentional readiness 503 without a database, private analytics/coding/attendance APIs returning 401 with no-store, protected role/analytics routes redirecting to login and the same-origin scanner decoder asset. This was HTTP boundary testing, not authenticated visual acceptance.
+
+### S. Dependency audits
+
+Backend and frontend `npm audit` each reported **zero vulnerabilities**. No new dependency, package or lockfile change was required for Phase 9.
+
+### T. Performance observations
+
+The 120-Student fixture reconciles expected counts across pagination. Production data paths use bounded bulk reads, keyed joins and request-local preparation with no persisted analytics cache. Server responses forbid HTTP caching. Existing TanStack Query client behavior can reuse a response for its 10-second stale interval; mutations continue to invalidate administration queries, and navigation/filter changes request their matching data. Generated timestamps and successful synchronization timestamps communicate freshness. No real-time provider guarantee is made.
+
+Atlas query plans, database persistence, concurrent-user latency, deployment throughput and live job aggregation compatibility remain BLOCKED until tested against the configured database. No unsupported performance claim is made.
+
+### U. Files and modules
+
+- New backend modules: `analytics/contracts.ts`, `calculations.ts`, `repository.ts`, `service.ts` and `router.ts`; shared `attendance/file.ts`; `tests/analytics-fixtures.ts`, `tests/analytics.test.ts` and `tests/analytics-repository.test.ts`.
+- Backend integrations: `app.ts`, `coding/service.ts`, `coding/reports.ts` and `attendance/service.ts`. Verification algorithms and historical mutation rules are preserved.
+- New frontend modules: `features/analytics/contracts.ts`, `dashboard.tsx` and `tests/analytics-ui.test.tsx`.
+- New protected route families: Admin and Super Admin `/analytics`, `/follow-up`, `/batches/[batchId]/analytics` and `/batches/[batchId]/analytics/days/[day]`.
+- Updated role landing pages, administration and Student navigation, working roll-search deep links into the existing Student directory, Batch catalog/detail links, themed responsive CSS and analytics request timeout handling.
+- No new environment variables or dependency packages. Existing `MONGODB_URI`, `FRONTEND_URL`, `BACKEND_PUBLIC_URL`, session/cookie/CSRF settings and Phase 8 `CODEFORCES_*` / `CODING_*` settings remain applicable. Only variable names belong in published documentation.
+
+<details>
+<summary>Complete Phase 9 changed file manifest</summary>
+
+```text
+README.md
+algora-backend/src/analytics/calculations.ts
+algora-backend/src/analytics/contracts.ts
+algora-backend/src/analytics/repository.ts
+algora-backend/src/analytics/router.ts
+algora-backend/src/analytics/service.ts
+algora-backend/src/app.ts
+algora-backend/src/attendance/file.ts
+algora-backend/src/attendance/service.ts
+algora-backend/src/coding/reports.ts
+algora-backend/src/coding/service.ts
+algora-backend/src/tests/analytics-fixtures.ts
+algora-backend/src/tests/analytics-repository.test.ts
+algora-backend/src/tests/analytics.test.ts
+algora-frontend/src/app/(admin)/admin/analytics/page.tsx
+algora-frontend/src/app/(admin)/admin/batches/[batchId]/analytics/days/[day]/page.tsx
+algora-frontend/src/app/(admin)/admin/batches/[batchId]/analytics/page.tsx
+algora-frontend/src/app/(admin)/admin/follow-up/page.tsx
+algora-frontend/src/app/(admin)/admin/page.tsx
+algora-frontend/src/app/(admin)/admin/students/page.tsx
+algora-frontend/src/app/(student)/student/page.tsx
+algora-frontend/src/app/(super-admin)/super-admin/analytics/page.tsx
+algora-frontend/src/app/(super-admin)/super-admin/batches/[batchId]/analytics/days/[day]/page.tsx
+algora-frontend/src/app/(super-admin)/super-admin/batches/[batchId]/analytics/page.tsx
+algora-frontend/src/app/(super-admin)/super-admin/follow-up/page.tsx
+algora-frontend/src/app/(super-admin)/super-admin/page.tsx
+algora-frontend/src/app/(super-admin)/super-admin/students/page.tsx
+algora-frontend/src/app/globals.css
+algora-frontend/src/components/layout/administration-shell.tsx
+algora-frontend/src/features/analytics/contracts.ts
+algora-frontend/src/features/analytics/dashboard.tsx
+algora-frontend/src/features/learning/batches.tsx
+algora-frontend/src/features/students/management.tsx
+algora-frontend/src/features/students/shell.tsx
+algora-frontend/src/lib/api/client.ts
+algora-frontend/src/tests/analytics-ui.test.tsx
+algora-frontend/src/tests/students-ui.test.tsx
+```
+
+</details>
+
+### V. Known issues and integration blockers
+
+Live Atlas persistence/index/query-plan verification, real Google OAuth, real Codeforces ownership/synchronization, deployed cookie transport and authenticated browser acceptance remain BLOCKED/unverified. LeetCode and CodeChef trusted automated verification remain unavailable as documented in Phase 8. No provider scraping or fake solves were introduced. Automated component tests establish behavior, not visual mobile/light/dark browser acceptance. Existing real-camera acceptance remains unverified. A large multi-Batch overview can hit explicit bounds and must be narrowed.
+
+### W. Acceptance criteria
+
+PASS below means local implementation and automated checks, not deployed/live acceptance. LIMITED identifies a feature with outstanding live acceptance; BLOCKED indicates unavailable external verification.
+
+| Criterion | Status | Evidence or boundary |
+| --- | --- | --- |
+| 1 Existing Phase 8 intact | PASS | Full coding/report/registration regression suite retained |
+| 2 Super Admin analytics | LIMITED | Scope and counts tested; live authenticated browser/database acceptance pending |
+| 3 College Admin analytics | LIMITED | Current permissions and College denial tested; live acceptance pending |
+| 4 Student personal analytics | LIMITED | Self-only response and UI tested; live acceptance pending |
+| 5 Batch analytics | PASS | Six views, combined metrics and 120-Student fixture |
+| 6 Learning Day analytics | PASS | Published/restricted/empty Day handling and navigation |
+| 7 Attendance calculations | PASS | Separate sessions, finalized snapshots, corrections and denominators |
+| 8 Coding distinctions | PASS | Shared Phase 8 projection/calculator and unavailable/attempted distinctions |
+| 9 Follow-up rules | PASS | Evidence and explicit thresholds; no automated outreach |
+| 10 Filters and pagination | PASS | Strict bounded contracts, URL filters and stable sorting |
+| 11 Charts use backend records | PASS | No production fixtures; accessible exact-value charts |
+| 12 Freshness visible | PASS | Generated/sync timestamps and pending/failed/stale signals |
+| 13 Analytics downloads | PASS | Existing coding reports and reconciled attendance CSV/XLSX |
+| 14 College permissions | PASS | Current scopes and revoked/inactive denial tests |
+| 15 Student self-only access | PASS | Browser-supplied target IDs rejected; private HTTP boundary tests |
+| 16 Zero denominators | PASS | Null/N/A in calculations and UI |
+| 17 Existing exports intact | PASS | Phase 8 workbook/report tests and prior attendance exports preserved |
+| 18 Registration enhancements intact | PASS | Existing registration/profile tests retained |
+| 19 QR attendance intact | PASS | Attendance regressions and protected scanner asset smoke |
+| 20 Coding verification intact | PASS | Existing ownership/evidence/job regressions retained; live provider checks BLOCKED |
+| 21 New tests | PASS | Recorded actual counts above |
+| 22 Regression tests | PASS | Existing assertions preserved |
+| 23 Production builds | PASS | Both local production builds |
+| 24 No secrets or fake production data | PASS | Sanitized documentation and privacy scan; fixtures confined to tests |
+| 25 Remains uncommitted and unpushed | PASS | Baseline HEAD preserved; local source changes only |
+
+### X. Final Git status
+
+Local branch remains `main` at `f3ec0484bfce3fc05ed210f3cde27d40c6594d8f`. The GitHub main reference was read and still matches that Phase 8 commit. Phase 9 source/tests and this README are local working-tree changes; the index is empty. No Phase 9 commit, push or deployment occurred. Only root README.md is tracked among Markdown files. Generated logs, reports and assets remain ignored.
+
+### Y. Next phase readiness
+
+Ready for review of the local Phase 9 implementation. Resolve live database/provider configuration and run authenticated browser acceptance before production sign-off. No Phase 10 feature work has begun. Commit, push and deployment remain separate user-directed steps.
+
+
+## Phase 9 delivery and Phase 10 handoff
+
+The Phase 10 request authorized a Phase 9 delivery commit, and the user explicitly approved pushing Phase 9 only. The refreshed handoff checks passed both applications: 673 backend tests, 244 regular frontend tests, format, lint, typecheck, production builds and zero dependency vulnerabilities. The separately enabled local health/HTTP check is recorded with the handoff. Previous 918-test acceptance remains the baseline. No unrelated file changes were found, and only intended source, tests and root README.md are included.
+
+This README accompanies commit `feat: implement phase 9 analytics and operational dashboards`; its immutable hash is recorded in Git history and the subsequent Phase 10 implementation record. Push outcome is verified before any Phase 10 source work. No credentials, generated output or other Markdown documents belong in this handoff. Phase 10 must remain uncommitted and unpushed.
+
 ## Current local setup
 
 Use Node.js 22 LTS and npm in the complete local workspace. Two independent applications are retained: algora-frontend and algora-backend.
@@ -2173,6 +2419,10 @@ npm run dev
 Frontend runs at http://localhost:3000; Express at http://localhost:5000/api/v1. Sign-in remains unavailable until its real dependencies/configuration are ready. Do not overwrite an existing environment file when revisiting setup.
 
 Run inside each application: npm run format, npm run lint, npm run typecheck, npm test, npm run build and npm audit. Production frontend builds require BACKEND_API_BASE_URL; browser requests use NEXT_PUBLIC_API_BASE_URL=/backend. The optional live health test needs RUN_CONNECTIVITY_TEST=true and the local API running.
+
+### Phase 9 analytics setup
+
+After the existing database, identity and provider setup, open the appropriate role landing page: `/super-admin`, `/admin` or `/student`. Staff have dedicated `/analytics`, `/follow-up` and Batch analytics routes. Combined Admin analytics requires current ACTIVE College assignments with `college.view`, `student.view`, `attendance.manage` and `progress.view`. Existing management permissions still govern linked actions. The MongoDB deployment must support the recent-job `$firstN` aggregation. No new environment variable is required. Review the Phase 9 bounds and acceptance record before production sign-off.
 
 ## Authentication configuration and contracts
 

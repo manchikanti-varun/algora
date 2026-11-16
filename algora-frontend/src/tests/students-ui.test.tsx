@@ -408,3 +408,22 @@ it('reviews correction values with a shared note and explicit confirmation', asy
     ).toBe(true),
   );
 });
+it('opens the existing authorized Student detail flow from an analytics roll-search deep link', async () => {
+  wrap(<StudentManagement initialSearch={profile.rollNumber} />);
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(
+          ([url]) =>
+            String(url).includes('/admin/students?') &&
+            new URL(String(url), 'http://localhost').searchParams.get(
+              'search',
+            ) === profile.rollNumber,
+        ),
+    ).toBe(true),
+  );
+  expect(screen.getByDisplayValue(profile.rollNumber)).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: 'View student' }));
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+});

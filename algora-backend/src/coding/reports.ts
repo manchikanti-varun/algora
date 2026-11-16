@@ -12,6 +12,8 @@ export const reportTypes = [
 ] as const;
 export type ReportType = (typeof reportTypes)[number];
 export const exportFilters = querySchema.safeExtend({
+  year: z.coerce.number().int().min(1).max(4).optional(),
+  search: z.string().trim().max(100).optional(),
   collegeId: idSchema.optional(),
   courseId: idSchema.optional(),
   rollNumber: z

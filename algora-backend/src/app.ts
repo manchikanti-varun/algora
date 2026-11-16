@@ -1,3 +1,5 @@
+import { analyticsRouter } from './analytics/router.js';
+import type { AnalyticsSource } from './analytics/repository.js';
 import { codingRouter } from './coding/router.js';
 import type { ProgressRepository } from './coding/contracts.js';
 import { attendanceRouter } from './attendance/router.js';
@@ -30,6 +32,7 @@ export function createApp(
   curriculum?: CurriculumRepository,
   attendance?: AttendanceRepository,
   coding?: ProgressRepository,
+  analytics?: AnalyticsSource,
 ) {
   const app = express();
   app.disable('x-powered-by');
@@ -92,6 +95,10 @@ export function createApp(
   );
   app.use(express.json({ limit: '32kb' }));
   app.use('/api/v1/auth', authRouter(auth));
+  app.use(
+    '/api/v1/analytics',
+    analyticsRouter(auth, coding, learning, analytics),
+  );
   app.use('/api/v1', codingRouter(auth, coding, learning));
   app.use('/api/v1', attendanceRouter(auth, attendance, learning));
   app.use('/api/v1', curriculumRouter(auth, curriculum, learning));

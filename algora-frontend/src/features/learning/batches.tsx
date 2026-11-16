@@ -143,6 +143,9 @@ export function BatchCatalog({ superAdmin = false }: { superAdmin?: boolean }) {
                   label: 'Actions',
                   render: (b) => (
                     <div className="student-actions">
+                      <Link href={prefix + '/batches/' + b.id + '/analytics'}>
+                        Batch analytics
+                      </Link>
                       <Button asChild variant="outline">
                         <Link href={prefix + '/batches/' + b.id}>Details</Link>
                       </Button>
@@ -365,6 +368,9 @@ export function BatchDetail({
             </dl>
             <p className="learning-prose">{q.data.snapshot.description}</p>
             <div className="student-actions">
+              <Link href={prefix + '/batches/' + id + '/analytics'}>
+                Batch analytics
+              </Link>
               <Link href={prefix + '/batches/' + id + '/attendance'}>
                 Attendance sessions
               </Link>
@@ -404,7 +410,8 @@ export function BatchDetail({
             <p>
               Assign a published curriculum to deliver Learning Days. Use
               attendance sessions for authorized scanning and finalized records.
-              Verified coding progress remains a later phase.
+              Verified coding progress and analytics are available from the
+              Batch analytics workspace.
             </p>
           </section>
         )}

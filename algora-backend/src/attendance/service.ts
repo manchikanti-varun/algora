@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import ExcelJS from 'exceljs';
+import { attendanceFile } from './file.js';
 import { AppError } from '../middleware/errors.js';
 import { LearningService } from '../learning/service.js';
 import { released } from '../curriculum/service.js';
@@ -1126,28 +1126,7 @@ export class AttendanceService {
           (s) => s.studentProfileId === r.studentProfileId,
         )?.percentage ?? 'N/A',
       ]);
-      let buffer: Buffer, mime: string;
-      if (d.format === 'CSV') {
-        buffer = Buffer.from(
-          '\ufeff' +
-            [headers, ...data]
-              .map((row) => row.map(csvCell).join(','))
-              .join('\r\n'),
-        );
-        mime = 'text/csv;charset=utf-8';
-      } else {
-        const workbook = new ExcelJS.Workbook(),
-          sheet = workbook.addWorksheet('Attendance');
-        sheet.addRow(headers);
-        for (const row of data) sheet.addRow(row.map((v) => String(v)));
-        sheet.getRow(1).font = { bold: true };
-        sheet.columns.forEach((col) => {
-          col.width = 24;
-        });
-        buffer = Buffer.from(await workbook.xlsx.writeBuffer());
-        mime =
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      }
+      const file = await attendanceFile(headers, data, d.format);
       const auditTarget = { id: b.id, collegeId: b.collegeId } as SessionRecord;
       await this.audit(
         tx,
@@ -1162,8 +1141,7 @@ export class AttendanceService {
       void c;
       return {
         filename: 'algora-attendance.' + d.format.toLowerCase(),
-        mime,
-        base64: buffer.toString('base64'),
+        ...file,
         rowCount: rows.length,
       };
     });

@@ -1262,3 +1262,115 @@ h3 {
 .dark .status-solved_verified {
   color: var(--accent);
 }
+/* Phase 9 analytics use the existing theme tokens in both color modes. */
+.analytics-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+}
+.analytics-kpis .student-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0;
+  min-width: 0;
+}
+.analytics-kpis strong {
+  font-size: 1.9rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.analytics-kpis span,
+.analytics-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.analytics-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  margin: 1rem 0;
+}
+.analytics-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 140px;
+  font-size: 0.85rem;
+}
+.analytics-filters input,
+.analytics-filters select {
+  max-width: 100%;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  color: var(--foreground);
+}
+.analytics-date-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+.analytics-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
+}
+.analytics-chart {
+  margin: 1rem 0;
+}
+.analytics-chart figcaption {
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+.analytics-chart svg {
+  width: 100%;
+  min-width: 500px;
+  max-height: 300px;
+  fill: #16b89a;
+}
+.analytics-chart text {
+  font-size: 11px;
+  fill: currentColor;
+}
+.analytics-gridline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.analytics-line {
+  stroke: #16b89a;
+  stroke-width: 3;
+}
+.analytics-actions {
+  display: grid;
+  gap: 0.7rem;
+  padding-left: 1.25rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 640px) {
+  .analytics-filters > *,
+  .analytics-date-form,
+  .analytics-date-form label {
+    width: 100%;
+  }
+  .analytics-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .analytics-kpis strong {
+    font-size: 1.5rem;
+  }
+  .analytics-kpis .student-card {
+    padding: 0.85rem;
+  }
+  .analytics-tabs .button {
+    flex: 1 1 40%;
+    font-size: 0.8rem;
+  }
+}

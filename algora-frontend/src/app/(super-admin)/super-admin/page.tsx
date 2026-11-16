@@ -1,3 +1,4 @@
+import { OperationalDashboard } from '@/features/analytics/dashboard';
 import { SuperAdminSection } from '@/features/super-admin/section';
 import { SuperAdminOverview } from '@/features/super-admin/overview';
 export const dynamic = 'force-dynamic';
@@ -8,6 +9,7 @@ export default async function SuperAdmin() {
       title="A clear view. A stronger platform."
       description="Live college, administrator and access-request activity across Algora."
     >
+      <OperationalDashboard superAdmin />
       <SuperAdminOverview />
     </SuperAdminSection>
   );

@@ -1,0 +1,250 @@
+import { z } from 'zod';
+export const coding = z.object({
+  assigned: z.number(),
+  solved: z.number(),
+  attempted: z.number(),
+  noVerifiedSolve: z.number(),
+  unavailable: z.number(),
+  completion: z.number().nullable(),
+  coverage: z.number().nullable(),
+});
+export const attendance = z.object({
+  eligible: z.number(),
+  present: z.number(),
+  absent: z.number(),
+  excused: z.number(),
+  unmarked: z.number(),
+  corrected: z.number(),
+  percentage: z.number().nullable(),
+});
+const page = <T extends z.ZodType>(item: T) =>
+  z.object({
+    items: z.array(item),
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+    totalPages: z.number(),
+  });
+const follow = z.object({
+  id: z.string(),
+  studentId: z.string(),
+  name: z.string(),
+  roll: z.string(),
+  batchId: z.string(),
+  batch: z.string(),
+  reason: z.string(),
+  absent: z.number(),
+  assigned: z.number(),
+  completion: z.number().nullable(),
+  coverage: z.number().nullable(),
+  lastSuccess: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+const batchOption = z.object({
+  id: z.string(),
+  name: z.string(),
+  collegeId: z.string(),
+  courseId: z.string(),
+  course: z.string(),
+  status: z.string(),
+  coding,
+  attendance,
+  lastSuccess: z.string().nullable(),
+});
+export const overviewSchema = z.object({
+  generatedAt: z.string(),
+  summary: z.object({
+    colleges: z.number(),
+    activeColleges: z.number(),
+    registeredStudents: z.number(),
+    verifiedStudents: z.number(),
+    courses: z.number(),
+    activeBatches: z.number(),
+    enrollments: z.number(),
+    enrolledStudents: z.number(),
+    learningDays: z.number(),
+    assignedProblems: z.number(),
+    attendanceSessions: z.number(),
+    coding,
+    attendance,
+    followUpStudents: z.number(),
+  }),
+  colleges: page(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      code: z.string(),
+      registeredStudents: z.number(),
+      verifiedStudents: z.number(),
+      activeBatches: z.number(),
+      enrolledStudents: z.number(),
+      attendance,
+      coding,
+      lastActivity: z.string().nullable(),
+    }),
+  ),
+  batches: z.array(batchOption),
+  alerts: page(
+    z.object({
+      id: z.string(),
+      batchId: z.string().nullable(),
+      message: z.string(),
+      target: z.string(),
+    }),
+  ),
+  followUp: page(follow),
+});
+const mark = z.object({
+  sessionId: z.string(),
+  studentId: z.string(),
+  roll: z.string(),
+  name: z.string(),
+  day: z.number(),
+  title: z.string(),
+  type: z.string(),
+  sessionStatus: z.string(),
+  status: z.string(),
+  corrected: z.boolean(),
+  updatedAt: z.string(),
+  official: z.boolean(),
+});
+const day = z.object({
+  id: z.string(),
+  day: z.number(),
+  title: z.string(),
+  publishedAssignments: z.number(),
+  eligibleStudents: z.number(),
+  coding,
+  morning: attendance,
+  afternoon: attendance,
+});
+export const batchSchema = z.object({
+  generatedAt: z.string(),
+  batch: z.object({
+    id: z.string(),
+    name: z.string(),
+    college: z.string(),
+    collegeId: z.string(),
+    course: z.string(),
+    courseId: z.string(),
+    status: z.string(),
+    curriculumRevisionId: z.string().nullable(),
+  }),
+  summary: z.object({
+    eligibleStudents: z.number(),
+    releasedDays: z.number(),
+    assignedProblems: z.number(),
+    coding,
+    attendance,
+    finalizedSessions: z.number(),
+    pendingSessions: z.number(),
+  }),
+  freshness: z.object({
+    lastSuccess: z.string().nullable(),
+    pending: z.number(),
+    failed: z.number(),
+    stale: z.number().default(0),
+    unavailable: z.number(),
+  }),
+  days: z.array(day),
+  sessions: z.array(
+    z.object({
+      id: z.string(),
+      day: z.number(),
+      title: z.string(),
+      type: z.string(),
+      status: z.string(),
+      eligible: z.number(),
+      present: z.number(),
+      absent: z.number().nullable(),
+      percentage: z.number().nullable(),
+    }),
+  ),
+  platforms: z.array(z.object({ platform: z.string(), coding })),
+  problems: z.array(
+    z.object({
+      id: z.string(),
+      day: z.number(),
+      title: z.string(),
+      platform: z.string(),
+      problemKey: z.string(),
+      coding,
+    }),
+  ),
+  students: page(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      roll: z.string(),
+      year: z.number().nullable(),
+      lastSuccess: z.string().nullable(),
+      lastSync: z.string().nullable(),
+      coding,
+      attendance,
+    }),
+  ),
+  attendanceMatrix: page(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      roll: z.string(),
+      marks: z.array(mark),
+    }),
+  ),
+  followUp: page(follow),
+});
+export const personalSchema = z.object({
+  generatedAt: z.string(),
+  summary: z.object({
+    enrolledCourses: z.number(),
+    activeBatches: z.number(),
+    coding,
+    attendance,
+  }),
+  batches: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      courseId: z.string(),
+      course: z.string(),
+      status: z.string(),
+      coding,
+      currentDay: z.number().nullable(),
+      days: z.array(
+        z.object({
+          id: z.string(),
+          day: z.number(),
+          title: z.string(),
+          coding,
+        }),
+      ),
+      attendance,
+      morning: attendance,
+      afternoon: attendance,
+      lastSuccess: z.string().nullable(),
+      assignments: z.array(
+        z.object({
+          id: z.string(),
+          day: z.number(),
+          title: z.string(),
+          url: z.string().url(),
+          platform: z.string(),
+          status: z.string(),
+        }),
+      ),
+      history: z.array(mark),
+      accounts: z.array(
+        z.object({
+          platform: z.string(),
+          status: z.string(),
+          proofExpired: z.boolean(),
+          syncStatus: z.string(),
+          lastSuccess: z.string().nullable(),
+          lastError: z.string().nullable(),
+        }),
+      ),
+    }),
+  ),
+});
+export type Coding = z.infer<typeof coding>;
+export type Follow = z.infer<typeof follow>;

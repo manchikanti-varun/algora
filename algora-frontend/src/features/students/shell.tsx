@@ -40,6 +40,7 @@ export function StudentShell({
       <header className="student-top">
         <Brand />
         <nav aria-label="Student navigation">
+          <Link href="/student">Overview</Link>
           <Link href="/student/courses">My courses</Link>
           <Link href="/student/batches">My batches</Link>
           <Link href="/student/attendance">My attendance</Link>

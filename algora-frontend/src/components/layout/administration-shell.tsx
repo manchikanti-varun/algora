@@ -34,6 +34,12 @@ export function AdministrationShell({
     role === 'SUPER_ADMIN'
       ? [
           { label: 'Overview', href: '/super-admin', icon: LayoutDashboard },
+          {
+            label: 'Analytics',
+            href: '/super-admin/analytics',
+            icon: LayoutDashboard,
+          },
+          { label: 'Follow-up', href: '/super-admin/follow-up', icon: Users },
           { label: 'Courses', href: '/super-admin/courses', icon: Building2 },
           {
             label: 'Problems',
@@ -77,6 +83,12 @@ export function AdministrationShell({
         ]
       : [
           { label: 'Overview', href: '/admin', icon: LayoutDashboard },
+          {
+            label: 'Analytics',
+            href: '/admin/analytics',
+            icon: LayoutDashboard,
+          },
+          { label: 'Follow-up', href: '/admin/follow-up', icon: Users },
           { label: 'Courses', href: '/admin/courses', icon: Building2 },
           { label: 'Problems', href: '/admin/problems', icon: ScrollText },
           { label: 'Batches', href: '/admin/batches', icon: Users },

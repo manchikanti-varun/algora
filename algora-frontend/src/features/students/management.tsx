@@ -35,15 +35,17 @@ const detailSchema = z.object({
 });
 export function StudentManagement({
   superAdmin = false,
+  initialSearch = '',
 }: {
   superAdmin?: boolean;
+  initialSearch?: string;
 }) {
   const prefix = superAdmin ? '/super-admin' : '/admin';
   const [collegeSearch, setCollegeSearch] = useState(''),
     [collegePage, setCollegePage] = useState(1),
     [collegeLabel, setCollegeLabel] = useState('');
   const [page, setPage] = useState(1),
-    [search, setSearch] = useState(''),
+    [search, setSearch] = useState(initialSearch),
     [status, setStatus] = useState(''),
     [college, setCollege] = useState(''),
     [selected, setSelected] = useState<string | null>(null),
