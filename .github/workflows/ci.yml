@@ -57,7 +57,8 @@ jobs:
           cache-dependency-path: algora-frontend/package-lock.json
 
       - run: npm ci
-      - run: npx tsc --noEmit
+      # Next.js generates global route types (LayoutProps, PageProps) before tsc can check them.
+      - run: npm run typecheck
       - run: npm run lint
 
       - name: Build
