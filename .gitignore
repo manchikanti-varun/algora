@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.next/
+# every env file except the committed examples
+.env
+.env.*
+!.env.example
+*.log
+docs/poc-results/
+.DS_Store

@@ -1,0 +1,255 @@
+import { Router } from 'express';
+import { Types } from 'mongoose';
+import { z } from 'zod';
+import { badRequest, forbidden, notFound, parse } from '../../lib/errors';
+import { parseCsv } from '../../lib/csv';
+import { normalizeRoll } from '../../lib/normalize';
+import { objectId, pagination } from '../../lib/validate';
+import { requireAuth, requireRole } from '../../middleware/auth';
+import {
+  Batch, BatchChapterAccess, BatchCourse, Chapter, Course, Enrollment, PendingEnrollment, TrainerBatchAssignment, User,
+} from '../../models';
+import { audit } from '../audit/audit';
+import { loadBatchFor, trainerBatchIds } from '../access';
+import { enrollByRoll, resolveCollege } from './enrollment.service';
+
+export const batchesRouter = Router();
+batchesRouter.use(requireAuth, requireRole('SUPER_ADMIN', 'TRAINER'));
+
+const rollSchema = z.string().trim().regex(/^[A-Za-z0-9]{10}$/, 'Roll number must be exactly 10 letters/digits').transform(normalizeRoll);
+const batchFields = {
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(2000),
+  college: z.string().trim().min(2).max(120),
+  startDate: z.coerce.date(),
+  endDate: z.coerce.date(),
+  status: z.enum(['DRAFT', 'ACTIVE', 'COMPLETED', 'ARCHIVED']),
+};
+const dateOrder = (v: { startDate?: Date; endDate?: Date }) => !v.startDate || !v.endDate || v.endDate >= v.startDate;
+
+// ---------- Batches (independent of courses) ----------
+batchesRouter.post('/', async (req, res) => {
+  const b = parse(
+    z.object({ name: batchFields.name, description: batchFields.description.default(''), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.default('DRAFT') })
+      .refine(dateOrder, 'endDate must not be before startDate'),
+    req.body,
+  );
+  const { college, ...rest } = b;
+  const batch = await Batch.create({ ...rest, collegeId: college ? (await resolveCollege(college))._id : undefined, createdBy: req.user!._id });
+  if (req.user!.role === 'TRAINER') {
+    await TrainerBatchAssignment.create({ trainerId: req.user!._id, batchId: batch._id, assignedBy: req.user!._id });
+  }
+  await audit(req, 'batch.create', { type: 'Batch', id: batch._id });
+  res.status(201).json(batch);
+});
+
+batchesRouter.get('/', async (req, res) => {
+  const q = parse(pagination.extend({ status: batchFields.status.optional(), q: z.string().trim().max(60).optional() }), req.query);
+  const filter: Record<string, unknown> = q.status ? { status: q.status } : {};
+  if (req.user!.role === 'TRAINER') filter._id = { $in: await trainerBatchIds(req.user!) };
+  if (q.q) filter.name = { $regex: q.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+  const [items, total] = await Promise.all([
+    Batch.find(filter).populate('collegeId', 'name').sort({ createdAt: -1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
+    Batch.countDocuments(filter),
+  ]);
+  const ids = items.map((b) => b._id);
+  const [st, co, pe] = await Promise.all([
+    Enrollment.aggregate([{ $match: { batchId: { $in: ids }, status: 'ACTIVE' } }, { $group: { _id: '$batchId', n: { $sum: 1 } } }]),
+    BatchCourse.aggregate([{ $match: { batchId: { $in: ids }, status: 'ACTIVE' } }, { $group: { _id: '$batchId', n: { $sum: 1 } } }]),
+    PendingEnrollment.aggregate([{ $match: { batchId: { $in: ids }, status: 'PENDING' } }, { $group: { _id: '$batchId', n: { $sum: 1 } } }]),
+  ]);
+  const n = (arr: any[], id: unknown) => arr.find((x) => String(x._id) === String(id))?.n ?? 0;
+  res.json({ items: items.map((b) => ({ ...b, college: (b.collegeId as any)?.name ?? null, collegeId: (b.collegeId as any)?._id ?? null, studentCount: n(st, b._id), courseCount: n(co, b._id), pendingCount: n(pe, b._id) })), total, page: q.page, pageSize: q.pageSize });
+});
+
+batchesRouter.get('/:id', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const [trainers, studentCount, courseCount] = await Promise.all([
+    TrainerBatchAssignment.find({ batchId: batch._id, status: 'ACTIVE' }, 'trainerId').populate('trainerId', 'fullName trainerId').lean(),
+    Enrollment.countDocuments({ batchId: batch._id, status: 'ACTIVE' }),
+    BatchCourse.countDocuments({ batchId: batch._id, status: 'ACTIVE' }),
+  ]);
+  const college = batch.collegeId ? await (await import('../../models/index.js')).College.findById(batch.collegeId, 'name').lean() : null;
+  res.json({ ...batch.toObject(), college: college?.name ?? null, trainers: trainers.map((t) => t.trainerId), studentCount, courseCount });
+});
+
+batchesRouter.patch('/:id', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const b = parse(
+    z.object({ name: batchFields.name.optional(), description: batchFields.description.optional(), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.optional() }).strict(),
+    req.body,
+  );
+  if (batch.status === 'ARCHIVED' && b.status === undefined) throw forbidden('Batch is archived', 'BATCH_ARCHIVED');
+  const merged = { startDate: b.startDate ?? batch.startDate ?? undefined, endDate: b.endDate ?? batch.endDate ?? undefined };
+  if (!dateOrder(merged)) throw badRequest('endDate must not be before startDate');
+  const { college, ...rest } = b;
+  Object.assign(batch, rest);
+  if (college) batch.collegeId = (await resolveCollege(college))._id;
+  await batch.save();
+  await audit(req, 'batch.update', { type: 'Batch', id: batch._id }, rest);
+  res.json(batch);
+});
+
+// ---------- Trainer assignment (Super Admin only) ----------
+const superOnly: import('express').RequestHandler = (req, _res, next) => (req.user!.role === 'SUPER_ADMIN' ? next() : next(forbidden()));
+
+batchesRouter.post('/:id/trainers', superOnly, async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const { trainerId } = parse(z.object({ trainerId: objectId }), req.body);
+  const t = await User.findOne({ _id: trainerId, role: 'TRAINER', status: 'ACTIVE' }, '_id').lean();
+  if (!t) throw notFound('Trainer not found');
+  await TrainerBatchAssignment.updateOne({ trainerId, batchId: batch._id }, { $set: { status: 'ACTIVE', assignedBy: req.user!._id } }, { upsert: true });
+  await audit(req, 'batch.trainer.assign', { type: 'Batch', id: batch._id }, { trainerId });
+  res.status(201).json({ ok: true });
+});
+
+batchesRouter.delete('/:id/trainers/:trainerId', superOnly, async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const trainerId = parse(objectId, req.params.trainerId);
+  await TrainerBatchAssignment.updateOne({ trainerId, batchId: batch._id }, { $set: { status: 'REVOKED' } });
+  await audit(req, 'batch.trainer.revoke', { type: 'Batch', id: batch._id }, { trainerId });
+  res.status(204).end();
+});
+
+// ---------- Enrollment ----------
+batchesRouter.get('/:id/enrollments', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const q = parse(pagination, req.query);
+  const filter = { batchId: batch._id, status: 'ACTIVE' as const };
+  const [rows, total, pending] = await Promise.all([
+    Enrollment.find(filter).sort({ enrolledAt: -1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).populate('studentId', 'fullName rollNumber leetcodeUsername collegeId').lean(),
+    Enrollment.countDocuments(filter),
+    PendingEnrollment.find({ batchId: batch._id, status: 'PENDING' }, 'rollNumber email createdAt').lean(), // never expose claim hashes
+  ]);
+  res.json({ items: rows, total, pending, page: q.page, pageSize: q.pageSize });
+});
+
+batchesRouter.post('/:id/enrollments', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const b = parse(z.object({ rollNumber: rollSchema, email: z.string().trim().toLowerCase().email().optional() }), req.body);
+  const out = await enrollByRoll(batch._id, b.rollNumber, req.user!._id, b.email);
+  await audit(req, 'enrollment.add', { type: 'Batch', id: batch._id }, { rollNumber: b.rollNumber, result: out.result });
+  res.status(201).json(out);
+});
+
+batchesRouter.delete('/:id/enrollments/:studentId', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const studentId = parse(objectId, req.params.studentId);
+  const r = await Enrollment.updateOne({ studentId, batchId: batch._id, status: 'ACTIVE' }, { $set: { status: 'REMOVED', removedAt: new Date() } });
+  if (!r.matchedCount) throw notFound('Enrollment not found');
+  await audit(req, 'enrollment.remove', { type: 'Batch', id: batch._id }, { studentId });
+  res.status(204).end();
+});
+
+/** Accepts `text/csv` body or JSON `{csv}`. Columns: rollNumber (required), email (optional). */
+batchesRouter.post('/:id/enrollments/import', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const text = typeof req.body === 'string' ? req.body : parse(z.object({ csv: z.string().min(1) }), req.body).csv;
+  const rows = parseCsv(text);
+  if (!('rollnumber' in rows[0])) throw badRequest('CSV must have a rollNumber column');
+  const seen = new Set<string>();
+  const results: Array<Record<string, unknown>> = [];
+  for (const [i, row] of rows.entries()) {
+    const line = i + 2;
+    const roll = rollSchema.safeParse(row.rollnumber);
+    if (!roll.success) { results.push({ line, rollNumber: row.rollnumber, result: 'INVALID', error: 'Invalid roll number' }); continue; }
+    if (seen.has(roll.data)) { results.push({ line, rollNumber: roll.data, result: 'DUPLICATE_IN_FILE' }); continue; }
+    seen.add(roll.data);
+    const email = row.email ? z.string().email().safeParse(row.email.toLowerCase()) : null;
+    if (email && !email.success) { results.push({ line, rollNumber: roll.data, result: 'INVALID', error: 'Invalid email' }); continue; }
+    results.push({ line, ...(await enrollByRoll(batch._id, roll.data, req.user!._id, email?.data)) });
+  }
+  const summary = results.reduce<Record<string, number>>((a, r) => ((a[r.result as string] = (a[r.result as string] ?? 0) + 1), a), {});
+  await audit(req, 'enrollment.import', { type: 'Batch', id: batch._id }, summary);
+  res.status(200).json({ summary, results });
+});
+
+// ---------- Batch <-> course assignment (many-to-many) ----------
+batchesRouter.get('/:id/courses', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const items = await BatchCourse.find({ batchId: batch._id }).populate('courseId', 'title status').lean();
+  res.json({ items });
+});
+
+batchesRouter.post('/:id/courses', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const { courseId } = parse(z.object({ courseId: objectId }), req.body);
+  const course = await Course.findById(courseId).lean();
+  if (!course || course.status !== 'PUBLISHED') throw badRequest('Only published courses can be assigned');
+  // Create or reactivate. No chapter access rows are created (hidden by default); enrollments and progress untouched.
+  const bc = await BatchCourse.findOneAndUpdate(
+    { batchId: batch._id, courseId },
+    { $set: { status: 'ACTIVE' }, $setOnInsert: { assignedBy: req.user!._id, assignedAt: new Date() } },
+    { upsert: true, returnDocument: 'after' },
+  );
+  await audit(req, 'batch.course.assign', { type: 'Batch', id: batch._id }, { courseId });
+  res.status(201).json(bc);
+});
+
+batchesRouter.patch('/:id/courses/:courseId', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const courseId = parse(objectId, req.params.courseId);
+  const { status } = parse(z.object({ status: z.enum(['ACTIVE', 'INACTIVE']) }).strict(), req.body);
+  const bc = await BatchCourse.findOneAndUpdate({ batchId: batch._id, courseId }, { $set: { status } }, { returnDocument: 'after' });
+  if (!bc) throw notFound('Assignment not found');
+  await audit(req, 'batch.course.status', { type: 'Batch', id: batch._id }, { courseId, status });
+  res.json(bc);
+});
+
+// ---------- Chapter visibility (per batch-course) ----------
+async function setVisibility(batchCourseId: Types.ObjectId, chapterIds: Types.ObjectId[], isVisible: boolean, by: Types.ObjectId) {
+  const now = new Date();
+  const set: Record<string, unknown> = { isVisible };
+  if (isVisible) { set.unlockedAt = now; set.unlockedBy = by; }
+  // Atomic per-document upsert; the unique (batchCourseId, chapterId) index makes concurrent calls converge.
+  await BatchChapterAccess.bulkWrite(chapterIds.map((chapterId) => ({ updateOne: { filter: { batchCourseId, chapterId }, update: { $set: set }, upsert: true } })), { ordered: false });
+}
+
+async function activeAssignment(batchId: Types.ObjectId, courseId: string) {
+  const bc = await BatchCourse.findOne({ batchId, courseId, status: 'ACTIVE' });
+  if (!bc) throw notFound('Course is not actively assigned to this batch');
+  return bc;
+}
+
+batchesRouter.get('/:id/chapter-access', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
+  const bcs = await BatchCourse.find({ batchId: batch._id }).populate('courseId', 'title').lean();
+  const out = [];
+  for (const bc of bcs) {
+    const chapters = await Chapter.find({ courseId: (bc.courseId as any)._id, status: 'ACTIVE' }).sort({ order: 1 }).lean();
+    const access = await BatchChapterAccess.find({ batchCourseId: bc._id }).lean();
+    const vis = new Map(access.map((a) => [String(a.chapterId), a]));
+    out.push({
+      batchCourseId: bc._id, status: bc.status, course: bc.courseId,
+      chapters: chapters.map((c) => ({ chapterId: c._id, title: c.title, order: c.order, isVisible: vis.get(String(c._id))?.isVisible === true, unlockedAt: vis.get(String(c._id))?.unlockedAt })),
+    });
+  }
+  res.json({ items: out });
+});
+
+batchesRouter.put('/:id/courses/:courseId/chapters/:chapterId/access', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const courseId = parse(objectId, req.params.courseId);
+  const chapterId = parse(objectId, req.params.chapterId);
+  const { isVisible } = parse(z.object({ isVisible: z.boolean() }).strict(), req.body);
+  const bc = await activeAssignment(batch._id, courseId);
+  if (!(await Chapter.exists({ _id: chapterId, courseId, status: 'ACTIVE' }))) throw notFound('Chapter not found in this course');
+  await setVisibility(bc._id, [new Types.ObjectId(chapterId)], isVisible, req.user!._id);
+  await audit(req, isVisible ? 'chapter.unlock' : 'chapter.hide', { type: 'Batch', id: batch._id }, { courseId, chapterId });
+  res.json({ chapterId, isVisible });
+});
+
+batchesRouter.post('/:id/chapter-access/bulk', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const b = parse(
+    z.object({ courseId: objectId, isVisible: z.boolean(), chapterIds: z.array(objectId).min(1).max(500).optional(), all: z.literal(true).optional() })
+      .refine((v) => !!v.chapterIds !== !!v.all, 'Provide exactly one of chapterIds or all'),
+    req.body,
+  );
+  const bc = await activeAssignment(batch._id, b.courseId);
+  const chapters = await Chapter.find({ courseId: b.courseId, status: 'ACTIVE', ...(b.all ? {} : { _id: { $in: b.chapterIds } }) }, '_id').lean();
+  if (!b.all && chapters.length !== new Set(b.chapterIds).size) throw badRequest('Some chapters do not belong to this course');
+  await setVisibility(bc._id, chapters.map((c) => c._id), b.isVisible, req.user!._id);
+  await audit(req, 'chapter.bulk', { type: 'Batch', id: batch._id }, { courseId: b.courseId, isVisible: b.isVisible, count: chapters.length });
+  res.json({ updated: chapters.length, isVisible: b.isVisible });
+});
