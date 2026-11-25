@@ -4,7 +4,6 @@ Bootcamp platform: courses with LeetCode problems, batches with per-batch chapte
 
 - `algora-frontend/`: Next.js 16 (Vercel)
 - `algora-backend/`: Express 5 + MongoDB (Railway + Atlas)
-- `docs/`: **`PRODUCTION.md` (go-live: exact variables and checklist)**, `ARCHITECTURE.md`, `STATUS.md` (test results, blockers), `DEPLOYMENT.md`, `LEETCODE_PROVIDERS.md`, permission request and live PoC runbook
 
 ## Run locally
 

@@ -8,3 +8,6 @@ dist/
 *.log
 docs/poc-results/
 .DS_Store
+
+# project documentation (kept locally, not in the repository)
+docs/
