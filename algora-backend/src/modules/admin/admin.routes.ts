@@ -8,7 +8,7 @@ import { requireAuth, requireRole } from '../../middleware/auth';
 import { AuditLog, Batch, College, Enrollment, LeetcodeLink, LeetcodeSyncLog, PendingEnrollment, User } from '../../models';
 import { audit } from '../audit/audit';
 import { loadBatchFor, trainerBatchIds } from '../access';
-import { requireRevalidation, revokeLinks } from '../leetcode/links.service';
+import { correctUsername, revokeLinks } from '../leetcode/links.service';
 
 export const collegesRouter = Router();
 export const studentsRouter = Router();
@@ -55,26 +55,39 @@ collegesRouter.patch('/:id', superOnly, async (req, res) => {
 // ---------- Students (management) ----------
 /** Trainers see students enrolled in their batches only. Contact details are not included in lists. */
 studentsRouter.get('/', async (req, res) => {
-  const q = parse(pagination.extend({ q: z.string().trim().max(60).optional(), collegeId: objectId.optional(), batchId: objectId.optional(), status: z.enum(['ACTIVE', 'SUSPENDED']).optional() }), req.query);
+  const q = parse(pagination.extend({
+    q: z.string().trim().max(60).optional(), collegeId: objectId.optional(), batchId: objectId.optional(), status: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
+    /** Account-linking and synchronization issues a trainer needs to act on. */
+    issue: z.enum(['MISSING_USERNAME', 'SYNC_FAILURE', 'POSSIBLE_GAP', 'NO_SUBMISSIONS', 'SUBMISSIONS_UNAVAILABLE', 'ACCOUNT_NOT_FOUND']).optional(),
+  }), req.query);
   const filter: Record<string, unknown> = { role: 'STUDENT' };
+  if (q.issue === 'SYNC_FAILURE') filter['sync.status'] = { $in: ['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED', 'VERIFICATION_UNAVAILABLE'] };
+  if (q.issue === 'POSSIBLE_GAP') filter['sync.possibleGap'] = true;
+  if (q.issue === 'NO_SUBMISSIONS') filter['sync.status'] = 'NO_SUBMISSIONS_OBSERVED';
+  if (q.issue === 'SUBMISSIONS_UNAVAILABLE') filter['sync.status'] = 'SUBMISSIONS_UNAVAILABLE';
+  if (q.issue === 'ACCOUNT_NOT_FOUND') filter['sync.status'] = 'ACCOUNT_NOT_FOUND';
   let batchIds: Types.ObjectId[] | null = null;
   if (req.user!.role === 'TRAINER') batchIds = await trainerBatchIds(req.user!);
   if (q.batchId) batchIds = (batchIds ?? [new Types.ObjectId(q.batchId)]).filter((b) => String(b) === q.batchId);
   if (batchIds) filter._id = { $in: await Enrollment.distinct('studentId', { batchId: { $in: batchIds }, status: 'ACTIVE' }) };
+  if (q.issue === 'MISSING_USERNAME') {
+    const linked = await LeetcodeLink.distinct('studentId', { isCurrent: true });
+    filter._id = { ...(filter._id as object | undefined), $nin: linked };
+  }
   if (q.collegeId) filter.collegeId = q.collegeId;
   if (q.status) filter.status = q.status;
   if (q.q) filter.$or = [{ fullName: { $regex: escape(q.q), $options: 'i' } }, { rollNumber: { $regex: escape(q.q.toUpperCase()) } }];
   const [items, total] = await Promise.all([
-    User.find(filter, 'fullName rollNumber collegeId status sync.status sync.lastSuccessAt createdAt').populate('collegeId', 'name').sort({ rollNumber: 1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
+    User.find(filter, 'fullName rollNumber collegeId status sync.status sync.lastSuccessAt sync.possibleGap sync.lastError sync.statusDetail createdAt').populate('collegeId', 'name').sort({ rollNumber: 1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
     User.countDocuments(filter),
   ]);
-  const links = await LeetcodeLink.find({ studentId: { $in: items.map((i) => i._id) }, $or: [{ isCurrent: true }, { isPending: true }] }, 'studentId status username').lean();
+  const links = await LeetcodeLink.find({ studentId: { $in: items.map((i) => i._id) }, isCurrent: true }, 'studentId status username linkedAt').lean();
   const enr = await Enrollment.aggregate([{ $match: { studentId: { $in: items.map((i) => i._id) }, status: 'ACTIVE', ...(batchIds ? { batchId: { $in: batchIds } } : {}) } }, { $group: { _id: '$studentId', n: { $sum: 1 } } }]);
   res.json({ total, page: q.page, pageSize: q.pageSize, items: items.map((i) => {
-    const l = links.filter((x) => String(x.studentId) === String(i._id));
-    const cur = l.find((x) => x.status !== 'PENDING_VERIFICATION') ?? l[0];
-    return { _id: i._id, fullName: i.fullName, rollNumber: i.rollNumber, college: (i.collegeId as any)?.name ?? null, status: i.status, syncStatus: i.sync?.status ?? 'IDLE', lastSyncAt: i.sync?.lastSuccessAt ?? null,
-      link: cur ? { status: cur.status, username: cur.username } : null, batches: enr.find((e) => String(e._id) === String(i._id))?.n ?? 0 };
+    const cur = links.find((x) => String(x.studentId) === String(i._id));
+    return { _id: i._id, fullName: i.fullName, rollNumber: i.rollNumber, college: (i.collegeId as any)?.name ?? null, status: i.status,
+      syncStatus: i.sync?.status ?? 'IDLE', lastSyncAt: i.sync?.lastSuccessAt ?? null, possibleGap: !!i.sync?.possibleGap, syncError: i.sync?.lastError ?? null, syncDetail: i.sync?.statusDetail ?? null,
+      link: cur ? { status: cur.status, username: cur.username, linkedAt: cur.linkedAt ?? null } : null, batches: enr.find((e) => String(e._id) === String(i._id))?.n ?? 0 };
   }) });
 });
 
@@ -93,12 +106,18 @@ studentsRouter.patch('/:id/status', superOnly, async (req, res) => {
   res.json({ status: u.status });
 });
 
-studentsRouter.post('/:id/leetcode/revalidate', async (req, res) => {
+/**
+ * Trainer/Super Admin correction of a linked username. Uses the student's standing consent, is limited to the batches the
+ * trainer manages, and is audited. It is a correction, not attestation: submissions are still verified automatically.
+ */
+studentsRouter.post('/:id/leetcode/username', async (req, res) => {
   const id = parse(objectId, req.params.id);
   await assertCanManageStudent(req.user!, id);
-  await requireRevalidation(id);
-  await audit(req, 'student.leetcode.revalidate', { type: 'User', id });
-  res.json({ ok: true });
+  const { username, reason } = parse(z.object({ username: z.string().trim().regex(/^[A-Za-z0-9_-]{1,40}$/, 'Invalid LeetCode username'), reason: z.string().trim().min(3).max(300) }).strict(), req.body);
+  const before = await LeetcodeLink.findOne({ studentId: id, isCurrent: true }, 'username').lean();
+  await correctUsername(id, username, req.user!._id);
+  await audit(req, 'student.leetcode.username_corrected', { type: 'User', id }, { from: before?.username ?? null, to: username, reason });
+  res.json({ ok: true, username });
 });
 studentsRouter.post('/:id/leetcode/revoke', superOnly, async (req, res) => {
   const id = parse(objectId, req.params.id);

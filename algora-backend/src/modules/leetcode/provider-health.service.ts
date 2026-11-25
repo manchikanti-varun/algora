@@ -9,6 +9,7 @@ const CORRELATION_WINDOW_MS = 2 * 60_000;
 
 export type StateDoc = {
   _id: string; totalRequests?: number; successes?: number; failures?: number; rateLimited?: number; consecutiveFailures?: number;
+  acceptedRetrievals?: number; lastAcceptedRetrievalAt?: Date;
   latencyEwmaMs?: number; lastSuccessAt?: Date; lastFailureAt?: Date; lastError?: string; lastErrorKind?: string;
   openedAt?: Date | null; openCount?: number; probeUntil?: Date | null; rateLimitedUntil?: Date | null;
   blockedUntil?: Date | null; blockedReason?: string; networkFailures?: { provider: string; at: Date }[];
@@ -23,13 +24,16 @@ export const event = (e: { type: string; provider?: string; toProvider?: string;
   ProviderEvent.create(e as Record<string, unknown>).catch(() => {});
 
 /** Success: reset failures, update latency (EWMA 0.2), close the breaker if it was open. */
-export async function recordSuccess(id: string, latencyMs: number) {
+export async function recordSuccess(id: string, latencyMs: number, retrievedAccepted = false) {
   const before = await ProviderState.findOneAndUpdate(
     { _id: pKey(id) },
     [{ $set: {
       kind: 'PROVIDER', totalRequests: { $add: [{ $ifNull: ['$totalRequests', 0] }, 1] }, successes: { $add: [{ $ifNull: ['$successes', 0] }, 1] },
       consecutiveFailures: 0, lastSuccessAt: '$$NOW', latencyEwmaMs: { $add: [{ $multiply: [{ $ifNull: ['$latencyEwmaMs', latencyMs] }, 0.8] }, latencyMs * 0.2] },
       openedAt: null, openCount: 0, probeUntil: null, rateLimitedUntil: null,
+      ...(retrievedAccepted ? {
+        acceptedRetrievals: { $add: [{ $ifNull: ['$acceptedRetrievals', 0] }, 1] }, lastAcceptedRetrievalAt: '$$NOW',
+      } : {}),
     } }],
     { upsert: true, returnDocument: 'before', updatePipeline: true },
   ).lean<StateDoc>();

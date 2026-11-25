@@ -63,9 +63,9 @@ import { LeetcodeLink, linkFlags, SolveEvidence, User } from '../src/models';
 import { resetTxSupportCache } from '../src/lib/lease';
 resetTxSupportCache();
 
-/** Create a VERIFIED LeetCode link for a student (test shortcut for the ownership flow). */
+/** Create a LINKED LeetCode account for a student (test shortcut for the linking flow). */
 export async function verifiedLink(studentId: any, username: string) {
-  const link = await LeetcodeLink.create({ studentId, username, usernameNorm: username.toLowerCase(), status: 'VERIFIED', ...linkFlags('VERIFIED'), kind: 'INITIAL', challenge: 'c', verifiedAt: new Date(), consentedAt: new Date() });
+  const link = await LeetcodeLink.create({ studentId, username, usernameNorm: username.toLowerCase(), status: 'LINKED', ...linkFlags('LINKED'), kind: 'INITIAL', linkedAt: new Date(), consentedAt: new Date() });
   await User.updateOne({ _id: studentId }, { $set: { leetcodeUsername: username } });
   return link;
 }

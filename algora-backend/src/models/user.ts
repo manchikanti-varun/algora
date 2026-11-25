@@ -29,7 +29,13 @@ const userSchema = new Schema(
     leetcodeUsernameChangedAt: Date,
     /** LeetCode sync state (per student). Evidence itself lives in solve_evidence. */
     sync: {
-      status: { type: String, enum: ['IDLE', 'SYNCING', 'SYNC_SUCCESS', 'SYNC_FAILED', 'RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'VERIFICATION_UNAVAILABLE', 'SYNC_PAUSED'], default: 'IDLE' },
+      status: {
+        type: String,
+        enum: ['IDLE', 'SYNCING', 'SYNC_PENDING', 'SYNC_SUCCESS', 'POSSIBLE_EVIDENCE_GAP', 'NO_SUBMISSIONS_OBSERVED', 'SUBMISSIONS_UNAVAILABLE', 'ACCOUNT_NOT_FOUND', 'SYNC_FAILED', 'RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'VERIFICATION_UNAVAILABLE', 'SYNC_PAUSED'],
+        default: 'IDLE',
+      },
+      /** Extra detail for the last result (e.g. INCOMPLETE_VISIBILITY, ACCOUNT_PROBE_UNAVAILABLE). */
+      statusDetail: String,
       lastProvider: String,
       coverage: { type: String, enum: ['FULL', 'REDUCED'] },
       lastAttemptAt: Date,

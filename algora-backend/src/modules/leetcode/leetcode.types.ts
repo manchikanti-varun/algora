@@ -39,5 +39,13 @@ export class ProviderError extends Error {
   get scope() { return scopeOf(this.kind); }
 }
 
-export const SYNC_STATES = ['IDLE', 'SYNCING', 'SYNC_SUCCESS', 'SYNC_FAILED', 'RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'VERIFICATION_UNAVAILABLE', 'SYNC_PAUSED'] as const;
+/**
+ * Outcomes of a synchronization attempt. Empty windows are described honestly instead of being reported as a success with
+ * zero solves: NO_SUBMISSIONS_OBSERVED, SUBMISSIONS_UNAVAILABLE and ACCOUNT_NOT_FOUND are distinct situations.
+ */
+export const SYNC_STATES = [
+  'IDLE', 'SYNCING', 'SYNC_PENDING', 'SYNC_SUCCESS', 'POSSIBLE_EVIDENCE_GAP',
+  'NO_SUBMISSIONS_OBSERVED', 'SUBMISSIONS_UNAVAILABLE', 'ACCOUNT_NOT_FOUND',
+  'SYNC_FAILED', 'RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'VERIFICATION_UNAVAILABLE', 'SYNC_PAUSED',
+] as const;
 export type SyncState = (typeof SYNC_STATES)[number];

@@ -3,7 +3,7 @@ import { conflict, forbidden } from '../../lib/errors';
 import { nameKey, normalizeEmail, safeEqual, sha256 } from '../../lib/normalize';
 import { maybeTransaction } from '../../lib/lease';
 import { College, Enrollment, LeetcodeLink, linkFlags, PendingEnrollment, TrainerRequest, User, type UserDoc } from '../../models';
-import { expireStalePending, newChallenge } from '../leetcode/links.service';
+import { normalizeUsername } from '../leetcode/links.service';
 import type { GoogleIdentity } from './google';
 import { loginOrCreateSuperAdmin } from './superAdmin';
 
@@ -67,8 +67,8 @@ export async function registerStudent(id: GoogleIdentity, input: StudentInput) {
   if (await User.exists({ email: id.email })) throw conflict('Email already registered', 'IDENTITY_CONFLICT');
   if (await TrainerRequest.exists({ googleSub: id.sub })) throw conflict('This account has a trainer access request', 'ACCOUNT_CONFLICT');
   if (await User.exists({ rollNumber: input.rollNumber })) throw conflict('Roll number already registered', 'ROLL_NUMBER_TAKEN');
-  await expireStalePending(input.leetcodeUsername.toLowerCase());
-  if (await LeetcodeLink.exists({ usernameNorm: input.leetcodeUsername.toLowerCase(), isActive: true })) throw conflict('That LeetCode username is already linked to another student', 'USERNAME_IN_USE');
+  const leetcodeUsername = normalizeUsername(input.leetcodeUsername);
+  if (await LeetcodeLink.exists({ usernameNorm: leetcodeUsername.toLowerCase(), isActive: true })) throw conflict('That LeetCode username is already linked to another student', 'USERNAME_IN_USE');
 
   // A roll number reserved by a pending enrollment can only be claimed by the matching verified email or by the claim code.
   const pendings = await PendingEnrollment.find({ rollNumber: input.rollNumber, status: 'PENDING' });
@@ -88,11 +88,13 @@ export async function registerStudent(id: GoogleIdentity, input: StudentInput) {
     const [u] = await User.create([{
       googleSub: id.sub, email: id.email, role: 'STUDENT', firstName: input.firstName, lastName: input.lastName,
       fullName: `${input.firstName} ${input.lastName}`, picture: id.picture, rollNumber: input.rollNumber, collegeId: college._id,
-      mobile: input.mobile, leetcodeUsername: input.leetcodeUsername, lastLoginAt: new Date(),
+      mobile: input.mobile, leetcodeUsername, lastLoginAt: new Date(),
     }], { session });
+    // Linking is immediate: the username is the account whose public accepted submissions Algora reads. It is not treated
+    // as proof of ownership, and no provider request is made at registration.
     await LeetcodeLink.create([{
-      studentId: u._id, username: input.leetcodeUsername, usernameNorm: input.leetcodeUsername.toLowerCase(), status: 'PENDING_VERIFICATION', ...linkFlags('PENDING_VERIFICATION'),
-      kind: 'INITIAL', challenge: newChallenge(), challengeIssuedAt: new Date(), consentedAt: new Date(),
+      studentId: u._id, username: leetcodeUsername, usernameNorm: leetcodeUsername.toLowerCase(), status: 'LINKED', ...linkFlags('LINKED'),
+      kind: 'INITIAL', consentedAt: new Date(), linkedAt: new Date(),
     }], { session });
     for (const p of authorised) {
       const claimed = await PendingEnrollment.findOneAndUpdate({ _id: p._id, status: 'PENDING' }, { $set: { status: 'CLAIMED', claimedBy: u._id, claimedAt: new Date() } }, { session });

@@ -13,7 +13,7 @@ let failed = 0;
 const step = async (name, fn) => {
   const t = Date.now();
   try { await fn(); results.push(`PASS  ${name} (${Date.now() - t} ms)`); }
-  catch (e) { failed++; results.push(`FAIL  ${name}: ${String(e.message ?? e).split('\n')[0]}`); }
+  catch (e) { failed++; results.push(`FAIL  ${name}: ${String(e.message ?? e)}`); }
 };
 const assert = (c, m) => { if (!c) throw new Error(m); };
 const tok = (sub, email, name) => `tok|${sub}|${email}|${name}`;
@@ -130,7 +130,9 @@ try {
       await p.locator('dialog[open]').waitFor({ state: 'detached' }).catch(() => {});
     }
     const addProblem = async (chapter, url, title, d) => {
-      await p.locator('section', { hasText: chapter }).filter({ has: p.getByRole('button', { name: 'Add problem' }) }).first().getByRole('button', { name: 'Add problem' }).click();
+      await p.locator('section', { hasText: chapter }).filter({ has: p.getByRole('button', { name: 'Add problems', exact: true }) }).first().getByRole('button', { name: 'Add problems', exact: true }).click();
+      await p.getByText('Add Manually', { exact: true }).click();
+      await p.getByRole('button', { name: 'Open manual entry' }).click();
       const dlg = p.locator('dialog[open]');
       await dlg.getByLabel('LeetCode URL').fill(url);
       await dlg.getByLabel('Title').fill(title);
@@ -157,6 +159,85 @@ try {
     await shot(p, '03-course-editor');
   });
 
+  await step('Problem Library imports CSV, looks up an exact number, and bulk assigns in order', async () => {
+    const p = admin.page;
+    const course = p.url();
+    await p.getByRole('link', { name: 'Problem Library' }).click();
+    await p.getByRole('button', { name: 'Import metadata' }).click();
+    const dialog = p.locator('dialog[open]');
+    await dialog.getByLabel('Source and access reference').fill('Test fixture');
+    await dialog.getByLabel('Choose or drop a CSV or JSON file').setInputFiles({
+      name: 'fixture.csv', mimeType: 'text/csv',
+      buffer: Buffer.from([
+        'problemNumber,title,slug,difficulty,url,topics,isPremium',
+        '704,Binary Search,binary-search,Easy,https://leetcode.com/problems/binary-search/,Binary Search,false',
+        '20,Valid Parentheses,valid-parentheses,Easy,https://leetcode.com/problems/valid-parentheses/,Stack,false',
+        '121,Best Time to Buy and Sell Stock,best-time-to-buy-and-sell-stock,Easy,https://leetcode.com/problems/best-time-to-buy-and-sell-stock/,Array,false',
+      ].join('\n')),
+    });
+    await dialog.getByRole('button', { name: 'Preview import' }).click();
+    await dialog.getByText('Preview · 3 insert').waitFor();
+    await dialog.getByRole('button', { name: 'Apply import' }).click();
+    await dialog.getByText('Import results · 3 insert').waitFor();
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await p.getByText('3 catalog entries · 3 with problem numbers').waitFor();
+    await p.getByText('Course published', { exact: true }).waitFor({ state: 'hidden' });
+    await shot(p, '13-problem-library');
+    for (const width of [375, 768, 1024, 1440]) {
+      await p.setViewportSize({ width, height: 900 });
+      assert(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `catalog spills at ${width}px`);
+      if (width === 375) await shot(p, '13-problem-library-mobile');
+    }
+    await p.setViewportSize({ width: 1360, height: 900 });
+
+    await p.goto(course);
+    await p.locator('section', { hasText: 'Strings' }).getByRole('button', { name: 'Add problems', exact: true }).click();
+    const search = dialog.getByLabel('Problem number, title, slug or URL');
+    await search.fill('704');
+    await dialog.getByRole('button', { name: 'Add Binary Search' }).waitFor();
+    await shot(p, '14-add-problems');
+    await p.setViewportSize({ width: 375, height: 800 });
+    await shot(p, '14-add-problems-mobile');
+    await p.setViewportSize({ width: 1360, height: 900 });
+    const assignment = p.waitForResponse((response) => response.url().includes('/problem-library/chapters/') && response.request().method() === 'POST');
+    await search.press('Enter');
+    const response = await assignment;
+    const outcome = await response.json();
+    assert(outcome.added === 1, JSON.stringify(outcome));
+    await dialog.getByText('Already added').waitFor();
+    await dialog.getByText('Bulk Add', { exact: true }).click();
+    await dialog.getByLabel('Problem identifiers').fill('121, 20, 121');
+    await dialog.getByRole('button', { name: 'Preview matches' }).click();
+    await dialog.getByText('duplicate', { exact: true }).waitFor();
+    await shot(p, '15-bulk-add');
+    await dialog.getByRole('button', { name: 'Add 2 problems to chapter' }).click();
+    await p.getByText('2 added · 0 already assigned').waitFor();
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    const titles = await p.locator('section', { hasText: 'Strings' }).locator('li > a').allTextContents();
+    assert(titles.slice(-3).join('|') === 'Binary Search|Best Time to Buy and Sell Stock|Valid Parentheses', 'catalog assignment order changed');
+    const strings = p.locator('section').filter({ has: p.getByRole('heading', { name: /Strings/ }) });
+    const arrays = p.locator('section').filter({ has: p.getByRole('heading', { name: /Arrays/ }) });
+    await strings.getByRole('checkbox', { name: 'Select Binary Search' }).check();
+    await strings.getByLabel('Action').selectOption('copy');
+    await strings.getByLabel('Destination chapter').selectOption({ label: 'Arrays' });
+    await strings.getByRole('button', { name: 'Apply' }).click();
+    await arrays.getByRole('link', { name: 'Binary Search' }).waitFor();
+
+    const exported = p.waitForEvent('download');
+    await arrays.getByRole('button', { name: 'Export problems' }).click();
+    const file = await exported;
+    const chunks = [];
+    for await (const chunk of await file.createReadStream()) chunks.push(chunk);
+    assert(Buffer.concat(chunks).toString().includes('Binary Search,EASY,binary-search'), 'chapter export did not include the copied problem');
+
+    await arrays.getByRole('checkbox', { name: 'Select Binary Search' }).check();
+    await arrays.getByRole('button', { name: 'Apply' }).click();
+    await confirmDialog(p, 'Archive problems');
+    await arrays.getByRole('link', { name: 'Binary Search' }).waitFor({ state: 'hidden' });
+    assert(await strings.getByRole('link', { name: 'Binary Search' }).isVisible(), 'archiving a copy changed its source');
+
+  });
+
   await step('Admin creates a batch with zero courses, assigns the course (chapters hidden), unlocks one chapter', async () => {
     const p = admin.page;
     await p.goto(`${FE}/manage/batches/new`);
@@ -176,6 +257,23 @@ try {
     await p.getByText('“Arrays” unlocked').waitFor();
     await p.getByText('1 of 2 unlocked').waitFor();
     await shot(p, '04-visibility');
+  });
+
+  await step('Keyboard search finds the admin batch and excludes it from the unassigned trainer', async () => {
+    for (const [person, visible] of [[admin, true], [trainer, false]]) {
+      const p = person.page;
+      await p.keyboard.press('Control+k');
+      const dialog = p.getByRole('dialog', { name: 'Search Algora' });
+      const field = dialog.getByRole('searchbox');
+      const batchResults = p.waitForResponse((response) => response.url().includes('/api/v1/batches?q=JNTU+Bootcamp'));
+      await field.fill('JNTU Bootcamp');
+      const result = await (await batchResults).json();
+      assert(result.items.some((item) => item.name === 'JNTU Bootcamp') === visible, 'batch search scope mismatch');
+      if (visible) await dialog.getByRole('link', { name: /JNTU Bootcamp/ }).waitFor();
+      else await dialog.getByText('No results. Try another name or problem number.').waitFor();
+      await field.press('Escape');
+      await dialog.waitFor({ state: 'hidden' });
+    }
   });
 
   await step('Trainer cannot open a batch they are not assigned to (404, no data)', async () => {
@@ -218,7 +316,6 @@ try {
     await p.getByText('Java & DSA · JNTU Bootcamp').waitFor();
     await p.getByText('Automatic LeetCode verification is not available yet').waitFor();
     await p.getByText('Verification unavailable').first().waitFor(); // header badge instead of a sync button
-    await p.getByText('waiting for ownership verification').waitFor();
     await shot(p, '06-student-dashboard');
   });
   await step('Student sees only the unlocked chapter; problems open LeetCode in a new tab; hidden chapter URL is refused', async () => {
@@ -242,12 +339,11 @@ try {
     await p.goto(`${FE}/student/chapters/${strings}?batchCourseId=${bc}`);
     await p.getByText('This chapter is not available to you.').waitFor();
   });
-  await step('Profile: roll number immutable; LeetCode link pending with challenge; Verify disabled while unavailable', async () => {
+  await step('Profile: roll number immutable and username linked while synchronization is unavailable', async () => {
     const p = student.page;
     await p.goto(`${FE}/student/profile`);
     assert(await p.getByLabel('Roll number').isDisabled(), 'roll editable');
-    await p.getByText(/algora-verify-/).waitFor();
-    assert(await p.getByRole('button', { name: 'Verify' }).isDisabled(), 'verify enabled');
+    await p.getByText('Linked account:', { exact: false }).waitFor();
     await shot(p, '08-profile');
   });
   await step('Leaderboard page explains verification is unavailable', async () => {
@@ -322,6 +418,22 @@ try {
     await m.page.getByRole('link', { name: 'Batches' }).last().click();
     await m.page.waitForURL('**/manage/batches');
     await shot(m.page, '10-mobile');
+    const palette = m.page.getByLabel('Color theme');
+    const background = () => m.page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    const light = await background();
+    await palette.selectOption('dark');
+    const dark = await background();
+    assert(dark !== light, 'dark mode did not change the rendered surface');
+    await m.page.reload();
+    await palette.waitFor();
+    assert(await palette.inputValue() === 'dark' && await background() === dark, 'theme did not persist');
+    await shot(m.page, '16-mobile-dark');
+    await m.page.emulateMedia({ colorScheme: 'dark' });
+    await palette.selectOption('system');
+    assert(await background() === dark, 'system mode did not follow dark scheme');
+    await palette.selectOption('light');
+    assert(await background() === light, 'explicit light mode did not override the system scheme');
+
     await m.ctx.close();
   });
 } finally {

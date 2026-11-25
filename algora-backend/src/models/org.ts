@@ -44,6 +44,17 @@ const batchSchema = new Schema(
     startDate: Date,
     endDate: Date,
     status: { type: String, enum: ['DRAFT', 'ACTIVE', 'COMPLETED', 'ARCHIVED'], default: 'DRAFT' },
+    /**
+     * Optional per-batch synchronization calendar. Unset fields fall back to the server defaults, so new bootcamps and
+     * batches with different hours, days, timezone or dates need no code change.
+     */
+    leetcodeSchedule: {
+      hours: { type: String, match: /^\d{2}:\d{2}-\d{2}:\d{2}$/ },
+      days: { type: String, match: /^[0-6](,[0-6])*$/ },
+      tzOffsetMin: { type: Number, min: -720, max: 840 },
+      termStart: Date,
+      termEnd: Date,
+    },
     createdBy: oid('User'),
   },
   { timestamps: true },

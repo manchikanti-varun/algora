@@ -5,6 +5,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       { section: 'Overview', items: [{ href: '/manage/dashboard', label: 'Dashboard' }] },
       { section: 'Teaching', items: [
         { href: '/manage/batches', label: 'Batches' }, { href: '/manage/courses', label: 'Courses' },
+        { href: '/manage/problem-library', label: 'Problem Library' },
         { href: '/manage/students', label: 'Students' }, { href: '/manage/leaderboards', label: 'Leaderboards' },
       ] },
       { section: 'Insights', items: [{ href: '/manage/analytics', label: 'Analytics' }, { href: '/manage/reports', label: 'Reports' }] },

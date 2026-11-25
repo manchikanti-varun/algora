@@ -1,6 +1,6 @@
 import type { ClientSession, Types } from 'mongoose';
 import { env } from '../../config/env';
-import { COUNTING_SOURCES, EvidenceConflict, LeetcodeLink, ObservedSubmission, SolveEvidence } from '../../models';
+import { COUNTING_LINK_STATUSES, COUNTING_SOURCES, EvidenceConflict, LeetcodeLink, ObservedSubmission, SolveEvidence } from '../../models';
 import type { AcceptedSubmission } from './leetcode.types';
 
 /** Sources that currently count. MOCK_DEV never counts (or is written) in production. */
@@ -88,14 +88,17 @@ export async function purgeStudentLeetcodeData(studentId: Types.ObjectId | strin
   return { evidence: e.deletedCount, observed: o.deletedCount, conflicts: c.deletedCount };
 }
 
-/** Student -> id of their established (VERIFIED) link. Only these links' evidence counts. */
+/** Student -> id of their currently linked account. Only these links' evidence counts. */
 export async function verifiedLinkIds(studentIds: (Types.ObjectId | string)[]): Promise<Map<string, Types.ObjectId>> {
-  // Consent is required for evidence to count (withdrawal = unlink, which also ends VERIFIED).
-  const links = await LeetcodeLink.find({ studentId: { $in: studentIds }, status: 'VERIFIED', consentedAt: { $exists: true } }, 'studentId').lean();
+  // Consent is required for evidence to count (withdrawal = unlink, which revokes the link).
+  const links = await LeetcodeLink.find(
+    { studentId: { $in: studentIds }, status: { $in: [...COUNTING_LINK_STATUSES] }, isCurrent: true, consentedAt: { $type: 'date' } },
+    'studentId',
+  ).lean();
   return new Map(links.map((l) => [String(l.studentId), l._id]));
 }
 
-/** Evidence that counts for a student: VERIFIED, counting source, and belonging to the student's currently VERIFIED link. */
+/** Evidence that counts for a student: VERIFIED, counting source, and belonging to the student's currently linked account. */
 export async function countableEvidence(studentId: Types.ObjectId | string) {
   const link = (await verifiedLinkIds([studentId])).get(String(studentId));
   if (!link) return [];

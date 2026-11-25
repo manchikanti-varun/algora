@@ -25,11 +25,19 @@ const schema = z.object({
   LEETCODE_SYNC_ENABLED: bool,
   /** Run the background scheduler in this process. Set false on API replicas when a separate worker service runs it. */
   LEETCODE_SCHEDULER_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
-  LEETCODE_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(5).default(60),
-  /** Reference to LeetCode's written permission. Without it no provider that reaches LeetCode is authorised (any environment). */
+  /** Default in-hours interval for students who are not currently active. */
+  LEETCODE_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(5).default(30),
+  /**
+   * The basis on which Algora accesses LeetCode data. This is a statement about OUR access arrangement, not a LeetCode key.
+   * Without a basis (NONE) no provider that reaches LeetCode is authorised.
+   */
+  LEETCODE_ACCESS_BASIS: z.enum(['NONE', 'TERMS', 'WRITTEN_PERMISSION', 'LICENSED_THIRD_PARTY', 'INSTITUTIONAL', 'COMMERCIAL', 'OWN_RISK']).optional(),
+  /** Reference to the document behind the access basis (written permission, contract, licence). */
+  LEETCODE_ACCESS_REF: z.string().trim().max(200).optional(),
+  /** @deprecated Alias for LEETCODE_ACCESS_BASIS=WRITTEN_PERMISSION + LEETCODE_ACCESS_REF. Kept for existing deployments. */
   LEETCODE_PERMISSION_REF: z.string().trim().optional(),
   /** Comma-separated provider ids in preferred order. Admins may reorder at runtime; unknown ids fail validation. */
-  LEETCODE_PROVIDER_PRIORITY: z.string().trim().default('direct,alfa,leetcode-query')
+  LEETCODE_PROVIDER_PRIORITY: z.string().trim().default('direct,leetcode-query,alfa')
     .transform((v) => v.split(',').map((x) => x.trim()).filter(Boolean))
     .pipe(z.array(z.enum(['direct', 'alfa', 'leetcode-query', 'mock'])).min(1)),
   LEETCODE_DIRECT_ENABLED: flag,
@@ -38,7 +46,7 @@ const schema = z.object({
   /** Development/test only. Refused in production. */
   LEETCODE_MOCK_ENABLED: flag,
   LEETCODE_ALFA_BASE_URL: z.string().trim().url().optional().or(z.literal('').transform(() => undefined)),
-  /** Permission/terms reference for the Alfa deployment used ("self-hosted" for our own instance). */
+  /** Access reference for the Alfa deployment used ("self-hosted" for our own instance). */
   LEETCODE_ALFA_PERMISSION_REF: z.string().trim().optional(),
   LEETCODE_ALFA_CACHE_SEC: z.coerce.number().int().min(0).max(3600).default(300),
   LEETCODE_QUERY_MODE: z.enum(['accepted', 'all-status']).default('accepted'),
@@ -61,6 +69,9 @@ const schema = z.object({
   LEETCODE_BOOTCAMP_HOURS: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/).default('09:30-16:30'),
   LEETCODE_BOOTCAMP_DAYS: z.string().regex(/^[0-6](,[0-6])*$/).default('1,2,3,4,5'),
   LEETCODE_TZ_OFFSET_MIN: z.coerce.number().int().min(-720).max(840).default(330),
+  /** Optional term dates for the default calendar. Outside them only the reduced off-hours sweep runs. Per-batch overrides exist. */
+  LEETCODE_BOOTCAMP_START: z.coerce.date().optional(),
+  LEETCODE_BOOTCAMP_END: z.coerce.date().optional(),
 });
 
 const parsed = schema
@@ -77,8 +88,12 @@ const parsed = schema
     if (v.LEETCODE_MOCK_ENABLED && prod) ctx.addIssue({ code: 'custom', path: ['LEETCODE_MOCK_ENABLED'], message: 'mock provider is not allowed in production' });
     if (v.LEETCODE_PROVIDER_PRIORITY.includes('mock') && prod) ctx.addIssue({ code: 'custom', path: ['LEETCODE_PROVIDER_PRIORITY'], message: 'mock provider is not allowed in production' });
     const real = v.LEETCODE_DIRECT_ENABLED || v.LEETCODE_ALFA_ENABLED || v.LEETCODE_QUERY_ENABLED;
-    if (prod && v.LEETCODE_SYNC_ENABLED && real && !v.LEETCODE_PERMISSION_REF) {
-      ctx.addIssue({ code: 'custom', path: ['LEETCODE_PERMISSION_REF'], message: 'A real LeetCode provider cannot be enabled in production without LEETCODE_PERMISSION_REF' });
+    const basis = v.LEETCODE_ACCESS_BASIS ?? (v.LEETCODE_PERMISSION_REF ? 'WRITTEN_PERMISSION' : 'NONE');
+    if (prod && v.LEETCODE_SYNC_ENABLED && real && (basis === 'NONE' || basis === 'OWN_RISK')) {
+      ctx.addIssue({ code: 'custom', path: ['LEETCODE_ACCESS_BASIS'], message: 'A real LeetCode provider cannot be enabled in production without a documented LEETCODE_ACCESS_BASIS (TERMS, WRITTEN_PERMISSION, LICENSED_THIRD_PARTY, INSTITUTIONAL or COMMERCIAL)' });
+    }
+    if (prod && ['TERMS', 'WRITTEN_PERMISSION', 'LICENSED_THIRD_PARTY', 'INSTITUTIONAL', 'COMMERCIAL'].includes(basis) && !(v.LEETCODE_ACCESS_REF ?? v.LEETCODE_PERMISSION_REF)) {
+      ctx.addIssue({ code: 'custom', path: ['LEETCODE_ACCESS_REF'], message: `LEETCODE_ACCESS_BASIS=${basis} requires LEETCODE_ACCESS_REF (the document or contract it refers to)` });
     }
     if (prod && v.LEETCODE_ALFA_ENABLED && (!v.LEETCODE_ALFA_BASE_URL || !v.LEETCODE_ALFA_PERMISSION_REF)) {
       ctx.addIssue({ code: 'custom', path: ['LEETCODE_ALFA_ENABLED'], message: 'Alfa requires LEETCODE_ALFA_BASE_URL and LEETCODE_ALFA_PERMISSION_REF' });
@@ -93,8 +108,15 @@ if (!parsed.success) {
   throw new Error('Invalid environment configuration');
 }
 
+export type AccessBasis = 'NONE' | 'TERMS' | 'WRITTEN_PERMISSION' | 'LICENSED_THIRD_PARTY' | 'INSTITUTIONAL' | 'COMMERCIAL' | 'OWN_RISK';
+
+const accessBasis: AccessBasis = parsed.data.LEETCODE_ACCESS_BASIS ?? (parsed.data.LEETCODE_PERMISSION_REF ? 'WRITTEN_PERMISSION' : 'NONE');
+
 export const env = {
   ...parsed.data,
   FRONTEND_ORIGIN: new URL(parsed.data.FRONTEND_URL).origin,
   isProd: parsed.data.NODE_ENV === 'production',
+  /** Resolved access arrangement (LEETCODE_ACCESS_BASIS, with the deprecated LEETCODE_PERMISSION_REF as an alias). */
+  LEETCODE_ACCESS_BASIS: accessBasis,
+  LEETCODE_ACCESS_REF: parsed.data.LEETCODE_ACCESS_REF ?? parsed.data.LEETCODE_PERMISSION_REF,
 };

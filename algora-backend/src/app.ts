@@ -15,6 +15,7 @@ import { csrfProtection } from './middleware/auth';
 import { authRouter } from './modules/auth/auth.routes';
 import { batchesRouter } from './modules/batches/batches.routes';
 import { chaptersRouter, coursesRouter, problemsRouter } from './modules/courses/courses.routes';
+import { catalogRouter } from './modules/catalog/catalog.routes';
 import { leetcodeRouter } from './modules/leetcode/leetcode.routes';
 import { leaderboardsRouter, settingsRouter } from './modules/progress/progress.routes';
 import { analyticsRouter, reportsRouter } from './modules/analytics/analytics.routes';
@@ -62,6 +63,7 @@ export function createApp() {
   api.use('/courses', coursesRouter);
   api.use('/chapters', chaptersRouter);
   api.use('/problems', problemsRouter);
+  api.use('/problem-library', catalogRouter);
   api.use('/batches/:id/pending', pendingRouter);
   api.use('/batches', express.text({ type: 'text/csv', limit: '1mb' }), batchesRouter);
   api.use('/student', studentRouter);

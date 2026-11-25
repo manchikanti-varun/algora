@@ -12,7 +12,7 @@ import { cooldownRemainingSec } from './sync.policy';
 import { dueQueue, policy, requestSync, STALE_SYNCING_MS } from './leetcode-sync.service';
 import { hasEligibleProvider, providerViews, runHealthChecks, upstreamBucket } from './provider-manager';
 import { upstreamBlock } from './provider-health.service';
-import { registry, providerEnvEnabled } from './providers/provider.registry';
+import { accessSummary, registry, providerEnvEnabled } from './providers/provider.registry';
 import { availableTokens } from '../../lib/ratelimit';
 import { linkView } from './links.service';
 
@@ -27,9 +27,9 @@ export async function syncView(studentId: Types.ObjectId) {
   const settings = await loadSettings();
   return {
     // Configured at all (a pause is a temporary state shown separately).
-    syncEnabled: env.LEETCODE_SYNC_ENABLED && (await hasEligibleProvider(undefined, { ignorePause: true })),
+    syncEnabled: env.LEETCODE_SYNC_ENABLED && (await hasEligibleProvider({ ignorePause: true })),
     paused: env.LEETCODE_SYNC_ENABLED && settings.paused,
-    status: stale ? 'SYNC_FAILED' : s?.status ?? 'IDLE', lastSuccessAt: s?.lastSuccessAt ?? null, lastAttemptAt: s?.lastAttemptAt ?? null,
+    status: stale ? 'SYNC_FAILED' : s?.status ?? 'IDLE', statusDetail: s?.statusDetail ?? null, lastSuccessAt: s?.lastSuccessAt ?? null, lastAttemptAt: s?.lastAttemptAt ?? null,
     possibleGap: !!s?.possibleGap, coverage: s?.coverage ?? null, cooldownRemainingSec: cooldownRemainingSec(s?.lastAttemptAt, new Date(), policy()),
     hasUsername: !!u?.leetcodeUsername,
     link: await linkView(studentId),
@@ -57,7 +57,7 @@ leetcodeRouter.get('/integration', admin, async (_req, res) => {
   const selected = eligible.find((v) => v.status === 'HEALTHY' || v.status === 'DEGRADED') ?? null;
   const [queue, failures, gaps, reduced, conflicts] = await Promise.all([
     env.LEETCODE_SYNC_ENABLED ? dueQueue() : Promise.resolve({ eligible: 0, due: [], syncing: 0 }),
-    User.countDocuments({ role: 'STUDENT', 'sync.status': { $in: ['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED'] } }),
+    User.countDocuments({ role: 'STUDENT', 'sync.status': { $in: ['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED', 'ACCOUNT_NOT_FOUND', 'SUBMISSIONS_UNAVAILABLE', 'VERIFICATION_UNAVAILABLE'] } }),
     User.countDocuments({ role: 'STUDENT', 'sync.possibleGap': true }),
     User.countDocuments({ role: 'STUDENT', 'sync.coverage': 'REDUCED' }),
     EvidenceConflict.countDocuments({ at: { $gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) } }),
@@ -66,8 +66,8 @@ leetcodeRouter.get('/integration', admin, async (_req, res) => {
     : upstream ? 'UPSTREAM_BLOCKED' : eligible.every((v) => v.status === 'HEALTHY') ? 'HEALTHY' : eligible.some((v) => v.status === 'HEALTHY' || v.status === 'DEGRADED') ? 'DEGRADED' : 'UNAVAILABLE';
   const tokens = await availableTokens(upstreamBucket('leetcode-graphql'), settings.ratePerMin, Math.max(5, settings.ratePerMin));
   res.json({
-    overall, syncEnabled: env.LEETCODE_SYNC_ENABLED, paused: settings.paused, permissionConfigured: !!env.LEETCODE_PERMISSION_REF,
-    authorization: { status: env.LEETCODE_PERMISSION_REF ? 'AUTHORIZED' : (await rawSettings()).permissionRequestedAt ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED', requestedAt: (await rawSettings()).permissionRequestedAt ?? null },
+    overall, syncEnabled: env.LEETCODE_SYNC_ENABLED, paused: settings.paused, access: accessSummary(),
+    authorization: { status: env.LEETCODE_ACCESS_BASIS !== 'NONE' ? 'AUTHORIZED' : (await rawSettings()).permissionRequestedAt ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED', requestedAt: (await rawSettings()).permissionRequestedAt ?? null },
     selectedProvider: selected?.id ?? null, priority: settings.priority,
     upstream: { id: 'leetcode-graphql', blocked: !!upstream, blockedUntil: upstream?.until ?? null, reason: upstream?.reason ?? null, ratePerMin: settings.ratePerMin, tokensAvailable: tokens, utilizationPct: Math.round((1 - tokens / Math.max(5, settings.ratePerMin)) * 100) },
     providers: views,

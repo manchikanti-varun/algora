@@ -1,16 +1,16 @@
 import { classifyGraphqlErrors, classifyLibraryError } from '../provider-error.classifier';
 import { ProviderError } from '../leetcode.types';
 import { normalizeRows } from '../submission-normalizer';
-import type { Authorization, FetchResult, ProviderCapabilities, SubmissionProvider } from './provider.interface';
+import type { AccountProbeResult, Authorization, FetchResult, ProviderCapabilities, SubmissionProvider } from './provider.interface';
 
 /** The subset of the `leetcode-query` LeetCode class this adapter uses. Injected so tests never touch the network. */
 export interface LeetCodeQueryClient {
   graphql(q: { query: string; variables: Record<string, unknown> }): Promise<{ data?: any; errors?: unknown }>;
   recent_submissions(username: string, limit?: number): Promise<{ title: string; titleSlug: string; timestamp: string; statusDisplay: string }[]>;
-  user(username: string): Promise<{ matchedUser: { profile?: { aboutMe?: string } } | null }>;
 }
 
 const AC_QUERY = 'query ($username: String!, $limit: Int) { recentAcSubmissionList(username: $username, limit: $limit) { id title titleSlug timestamp } }';
+const EXISTS_QUERY = 'query ($username: String!) { matchedUser(username: $username) { username submissionCalendar } }';
 
 /**
  * Provider 3: `leetcode-query` npm package, from this server.
@@ -25,7 +25,7 @@ export class LeetCodeQueryProvider implements SubmissionProvider {
   readonly capabilities: ProviderCapabilities;
   private client: Promise<LeetCodeQueryClient> | null = null;
   constructor(private makeClient: () => Promise<LeetCodeQueryClient>, private auth: () => Authorization, readonly transportKind: 'network' | 'mock', private mode: 'accepted' | 'all-status' = 'accepted') {
-    this.capabilities = { acceptedOnly: mode === 'accepted', windowSize: 20, submissionIds: mode === 'accepted', timestamps: true, profileText: true, upstream: 'leetcode-graphql', reachesUpstreamDirectly: true, cacheTtlSec: 0 };
+    this.capabilities = { acceptedOnly: mode === 'accepted', windowSize: 20, submissionIds: mode === 'accepted', timestamps: true, accountProbe: true, upstream: 'leetcode-graphql', reachesUpstreamDirectly: true, cacheTtlSec: 0 };
   }
   authorization() { return this.auth(); }
   private c() { if (!this.client) this.client = this.makeClient().catch((e) => { this.client = null; throw new ProviderError('CONFIG_ERROR', `leetcode-query unavailable: ${String((e as Error)?.message ?? e)}`); }); return this.client; }
@@ -55,11 +55,18 @@ export class LeetCodeQueryProvider implements SubmissionProvider {
     return { submissions, rawCount: stats.raw, limit: lim, oldestRawAt: stats.oldestRawAt, acceptedOnly: false, dataAsOf: new Date(), stats };
   }
 
-  async fetchProfileText(username: string, signal: AbortSignal): Promise<string> {
+  async probeAccount(username: string, signal: AbortSignal): Promise<AccountProbeResult> {
     const client = await this.c();
-    const r = await this.guard(signal, () => client.user(username));
-    if (!r?.matchedUser) throw new ProviderError('NOT_FOUND', 'LeetCode user not found');
-    return String(r.matchedUser.profile?.aboutMe ?? '');
+    const r = await this.guard(signal, () => client.graphql({ query: EXISTS_QUERY, variables: { username } }));
+    if (r?.errors) throw classifyGraphqlErrors(r.errors);
+    const user = r?.data?.matchedUser;
+    if (!user) return { exists: false, calendarTotal: null };
+    let calendarTotal: number | null = null;
+    try {
+      const cal = JSON.parse(String(user.submissionCalendar ?? '{}')) as Record<string, unknown>;
+      calendarTotal = Object.values(cal).reduce<number>((a, v) => a + (Number(v) || 0), 0);
+    } catch { /* activity unknown */ }
+    return { exists: true, calendarTotal };
   }
 }
 

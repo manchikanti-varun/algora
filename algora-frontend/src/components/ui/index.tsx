@@ -73,11 +73,12 @@ export const Badge = ({ children, tone = 'gray' }: { children: ReactNode; tone?:
   <span className={cx('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset', tones[tone])}>{children}</span>
 );
 const STATUS_TONE: Record<string, Tone> = {
-  VISIBLE: 'green', ACTIVE: 'green', PUBLISHED: 'green', VERIFIED: 'green', SYNC_SUCCESS: 'green', APPROVED: 'green', CLAIMED: 'green', SUCCESS: 'green',
-  DRAFT: 'gray', IDLE: 'gray', INACTIVE: 'gray', COMPLETED: 'blue', SYNCING: 'blue', UNLINKED: 'gray',
+  VISIBLE: 'green', ACTIVE: 'green', PUBLISHED: 'green', VERIFIED: 'green', LINKED: 'green', SYNC_SUCCESS: 'green', APPROVED: 'green', CLAIMED: 'green', SUCCESS: 'green',
+  DRAFT: 'gray', IDLE: 'gray', INACTIVE: 'gray', COMPLETED: 'blue', SYNCING: 'blue', SYNC_PENDING: 'blue', UNLINKED: 'gray', NO_SUBMISSIONS_OBSERVED: 'gray',
   ARCHIVED: 'gray', CANCELLED: 'gray', SUPERSEDED: 'gray',
   PENDING: 'amber', PENDING_APPROVAL: 'amber', PENDING_VERIFICATION: 'amber', REVALIDATION_REQUIRED: 'amber', RATE_LIMITED: 'amber', PARTIAL: 'amber', VERIFICATION_UNAVAILABLE: 'amber',
-  SUSPENDED: 'red', REJECTED: 'red', REVOKED: 'red', SYNC_FAILED: 'red', PROVIDER_UNAVAILABLE: 'red', FAILED: 'red',
+  POSSIBLE_EVIDENCE_GAP: 'amber', SUBMISSIONS_UNAVAILABLE: 'amber',
+  SUSPENDED: 'red', REJECTED: 'red', REVOKED: 'red', SYNC_FAILED: 'red', PROVIDER_UNAVAILABLE: 'red', FAILED: 'red', ACCOUNT_NOT_FOUND: 'red',
 };
 export const human = (s: string) => s.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 export const StatusBadge = ({ status }: { status: string }) => <Badge tone={STATUS_TONE[status] ?? 'gray'}>{human(status)}</Badge>;
@@ -163,8 +164,8 @@ export const Textarea = ({ label, error, hint, ...p }: TextareaHTMLAttributes<HT
 export const Select = ({ label, options, ...p }: SelectHTMLAttributes<HTMLSelectElement> & { label: string; options: { value: string; label: string }[] }) => (
   <Field label={label}>{(id) => <select id={id} className={inputCls} {...p}>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>}</Field>
 );
-export const SearchInput = ({ value, onChange, placeholder = 'Search…', label = 'Search' }: { value: string; onChange: (v: string) => void; placeholder?: string; label?: string }) => (
-  <input type="search" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={cx(inputCls, 'max-w-xs')} />
+export const SearchInput = ({ value, onChange, placeholder = 'Search…', label = 'Search', autoFocus = false }: { value: string; onChange: (v: string) => void; placeholder?: string; label?: string; autoFocus?: boolean }) => (
+  <input type="search" autoFocus={autoFocus} aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={cx(inputCls, 'max-w-xs')} />
 );
 export const InlineSelect = ({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) => (
   <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={cx(inputCls, 'w-auto')}>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
@@ -222,15 +223,16 @@ export function Tabs({ tabs, active, onChange }: { tabs: { key: string; label: s
 }
 
 // ---------- Modal / confirm ----------
-export function Modal({ open, onClose, title, children, footer }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode }) {
+export function Modal({ open, onClose, title, children, footer, wide = false }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => { const d = ref.current; if (!d) return; if (open && !d.open) d.showModal(); if (!open && d.open) d.close(); }, [open]);
   return (
-    <dialog ref={ref} onClose={onClose} onCancel={onClose} className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl p-0 shadow-xl backdrop:bg-slate-900/40" aria-labelledby="modal-title">
+    <dialog ref={ref} onClose={onClose} onCancel={onClose} className={cx("m-auto max-h-[calc(100dvh-2rem)] rounded-xl p-0 shadow-xl backdrop:bg-slate-900/40", wide ? "w-[min(56rem,calc(100vw-2rem))]" : "w-[min(32rem,calc(100vw-2rem))]")} aria-labelledby={titleId}>
       {open && (
         <div>
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h2 id="modal-title" className="font-semibold text-slate-900">{title}</h2>
+            <h2 id={titleId} className="font-semibold text-slate-900">{title}</h2>
             <button onClick={onClose} className="rounded p-1 text-slate-400 hover:text-slate-600" aria-label="Close">✕</button>
           </div>
           <div className="space-y-4 px-5 py-4">{children}</div>
@@ -257,7 +259,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastT[]>([]);
   const push = useCallback((tone: ToastT['tone'], text: string) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, tone, text }]);
+    setToasts((t) => [...t.slice(-2), { id, tone, text }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'error' ? 7000 : 4000);
   }, []);
   const [confirm, setConfirm] = useState<(ConfirmOpts & { resolve: (v: boolean) => void }) | null>(null);
@@ -271,9 +273,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
           footer={<><Button variant="secondary" onClick={() => done(false)}>Cancel</Button><Button variant={confirm?.danger ? 'danger' : 'primary'} onClick={() => done(true)} autoFocus>{confirm?.confirmLabel ?? 'Confirm'}</Button></>}>
           {confirm?.body && <div className="text-sm text-slate-600">{confirm.body}</div>}
         </Modal>
-        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2" aria-live="polite">
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2" aria-live="polite">
           {toasts.map((t) => (
-            <div key={t.id} className={cx('pointer-events-auto rounded-lg px-4 py-3 text-sm shadow-lg ring-1', { success: 'bg-emerald-600 text-white ring-emerald-700', error: 'bg-rose-600 text-white ring-rose-700', info: 'bg-slate-800 text-white ring-slate-900' }[t.tone])} role={t.tone === 'error' ? 'alert' : 'status'}>{t.text}</div>
+            <div key={t.id} className={cx('rounded-lg px-4 py-3 text-sm shadow-lg ring-1', { success: 'bg-emerald-600 text-white ring-emerald-700', error: 'bg-rose-600 text-white ring-rose-700', info: 'bg-slate-800 text-white ring-slate-900' }[t.tone])} role={t.tone === 'error' ? 'alert' : 'status'}>{t.text}</div>
           ))}
         </div>
       </ConfirmCtx.Provider>

@@ -1,5 +1,5 @@
 import { ProviderError, type AcceptedSubmission, type ProviderErrorKind } from '../leetcode.types';
-import type { FetchResult, ProviderCapabilities, SubmissionProvider } from './provider.interface';
+import type { AccountProbeResult, FetchResult, ProviderCapabilities, SubmissionProvider } from './provider.interface';
 
 /**
  * DEVELOPMENT AND TEST ONLY. Serves data you put into it. Its evidence is stored with source MOCK_DEV, which never counts
@@ -8,10 +8,11 @@ import type { FetchResult, ProviderCapabilities, SubmissionProvider } from './pr
 export class MockProvider implements SubmissionProvider {
   readonly displayName: string;
   readonly transportKind = 'mock' as const;
-  capabilities: ProviderCapabilities = { acceptedOnly: true, windowSize: 20, submissionIds: false, timestamps: true, profileText: true, upstream: 'mock-upstream', reachesUpstreamDirectly: true, cacheTtlSec: 0 };
+  capabilities: ProviderCapabilities = { acceptedOnly: true, windowSize: 20, submissionIds: false, timestamps: true, accountProbe: true, upstream: 'mock-upstream', reachesUpstreamDirectly: true, cacheTtlSec: 0 };
   calls = 0;
+  probeCalls = 0;
   private data = new Map<string, AcceptedSubmission[]>();
-  private about = new Map<string, string>();
+  private calendar = new Map<string, number | null>();
   failWith: ProviderErrorKind | null = null;
   retryAfterSec?: number;
   latencyMs = 0;
@@ -26,7 +27,15 @@ export class MockProvider implements SubmissionProvider {
     list.unshift({ submissionId, username, problemTitle: title, problemSlug: slug.toLowerCase(), status: 'ACCEPTED', submittedAt: at, provider: this.id });
     this.data.set(k, list);
   }
-  setProfileText(username: string, text: string) { this.about.set(username.toLowerCase(), text); }
+  /** An account that exists but has no recent accepted submissions. */
+  register(username: string, calendarTotal: number | null = 0) {
+    const k = username.toLowerCase();
+    if (!this.data.has(k)) this.data.set(k, []);
+    this.calendar.set(k, calendarTotal);
+  }
+  clearAccepted(username: string) { this.data.set(username.toLowerCase(), []); }
+  /** Synthesized activity when the provider cannot see submissions; used to model incomplete visibility. */
+  setCalendarTotal(username: string, n: number | null) { this.calendar.set(username.toLowerCase(), n); }
   private async wait(signal?: AbortSignal) {
     this.calls++;
     if (this.latencyMs) await new Promise<void>((res, rej) => { const t = setTimeout(res, this.latencyMs); signal?.addEventListener('abort', () => { clearTimeout(t); rej(new ProviderError('PROVIDER_TIMEOUT', 'timeout')); }, { once: true }); });
@@ -40,9 +49,10 @@ export class MockProvider implements SubmissionProvider {
     const rows = all.slice(0, cap).map((r) => ({ ...r, provider: this.id }));
     return { submissions: rows, rawCount: rows.length, limit: cap, oldestRawAt: rows.at(-1)?.submittedAt ?? null, acceptedOnly: this.capabilities.acceptedOnly, dataAsOf: new Date() };
   }
-  async fetchProfileText(username: string, signal?: AbortSignal): Promise<string> {
-    await this.wait(signal);
-    if (!this.data.has(username.toLowerCase()) && !this.about.has(username.toLowerCase())) throw new ProviderError('NOT_FOUND', 'user not found');
-    return this.about.get(username.toLowerCase()) ?? '';
+  async probeAccount(username: string, _signal?: AbortSignal): Promise<AccountProbeResult> {
+    this.probeCalls++; // counted separately: a probe is not a submission request
+    const k = username.toLowerCase();
+    if (!this.data.has(k)) return { exists: false, calendarTotal: null };
+    return { exists: true, calendarTotal: this.calendar.get(k) ?? (this.data.get(k)?.length ?? 0) };
   }
 }

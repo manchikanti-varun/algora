@@ -4,6 +4,8 @@ export interface PolicyConfig {
   tzOffsetMin: number;              // offset of the bootcamp timezone from UTC (IST = 330)
   hours: { startMin: number; endMin: number }; // minutes since local midnight
   days: number[];                   // local weekdays 0=Sun
+  /** Optional term dates. Outside them every student uses the off-hours interval. */
+  term?: { start: Date | null; end: Date | null };
   activeWindowMin: number;          // student counts as "active" if seen within this window
   activeIntervalMin: number;        // in-hours, active student
   idleIntervalMin: number;          // in-hours, not active
@@ -13,8 +15,8 @@ export interface PolicyConfig {
 }
 
 export const defaultPolicy = (over: Partial<PolicyConfig> = {}): PolicyConfig => ({
-  tzOffsetMin: 330, hours: { startMin: 9 * 60, endMin: 18 * 60 }, days: [1, 2, 3, 4, 5, 6],
-  activeWindowMin: 60, activeIntervalMin: 15, idleIntervalMin: 60, offHoursIntervalMin: 240, gapIntervalMin: 5, studentCooldownSec: 300, ...over,
+  tzOffsetMin: 330, hours: { startMin: 9 * 60, endMin: 18 * 60 }, days: [1, 2, 3, 4, 5],
+  activeWindowMin: 60, activeIntervalMin: 15, idleIntervalMin: 30, offHoursIntervalMin: 240, gapIntervalMin: 5, studentCooldownSec: 300, ...over,
 });
 
 export function parseHours(s: string): { startMin: number; endMin: number } {
@@ -26,7 +28,13 @@ export function localParts(now: Date, tzOffsetMin: number) {
   const l = new Date(now.getTime() + tzOffsetMin * 60_000);
   return { day: l.getUTCDay(), minutes: l.getUTCHours() * 60 + l.getUTCMinutes() };
 }
+export const inTerm = (now: Date, c: PolicyConfig) => {
+  if (c.term?.start && now < c.term.start) return false;
+  if (c.term?.end && now > c.term.end) return false;
+  return true;
+};
 export const inBootcampHours = (now: Date, c: PolicyConfig) => {
+  if (!inTerm(now, c)) return false;
   const { day, minutes } = localParts(now, c.tzOffsetMin);
   return c.days.includes(day) && minutes >= c.hours.startMin && minutes < c.hours.endMin;
 };
@@ -38,12 +46,15 @@ export interface StudentSyncView {
   lastAttemptAt?: Date | null;
   nextEligibleAt?: Date | null; // set by backoff / retry-after
   possibleGap?: boolean;
+  /** Per-student calendar (from the student's active batch), falling back to the global policy. */
+  policy?: PolicyConfig;
 }
 
 const mins = (a: Date, b: Date) => (a.getTime() - b.getTime()) / 60_000;
 
 /** The wall-clock time at which this student next becomes due, or null if they should not be scheduled. */
-export function dueAt(s: StudentSyncView, now: Date, c: PolicyConfig): Date | null {
+export function dueAt(s: StudentSyncView, now: Date, global: PolicyConfig): Date | null {
+  const c = s.policy ?? global;
   const inH = inBootcampHours(now, c);
   const active = !!s.lastActiveAt && mins(now, s.lastActiveAt) <= c.activeWindowMin;
   let interval: number;
@@ -58,7 +69,7 @@ export function dueAt(s: StudentSyncView, now: Date, c: PolicyConfig): Date | nu
 
 /** Due students ordered: possible-gap first, then active, then least recently synced. Capped by `max`. */
 export function selectDue(students: StudentSyncView[], now: Date, c: PolicyConfig, max: number): StudentSyncView[] {
-  const rank = (s: StudentSyncView) => (s.possibleGap ? 0 : s.lastActiveAt && mins(now, s.lastActiveAt) <= c.activeWindowMin ? 1 : 2);
+  const rank = (s: StudentSyncView) => (s.possibleGap ? 0 : s.lastActiveAt && mins(now, s.lastActiveAt) <= (s.policy ?? c).activeWindowMin ? 1 : 2);
   return students
     .filter((s) => { const d = dueAt(s, now, c); return d !== null && d <= now; })
     .sort((a, b) => rank(a) - rank(b) || (a.lastSuccessAt?.getTime() ?? 0) - (b.lastSuccessAt?.getTime() ?? 0) || a.id.localeCompare(b.id))

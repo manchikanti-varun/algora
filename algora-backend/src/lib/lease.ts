@@ -91,6 +91,7 @@ export const resetTxSupportCache = () => { txSupport = null; };
  * enable synchronization on such a deployment (see server.ts).
  */
 export async function withFencedWrite<T>(l: Lease, fn: (session: ClientSession | undefined) => Promise<T>): Promise<T> {
+  if (l.lost) throw new LeaseLostError();
   if (!(await supportsTransactions())) {
     await assertLease(l);
     return fn(undefined);
@@ -98,6 +99,7 @@ export async function withFencedWrite<T>(l: Lease, fn: (session: ClientSession |
   const session = await mongoose.startSession();
   try {
     return await session.withTransaction(async () => {
+      if (l.lost) throw new LeaseLostError();
       const r = await JobLease.updateOne(liveFilter(l), { $set: { lastWriteAt: new Date() } }, { session });
       if (r.matchedCount !== 1) { l.lost = true; throw new LeaseLostError(); }
       return fn(session);

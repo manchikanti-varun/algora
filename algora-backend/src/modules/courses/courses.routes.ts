@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { badRequest, forbidden, notFound, parse } from '../../lib/errors';
+import { badRequest, conflict, forbidden, notFound, parse } from '../../lib/errors';
+import { toCsv } from '../../lib/csv';
+import { maybeTransaction, supportsTransactions } from '../../lib/lease';
 import { parseLeetCodeUrl } from '../../lib/leetcodeUrl';
 import { objectId, pagination } from '../../lib/validate';
 import { requireAuth, requireRole } from '../../middleware/auth';
@@ -143,6 +145,62 @@ chaptersRouter.post('/:id/problems', mustManage, async (req, res) => {
   res.status(201).json(p);
 });
 
+chaptersRouter.get('/:id/problems/export', mustManage, async (req, res) => {
+  const chapterId = parse(objectId, req.params.id);
+  if (!(await Chapter.exists({ _id: chapterId }))) throw notFound('Chapter not found');
+  const problems = await Problem.find({ chapterId, status: 'ACTIVE' }).sort({ order: 1, _id: 1 }).lean();
+  res.attachment('chapter-problems.csv').type('text/csv').send(toCsv(
+    ['Position', 'Title', 'Difficulty', 'Slug', 'LeetCode URL'],
+    problems.map((problem, index) => [index + 1, problem.title, problem.difficulty, problem.slug, problem.url]),
+  ));
+});
+
+const selectedProblems = z.array(objectId).min(1).max(100);
+const bulkProblemOperation = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('archive'), ids: selectedProblems }).strict(),
+  z.object({ action: z.enum(['copy', 'move']), ids: selectedProblems, targetChapterId: objectId }).strict(),
+]);
+
+chaptersRouter.post('/:id/problems/bulk', mustManage, async (req, res) => {
+  const chapterId = parse(objectId, req.params.id);
+  const body = parse(bulkProblemOperation, req.body);
+  const ids = [...new Set(body.ids)];
+  const targetId = body.action === 'archive' ? null : body.targetChapterId;
+  if (targetId === chapterId) throw badRequest('Choose a different destination chapter');
+  if (!(await supportsTransactions())) throw badRequest('Bulk problem management requires a MongoDB replica set');
+
+  const result = await maybeTransaction(async (session) => {
+    const coursesByChapter = new Map<string, string>();
+    // Lock both chapters in consistent order to serialize concurrent appends and moves.
+    for (const id of (targetId ? [chapterId, targetId] : [chapterId]).sort()) {
+      const chapter = await Chapter.findOneAndUpdate({ _id: id, status: 'ACTIVE' }, { $currentDate: { updatedAt: true } }, { session, timestamps: false });
+      if (!chapter) throw notFound('Active chapter not found');
+      coursesByChapter.set(id, String(chapter.courseId));
+    }
+    const selected = await Problem.find({ _id: { $in: ids }, chapterId }).sort({ order: 1, _id: 1 }).session(session ?? null).lean();
+    if (selected.length !== ids.length) throw badRequest('One or more problems are outside this chapter');
+    const active = selected.filter((problem) => problem.status === 'ACTIVE');
+
+    if (!targetId) {
+      await Problem.updateMany({ _id: { $in: active.map((p) => p._id) } }, { $set: { status: 'ARCHIVED' } }, { session });
+      return { added: 0, archived: active.length, skipped: ids.length - active.length };
+    }
+    const assigned = new Set(await Problem.distinct('slug', { chapterId: targetId, status: 'ACTIVE', slug: { $in: active.map((p) => p.slug) } }).session(session ?? null));
+    const additions = active.filter((problem) => !assigned.has(problem.slug));
+    if (additions.length) {
+      const last = await Problem.findOne({ chapterId: targetId }).sort({ order: -1 }).select('order').session(session ?? null).lean();
+      await Problem.insertMany(additions.map(({ title, url, slug, difficulty, catalogId }, index) => ({
+        title, url, slug, difficulty, catalogId, chapterId: targetId, courseId: coursesByChapter.get(targetId), order: (last?.order ?? -1) + index + 1,
+      })), { session });
+    }
+    const archived = body.action === 'move' ? additions.length : 0;
+    if (archived) await Problem.updateMany({ _id: { $in: additions.map((p) => p._id) } }, { $set: { status: 'ARCHIVED' } }, { session });
+    return { added: additions.length, archived, skipped: ids.length - additions.length };
+  });
+  await audit(req, `problem.bulk.${body.action}`, { type: 'Chapter', id: chapterId }, { targetChapterId: targetId, ...result });
+  res.json(result);
+});
+
 problemsRouter.patch('/:id', mustManage, async (req, res) => {
   const id = parse(objectId, req.params.id);
   const b = parse(
@@ -150,8 +208,21 @@ problemsRouter.patch('/:id', mustManage, async (req, res) => {
     req.body,
   );
   const set: Record<string, unknown> = { ...b };
-  if (b.url) { const { slug, url } = parseLeetCodeUrl(b.url); set.slug = slug; set.url = url; }
-  const p = await Problem.findByIdAndUpdate(id, { $set: set }, { returnDocument: 'after' });
+  const filter: { _id: string; slug?: string } = { _id: id };
+  let detachCatalog = false;
+  if (b.url) {
+    const { slug, url } = parseLeetCodeUrl(b.url);
+    const current = await Problem.findById(id).select('slug').lean();
+    if (!current) throw notFound('Problem not found');
+    filter.slug = current.slug;
+    set.slug = slug;
+    set.url = url;
+    detachCatalog = current.slug !== slug;
+  }
+  const p = await Problem.findOneAndUpdate(filter, {
+    $set: set, ...(detachCatalog ? { $unset: { catalogId: 1 } } : {}),
+  }, { returnDocument: 'after' });
+  if (!p && filter.slug) throw conflict('The problem changed while you were editing it. Reload and try again.');
   if (!p) throw notFound('Problem not found');
   await audit(req, 'problem.update', { type: 'Problem', id: p._id }, b);
   res.json(p);

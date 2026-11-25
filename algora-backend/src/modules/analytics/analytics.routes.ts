@@ -17,7 +17,7 @@ const date = z.coerce.date();
 export const filterSchema = z.object({
   collegeId: objectId.optional(), batchId: objectId.optional(), courseId: objectId.optional(), chapterId: objectId.optional(),
   difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(), q: z.string().trim().max(60).optional(),
-  verification: z.enum(['VERIFIED', 'PENDING_VERIFICATION', 'REVALIDATION_REQUIRED', 'UNLINKED']).optional(),
+  verification: z.enum(['LINKED', 'UNLINKED', 'VERIFIED', 'PENDING_VERIFICATION', 'REVALIDATION_REQUIRED']).optional(),
   minPct: z.coerce.number().min(0).max(100).optional(), maxPct: z.coerce.number().min(0).max(100).optional(),
   from: date.optional(), to: date.optional(), dateBasis: z.enum(['verified', 'submitted']).default('verified'),
 });

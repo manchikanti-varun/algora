@@ -8,14 +8,16 @@ import type { Paged } from '@/components/manage/types';
 interface ProviderView {
   id: string; displayName: string; priority: number; envEnabled: boolean; adminEnabled: boolean; authorized: boolean; authorizationReason?: string; transportKind: string;
   status: string; breaker: string; nextEligibleAt: string | null; totalRequests: number; successes: number; failures: number; rateLimited: number; consecutiveFailures: number;
+  acceptedRetrievals: number; lastAcceptedRetrievalAt: string | null;
   successRate: number | null; avgLatencyMs: number | null; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null; lastErrorKind: string | null;
   ratePerMin: number; tokensAvailable: number;
-  authorizationStatus: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED'; activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null;
+  authorizationStatus: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED'; accessBasis: string | null; activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null;
   technicalHealth: 'UNTESTED' | 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RATE_LIMITED' | 'CIRCUIT_OPEN';
   capabilities: { acceptedOnly: boolean; windowSize: number; submissionIds: boolean; cacheTtlSec: number; upstream: string; reachesUpstreamDirectly: boolean };
 }
 interface Overview {
-  overall: string; syncEnabled: boolean; paused: boolean; permissionConfigured: boolean; authorization: { status: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED'; requestedAt: string | null }; selectedProvider: string | null; priority: string[];
+  overall: string; syncEnabled: boolean; paused: boolean; access: { basis: string; reference: string | null; establishedExternally: boolean; internalRiskAcceptance: boolean };
+  authorization: { status: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED'; requestedAt: string | null }; selectedProvider: string | null; priority: string[];
   upstream: { id: string; blocked: boolean; blockedUntil: string | null; reason: string | null; ratePerMin: number; tokensAvailable: number; utilizationPct: number };
   providers: ProviderView[]; queue: { eligibleStudents: number; due: number; syncing: number };
   students: { withFailures: number; possibleGaps: number; reducedCoverage: number }; conflicts7d: number; healthCheckConfigured: boolean;
@@ -69,17 +71,21 @@ export default function Page() {
         </>} />
 
       {!d.syncEnabled && <Notice tone="warn" title="Automatic verification is disabled by configuration">LEETCODE_SYNC_ENABLED is false. Providers stay off until LeetCode access is authorised and the live proof of concept passes (docs/LIVE_POC_RUNBOOK.md). Admin controls here cannot enable or authorise a provider.</Notice>}
-      <Card title="LeetCode authorization">
+      <Card title="Data access basis">
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <Badge tone={AUTH_BADGE[d.authorization.status].tone}>{AUTH_BADGE[d.authorization.status].text}</Badge>
-          <span className="text-slate-600">{d.authorization.status === 'AUTHORIZED' ? 'A LeetCode permission reference is configured on the server.' : d.authorization.status === 'AUTHORIZATION_PENDING' ? `Permission request sent on ${fmtDateTime(d.authorization.requestedAt)}. Waiting for LeetCode's written reply.` : 'No permission request to LeetCode has been recorded yet.'}</span>
+          <span className="text-slate-600">
+            {d.access.basis === 'NONE' ? 'No access basis is configured on the server, so no real provider may be used.'
+              : d.access.internalRiskAcceptance ? 'Access basis: internal risk acceptance. This is an owner decision, NOT permission from LeetCode.'
+              : <>Access basis: <strong>{d.access.basis.replace(/_/g, ' ').toLowerCase()}</strong>{d.access.establishedExternally ? ' (established outside Algora)' : ''}{d.access.reference ? <> · reference <code className="text-xs">{d.access.reference}</code></> : null}</>}
+          </span>
           {d.authorization.status !== 'AUTHORIZED' && (
             <Button size="sm" variant="secondary" loading={busy === 'save'} onClick={() => save({ permissionRequestedAt: d.authorization.requestedAt ? null : new Date().toISOString() }, d.authorization.requestedAt ? 'Request date cleared' : 'Permission request recorded')}>
               {d.authorization.requestedAt ? 'Clear request date' : 'Record that the request was sent today'}
             </Button>
           )}
         </div>
-        <p className="mt-2 text-xs text-slate-500">LeetCode issues no API keys. LEETCODE_PERMISSION_REF is Algora&apos;s own switch, set on the server only after LeetCode grants written permission. Recording the request date here is for tracking only and authorizes nothing.</p>
+        <p className="mt-2 text-xs text-slate-500">LeetCode issues no API keys. LEETCODE_ACCESS_BASIS describes how Algora is allowed to read LeetCode data (public terms, written permission, a licence, an institutional or commercial agreement, or an explicit internal risk decision) and LEETCODE_ACCESS_REF points at the document behind it. Recording a request date here is for tracking only and authorizes nothing.</p>
       </Card>
       {d.upstream.blocked && <Notice tone="error" title="LeetCode is restricting or unavailable">Reason: {d.upstream.reason?.replace(/_/g, ' ').toLowerCase()}. Every provider that depends on LeetCode is paused until {fmtDateTime(d.upstream.blockedUntil)}. Algora does not switch providers to get around a LeetCode restriction.</Notice>}
       {d.providers.some((p) => p.transportKind === 'mock' && p.envEnabled) && <Notice tone="info">A development mock provider is active in this environment. Its data never counts in production.</Notice>}
@@ -105,6 +111,7 @@ export default function Page() {
                     <span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{i + 1}</span>
                     <span className="font-semibold">{p.displayName}</span>
                     <span className="text-xs text-slate-500">Authorization</span><Badge tone={AUTH_BADGE[p.authorizationStatus].tone}>{AUTH_BADGE[p.authorizationStatus].text}</Badge>
+                    {p.accessBasis && <Badge tone={p.accessBasis === 'OWN_RISK' ? 'amber' : 'indigo'}>{p.accessBasis === 'OWN_RISK' ? 'Internal risk acceptance' : p.accessBasis.replace(/_/g, ' ').toLowerCase()}</Badge>}
                     <span className="text-xs text-slate-500">Activation</span><Badge tone={p.activation === 'ACTIVE' ? 'green' : 'gray'}>{p.activation === 'ACTIVE' ? 'Active' : 'Inactive'}</Badge>
                     <span className="text-xs text-slate-500">Health</span><Badge tone={HEALTH_BADGE[p.technicalHealth].tone}>{HEALTH_BADGE[p.technicalHealth].text}</Badge>
                     {d.selectedProvider === p.id && <Badge tone="indigo">Serving</Badge>}
@@ -121,12 +128,13 @@ export default function Page() {
                   {p.activationReason && <p className="mt-1 text-sm text-slate-500">Inactive because: {p.activationReason}.</p>}
                   {p.technicalHealth === 'UNTESTED' && <p className="mt-1 text-sm text-slate-500">Untested: this provider has never made a live request, so its technical health is unknown.</p>}
                   <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3 lg:grid-cols-6">
-                    <div><dt className="text-xs text-slate-500">Success rate</dt><dd>{p.successRate === null ? '—' : `${p.successRate}%`} <span className="text-xs text-slate-400">({p.successes}/{p.totalRequests})</span></dd></div>
+                    <div><dt className="text-xs text-slate-500">Valid response rate</dt><dd>{p.successRate === null ? '—' : `${p.successRate}%`} <span className="text-xs text-slate-400">({p.successes}/{p.totalRequests})</span></dd></div>
                     <div><dt className="text-xs text-slate-500">Avg latency</dt><dd>{p.avgLatencyMs === null ? '—' : `${p.avgLatencyMs} ms`}</dd></div>
                     <div><dt className="text-xs text-slate-500">Failures · rate limited</dt><dd>{p.failures} · {p.rateLimited} <span className="text-xs text-slate-400">({p.consecutiveFailures} in a row)</span></dd></div>
                     <div><dt className="text-xs text-slate-500">Circuit</dt><dd>{p.breaker.toLowerCase().replace('_', '-')}{p.nextEligibleAt && <span className="text-xs text-slate-400"> · retry {fmtDateTime(p.nextEligibleAt)}</span>}</dd></div>
                     <div><dt className="text-xs text-slate-500">Own budget</dt><dd>{p.tokensAvailable}/{Math.max(5, p.ratePerMin)} · {p.ratePerMin}/min</dd></div>
-                    <div><dt className="text-xs text-slate-500">Last success · failure</dt><dd>{timeAgo(p.lastSuccessAt)} · {timeAgo(p.lastFailureAt)}</dd></div>
+                    <div><dt className="text-xs text-slate-500">Accepted-submission retrievals</dt><dd>{p.acceptedRetrievals} · {timeAgo(p.lastAcceptedRetrievalAt)}</dd></div>
+                    <div><dt className="text-xs text-slate-500">Last valid response · failure</dt><dd>{timeAgo(p.lastSuccessAt)} · {timeAgo(p.lastFailureAt)}</dd></div>
                   </dl>
                   {p.lastError && <p className="mt-2 truncate text-xs text-slate-500" title={p.lastError}>Last error ({p.lastErrorKind}): {p.lastError}</p>}
                   <p className="mt-2 text-xs text-slate-400">Window {p.capabilities.windowSize} · {p.capabilities.acceptedOnly ? 'accepted only' : 'all statuses, filtered'} · submission ids {p.capabilities.submissionIds ? 'yes' : 'no'} · cache {p.capabilities.cacheTtlSec}s · upstream {p.capabilities.upstream}{p.capabilities.reachesUpstreamDirectly ? '' : ' (via relay)'}</p>

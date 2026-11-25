@@ -57,7 +57,7 @@ describe('analytics', () => {
     const w = await world();
     const all = (await w.admin.call('get', '/analytics/students')).body;
     expect(all.total).toBe(3);
-    expect(all.items[0]).toMatchObject({ name: 'Stu a', solved: 3, points: 40, rank: 1, completionPct: 100, linkState: 'VERIFIED' });
+    expect(all.items[0]).toMatchObject({ name: 'Stu a', solved: 3, points: 40, rank: 1, completionPct: 100, linkState: 'LINKED' });
     expect(JSON.stringify(all)).not.toMatch(/9999999999|@x\.com/); // no contact data in tables
     expect((await w.admin.call('get', `/analytics/students?batchId=${w.bB._id}`)).body.items.map((r: any) => r.name)).toEqual(['Stu c']);
     expect((await w.admin.call('get', `/analytics/students?collegeId=${w.bB.collegeId}`)).body.total).toBe(1);
@@ -68,8 +68,8 @@ describe('analytics', () => {
     expect((await w.admin.call('get', '/analytics/students?q=stu%20b')).body.total).toBe(1);
     expect((await w.admin.call('get', `/analytics/students?q=${w.s[2].user.rollNumber}`)).body.total).toBe(1);
     expect((await w.admin.call('get', '/analytics/students?maxPct=10')).body.items.map((r: any) => r.name)).toEqual(['Stu b']);
-    await LeetcodeLink.updateOne({ studentId: w.s[1].user._id }, { $set: { status: 'REVALIDATION_REQUIRED' } });
-    expect((await w.admin.call('get', '/analytics/students?verification=REVALIDATION_REQUIRED')).body.items.map((r: any) => r.name)).toEqual(['Stu b']);
+    await LeetcodeLink.updateOne({ studentId: w.s[1].user._id }, { $set: { status: 'REVOKED', isActive: false, isCurrent: false } });
+    expect((await w.admin.call('get', '/analytics/students?verification=UNLINKED')).body.items.map((r: any) => r.name)).toEqual(['Stu b']);
     const p = (await w.admin.call('get', '/analytics/students?pageSize=2&page=2&sort=name&dir=asc')).body;
     expect(p.items.map((r: any) => r.name)).toEqual(['Stu c']);
     expect((await w.trainer.call('get', `/analytics/students?batchId=${w.bB._id}`)).body.total).toBe(0); // not their batch
@@ -135,20 +135,20 @@ describe('admin APIs', () => {
     expect((await w.trainer.call('get', '/colleges')).status).toBe(200);
   });
 
-  it('students: scoped list, suspend (session killed), revalidate, revoke', async () => {
+  it('students: scoped list, suspend (session killed), username correction, revoke', async () => {
     const w = await world();
     expect((await w.admin.call('get', '/students')).body.total).toBe(3);
     const tl = (await w.trainer.call('get', '/students')).body;
     expect(tl.total).toBe(2);
-    expect(tl.items[0].link.status).toBe('VERIFIED');
+    expect(tl.items[0].link.status).toBe('LINKED');
     const sa = await login(tok('s-a', 'a@x.com', 'a'));
     expect((await sa.call('get', '/auth/me')).status).toBe(200);
     expect((await w.trainer.call('patch', `/students/${w.s[0].user._id}/status`, { status: 'SUSPENDED' })).status).toBe(403);
     expect((await w.admin.call('patch', `/students/${w.s[0].user._id}/status`, { status: 'SUSPENDED' })).status).toBe(200);
     expect((await sa.call('get', '/auth/me')).status).toBe(401);
-    expect((await w.trainer.call('post', `/students/${w.s[1].user._id}/leetcode/revalidate`, {})).status).toBe(200);
-    expect((await LeetcodeLink.findOne({ studentId: w.s[1].user._id }))!.status).toBe('REVALIDATION_REQUIRED');
-    expect((await w.trainer.call('post', `/students/${w.s[2].user._id}/leetcode/revalidate`, {})).status).toBe(404); // not their student
+    expect((await w.trainer.call('post', `/students/${w.s[1].user._id}/leetcode/username`, { username: 'b_fixed', reason: 'typo' })).status).toBe(200);
+    expect((await LeetcodeLink.findOne({ studentId: w.s[1].user._id, isCurrent: true }))!.username).toBe('b_fixed');
+    expect((await w.trainer.call('post', `/students/${w.s[2].user._id}/leetcode/username`, { username: 'c_fixed', reason: 'not mine' })).status).toBe(404); // not their student
     expect((await w.trainer.call('post', `/students/${w.s[2].user._id}/leetcode/revoke`, { reason: 'abuse' })).status).toBe(403);
     expect((await w.admin.call('post', `/students/${w.s[2].user._id}/leetcode/revoke`, { reason: 'shared account' })).body.revoked).toBe(1);
   });

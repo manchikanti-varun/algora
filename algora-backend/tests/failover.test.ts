@@ -5,7 +5,7 @@ import { EvidenceConflict, ProviderEvent, ProviderState, RateBucket, SolveEviden
 import { countableEvidence } from '../src/modules/leetcode/evidence.repository';
 import { invalidateSettings, saveSettings } from '../src/modules/leetcode/integration-settings';
 import { requestSync, syncStudent } from '../src/modules/leetcode/leetcode-sync.service';
-import { fetchAccepted } from '../src/modules/leetcode/provider-manager';
+import { fetchAccepted, runHealthChecks } from '../src/modules/leetcode/provider-manager';
 import { AlfaProvider } from '../src/modules/leetcode/providers/alfa.provider';
 import { DirectProvider } from '../src/modules/leetcode/providers/direct.provider';
 import { LeetCodeQueryProvider, type LeetCodeQueryClient } from '../src/modules/leetcode/providers/leetcode-query.provider';
@@ -54,11 +54,31 @@ const acRows = (rows: { id?: string; slug: string; ts: number }[]) => ({ data: {
 beforeEach(async () => {
   await resetDb();
   (env as any).LEETCODE_SYNC_ENABLED = true;
+  env.LEETCODE_PROVIDER_PRIORITY = ['direct', 'alfa', 'leetcode-query']; // Exercise an explicit relay-first override.
   (env as any).LEETCODE_ALFA_RATE_PER_MIN = 60; // scenarios below are about failover, not Alfa's small default budget
   invalidateSettings();
 });
 
 describe('failover scenarios (mock providers sharing one upstream)', () => {
+  it('stops the in-flight request and skips failover when its synchronization lease is lost', async () => {
+    const { d, a, q } = trio();
+    const controller = new AbortController();
+    const started = new Promise<void>((resolve) => {
+      d.fetchAccepted = async (_username, _limit, signal) => {
+        resolve();
+        return new Promise((_, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      };
+    });
+    const pending = fetchAccepted('asha', 20, undefined, controller.signal);
+    const failure = expect(pending).rejects.toThrow('Lease lost');
+    await started;
+    controller.abort(new Error('Lease lost'));
+    await failure;
+    expect(a.calls + q.calls).toBe(0);
+  });
+
   it('1. primary succeeds: only the primary is called', async () => {
     const { d, a, q } = trio(); const s = await student(); solveAll([d, a, q], 'asha', 'two-sum');
     const o = await syncStudent(s.id, 'MANUAL');
@@ -127,9 +147,11 @@ describe('failover scenarios (mock providers sharing one upstream)', () => {
     expect(Date.now() - new Date(st.openedAt!).getTime()).toBeLessThan(5000);
   });
 
-  it('10. empty submission list is a success, not a failure or failover', async () => {
+  it('10. empty submission window is classified honestly, not as a success with zero solves, and does not fail over', async () => {
     const { d, a } = trio(); const s = await student(); d.solve('asha', 'x'); d.windowSize = 0;
-    expect(await syncStudent(s.id, 'MANUAL')).toMatchObject({ status: 'SYNC_SUCCESS', newlyVerified: 0, provider: 'direct' });
+    const o = await syncStudent(s.id, 'MANUAL');
+    expect(o).toMatchObject({ status: 'SUBMISSIONS_UNAVAILABLE', newlyVerified: 0, provider: 'direct' });
+    expect((await User.findById(s.u._id))!.sync!.statusDetail).toBe('INCOMPLETE_VISIBILITY');
     expect(a.calls).toBe(0);
   });
 
@@ -323,7 +345,7 @@ describe('real adapters on mock transports', () => {
     setProvidersForTests([new AlfaProvider(fakeLeetCode(() => ({ status: 200, body: { errors: [{ message: 'That user does not exist.' }] } })), 'https://alfa.test', ok, 'ua'), lq2]);
     await ProviderState.deleteMany({});
     const s2 = await student('ghost');
-    expect((await syncStudent(s2.id, 'MANUAL')).status).toBe('VERIFICATION_UNAVAILABLE');
+    expect((await syncStudent(s2.id, 'MANUAL')).status).toBe('ACCOUNT_NOT_FOUND');
     expect(lq2.calls).toBe(0);
   });
 
@@ -378,7 +400,6 @@ describe('real adapters on mock transports', () => {
         { title: 'Two Sum', titleSlug: 'two-sum', timestamp: String(T + 5), statusDisplay: 'Accepted' },
         { title: '3Sum', titleSlug: '3sum', timestamp: String(T + 9), statusDisplay: 'Time Limit Exceeded' },
       ],
-      user: async () => ({ matchedUser: { profile: { aboutMe: 'hi algora-verify-x' } } }),
     };
     const acc = new LeetCodeQueryProvider(async () => client, ok, 'mock', 'accepted');
     const r1 = await acc.fetchAccepted('asha', 20, new AbortController().signal);
@@ -389,7 +410,6 @@ describe('real adapters on mock transports', () => {
     expect(r2).toMatchObject({ acceptedOnly: false, rawCount: 3 });
     expect(r2.submissions.map((s) => s.problemSlug)).toEqual(['two-sum']);
     expect(all.capabilities.acceptedOnly).toBe(false);
-    expect(await acc.fetchProfileText('asha', new AbortController().signal)).toContain('algora-verify-x');
     const failing = new LeetCodeQueryProvider(async () => ({ ...client, graphql: async () => { throw new Error('HTTP 429 Too Many Requests: slow'); } }), ok, 'mock');
     await expect(failing.fetchAccepted('a', 20, new AbortController().signal)).rejects.toMatchObject({ kind: 'UPSTREAM_RATE_LIMITED' });
   });
@@ -445,6 +465,18 @@ describe('Super Admin integration controls', () => {
   });
 });
 
+it('a structurally valid empty health probe does not count as an accepted-submission retrieval', async () => {
+  const p = new MockProvider('direct');
+  p.register('health');
+  setProvidersForTests(p);
+  const check = await runHealthChecks('health');
+  expect(check).toMatchObject({ ran: true, results: [{ result: 'EMPTY_WINDOW', diagnostics: { structureValid: true, submissionsRetrieved: 0 } }] });
+  expect((await state('direct'))?.acceptedRetrievals ?? 0).toBe(0);
+  expect(p.probeCalls).toBe(0);
+  expect((await runHealthChecks('health')).ran).toBe(false);
+  expect(p.calls).toBe(1);
+});
+
 describe('consent and withdrawal', () => {
   it('linking requires consent; withdrawal deletes LeetCode-derived data', async () => {
     const { d } = trio(); const s = await student(); d.solve('asha', 'x');
@@ -455,7 +487,7 @@ describe('consent and withdrawal', () => {
     const r = await c.call('delete', '/student/leetcode/data', { confirm: 'DELETE' });
     expect(r.body).toMatchObject({ ok: true, evidence: 1 });
     expect(await SolveEvidence.countDocuments({ studentId: s.u._id })).toBe(0);
-    expect(r.body.link.state).toBe('REVOKED');
+    expect(r.body.link.state).toBe('UNLINKED');
   });
 });
 

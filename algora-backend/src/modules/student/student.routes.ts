@@ -9,7 +9,7 @@ import { objectId as _oid, pagination as _pg } from '../../lib/validate';
 import { User } from '../../models';
 import { audit } from '../audit/audit';
 import { buildDashboard, verifiedHistory } from '../progress/dashboard';
-import { linkView, requestLink, revokeLinks, verifyOwnership } from '../leetcode/links.service';
+import { linkAccount, linkView, revokeLinks } from '../leetcode/links.service';
 import { countableEvidence, purgeStudentLeetcodeData } from '../leetcode/evidence.repository';
 import { batchBoard, batchCourseBoard, cachedBoard, clearBoardCache, courseBoard, paginate } from '../progress/progress.service';
 
@@ -37,8 +37,12 @@ studentRouter.get('/chapters/:chapterId', async (req, res) => {
   const visible = chapter && (await BatchChapterAccess.exists({ batchCourseId, chapterId, isVisible: true }));
   // Same 404 for "does not exist", "not enrolled" and "hidden": hidden content is indistinguishable from absent.
   if (!ctx || !chapter || !visible) throw notFound('Chapter not found');
-  const problems = await Problem.find({ chapterId, status: 'ACTIVE' }, 'title url slug difficulty order').sort({ order: 1 }).lean();
-  const ev = new Map((await countableEvidence(req.user!._id)).map((e) => [e.slug, e]));
+  const [problems, evidence] = await Promise.all([
+    Problem.find({ chapterId, status: 'ACTIVE' }, 'title url slug difficulty order catalogId')
+      .sort({ order: 1, _id: 1 }).populate<{ catalogId?: { problemNumber?: number; topics: string[] } | null }>('catalogId', 'problemNumber topics').lean(),
+    countableEvidence(req.user!._id),
+  ]);
+  const ev = new Map(evidence.map((e) => [e.slug, e]));
   // Navigation only between VISIBLE chapters.
   const visibleIds = (await BatchChapterAccess.find({ batchCourseId, isVisible: true }, 'chapterId').lean()).map((v) => v.chapterId);
   const siblings = await Chapter.find({ _id: { $in: visibleIds }, courseId: ctx.bc.courseId, status: 'ACTIVE' }, 'title order').sort({ order: 1 }).lean();
@@ -46,9 +50,9 @@ studentRouter.get('/chapters/:chapterId', async (req, res) => {
   res.json({
     chapter: { _id: chapter._id, title: chapter.title, description: chapter.description },
     course: { _id: ctx.course._id, title: ctx.course.title }, batchName: ctx.batchName,
-    problems: problems.map((p) => {
+    problems: problems.map(({ catalogId, ...p }) => {
       const e = ev.get(p.slug);
-      return { ...p, verified: !!e, evidence: e ? { firstVerifiedAt: e.firstVerifiedAt ?? null, lastVerifiedAt: e.lastVerifiedAt ?? null, earliestObservedSolvedAt: e.earliestObservedSolvedAt ?? null, latestObservedSolvedAt: e.latestObservedSolvedAt ?? null } : null };
+      return { ...p, problemNumber: catalogId?.problemNumber ?? null, topics: catalogId?.topics ?? [], verified: !!e, evidence: e ? { firstVerifiedAt: e.firstVerifiedAt ?? null, lastVerifiedAt: e.lastVerifiedAt ?? null, earliestObservedSolvedAt: e.earliestObservedSolvedAt ?? null, latestObservedSolvedAt: e.latestObservedSolvedAt ?? null } : null };
     }),
     prev: idx > 0 ? { _id: siblings[idx - 1]._id, title: siblings[idx - 1].title } : null,
     next: idx >= 0 && idx < siblings.length - 1 ? { _id: siblings[idx + 1]._id, title: siblings[idx + 1].title } : null,
@@ -113,21 +117,22 @@ studentRouter.patch('/profile', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- LeetCode account ownership ----------
+// ---------- LeetCode account linking (no ownership verification) ----------
 studentRouter.get('/leetcode', async (req, res) => res.json(await linkView(req.user!._id)));
 
-/** Start a link, or request a username change. The established link keeps counting until the new one is verified. */
+/**
+ * Link a username, or change it. Takes effect immediately and makes no provider request, so it also works while
+ * synchronization is unavailable. A changed account starts with no counted evidence; the old account's evidence is kept.
+ */
 studentRouter.post('/leetcode/link', async (req, res) => {
-  const { username, consent } = parse(z.object({ username: z.string().trim().regex(/^[A-Za-z0-9_-]{1,40}$/, 'Invalid LeetCode username'), consent: z.literal(true, { message: 'Consent is required' }) }).strict(), req.body);
-  await requestLink(req.user!._id, username, consent);
-  await audit(req, 'student.leetcode.link.request', { type: 'User', id: req.user!._id }, { username });
+  const { username, consent } = parse(
+    z.object({ username: z.string().trim().regex(/^[A-Za-z0-9_-]{1,40}$/, 'Invalid LeetCode username'), consent: z.literal(true, { message: 'Consent is required' }) }).strict(),
+    req.body,
+  );
+  const before = await linkView(req.user!._id);
+  await linkAccount(req.user!._id, username, { consent });
+  await audit(req, before.state === 'LINKED' ? 'student.leetcode.username_changed' : 'student.leetcode.linked', { type: 'User', id: req.user!._id }, { from: before.username, to: username });
   res.status(201).json(await linkView(req.user!._id));
-});
-
-studentRouter.post('/leetcode/verify', async (req, res) => {
-  const r = await verifyOwnership(req.user!._id);
-  await audit(req, 'student.leetcode.verify', { type: 'User', id: req.user!._id }, { verified: r.verified });
-  res.json({ ...r, link: await linkView(req.user!._id) });
 });
 
 /**

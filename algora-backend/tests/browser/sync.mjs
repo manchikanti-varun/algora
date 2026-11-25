@@ -40,7 +40,13 @@ try {
   await step('Setup through the API as Super Admin: course (2 problems), active batch, unlocked chapter, enrollment', async () => {
     const c = (await apiAs(admin.page, 'POST', '/courses', { title: 'DSA' })).body;
     const ch = (await apiAs(admin.page, 'POST', `/courses/${c._id}/chapters`, { title: 'Arrays' })).body;
-    for (const [slug, d] of [['two-sum', 'EASY'], ['3sum', 'MEDIUM']]) await apiAs(admin.page, 'POST', `/chapters/${ch._id}/problems`, { title: slug, url: `https://leetcode.com/problems/${slug}/`, difficulty: d });
+    for (const [slug, title, number, difficulty] of [['two-sum', 'Two Sum', 1, 'EASY'], ['3sum', '3Sum', 15, 'MEDIUM']]) {
+      const catalog = await apiAs(admin.page, 'POST', '/problem-library', { title, problemNumber: number, url: `https://leetcode.com/problems/${slug}/`, difficulty });
+      assert(catalog.status === 201, 'catalog entry was not created');
+    }
+    const resolved = await apiAs(admin.page, 'POST', '/problem-library/resolve', { input: '1 15' });
+    const assigned = await apiAs(admin.page, 'POST', `/problem-library/chapters/${ch._id}/assign`, { ids: resolved.body.rows.map((row) => row.problem._id) });
+    assert(assigned.body.added === 2, 'chapter did not receive the catalog entries');
     await apiAs(admin.page, 'PATCH', `/courses/${c._id}`, { status: 'PUBLISHED' });
     const b = (await apiAs(admin.page, 'POST', '/batches', { name: 'B', status: 'ACTIVE' })).body;
     await apiAs(admin.page, 'POST', `/batches/${b._id}/courses`, { courseId: c._id });
@@ -54,20 +60,11 @@ try {
     await s.page.getByRole('checkbox', { name: /public accepted submissions/ }).check();
     await s.page.getByRole('button', { name: 'Create account' }).click();
     await s.page.waitForURL('**/student/dashboard');
-    await s.page.getByText('waiting for ownership verification').waitFor();
   });
-  await step('Ownership: wrong profile text is refused; challenge in the profile summary verifies the account', async () => {
+  await step('Registration immediately links the consenting username', async () => {
     await s.page.goto(`${FE}/student/profile`);
-    const challenge = (await s.page.getByText(/algora-verify-/).textContent()).trim();
-    await mock('/profile', { username: 'asha_rao', text: 'hello' });
-    await mock('/solve', { username: 'asha_rao', slug: 'unrelated-problem' }); // account exists at the provider
-    await s.page.getByRole('button', { name: 'Verify' }).click();
-    await s.page.getByText('The code was not found').waitFor();
-    await s.page.waitForTimeout(61_000); // verification attempt cooldown (60 s)
-    await mock('/profile', { username: 'asha_rao', text: `Learning DSA ${challenge}` });
-    await s.page.getByRole('button', { name: 'Verify' }).click();
-    await s.page.getByText('Ownership verified').waitFor();
-    await s.page.getByText('Verified account:').waitFor();
+    await s.page.getByText('Linked account:', { exact: false }).waitFor();
+    await mock('/solve', { username: 'asha_rao', slug: 'unrelated-problem' });
   });
   await step('Manual sync verifies a newly accepted problem; dashboard and chapter update; button shows a countdown', async () => {
     await mock('/solve', { username: 'asha_rao', slug: 'two-sum' });
@@ -81,6 +78,7 @@ try {
     await s.page.getByRole('link', { name: 'Arrays' }).click();
     await s.page.getByLabel('Verified', { exact: true }).waitFor();
     await s.page.getByText(/Verified .* last accepted/).waitFor();
+    await s.page.getByText('#1', { exact: true }).waitFor();
     await s.page.screenshot({ path: '../docs/screenshots/11-verified-chapter.png', fullPage: true });
   });
   await step('Returning to the tab after being away re-syncs once the cooldown has passed', async () => {
@@ -112,7 +110,7 @@ try {
     await s.page.goto(`${FE}/student/profile`);
     await s.page.getByRole('button', { name: 'Unlink account' }).click();
     await s.page.locator('dialog[open]').getByRole('button', { name: 'Unlink' }).click();
-    await s.page.getByText('Account unlinked').waitFor();
+    await s.page.getByText('Account unlinked', { exact: true }).waitFor();
     await s.page.goto(`${FE}/student/dashboard`);
     await s.page.getByText('0 / 2').first().waitFor();
     const d = await apiAs(admin.page, 'GET', `/analytics/students?batchId=${ids.b._id}`);

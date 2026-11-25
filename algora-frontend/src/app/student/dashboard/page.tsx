@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { Card, DifficultyBadge, EmptyState, ErrorState, Grid, PageHeader, PageSkeleton, ProgressBar, StatCard } from '@/components/ui';
+import { ButtonLink, Card, DifficultyBadge, EmptyState, ErrorState, Grid, PageHeader, PageSkeleton, ProgressBar, StatCard } from '@/components/ui';
 import { ContextPicker } from '@/components/student/ContextPicker';
 import { SyncPanel, useSync } from '@/components/student/SyncProvider';
 import { useContextChoice } from '@/components/student/useContextChoice';
@@ -22,13 +22,19 @@ export default function Page() {
   if (err) return <ErrorState message={err} retry={() => { probe.reload(); d.reload(); }} />;
   if (!data) return <PageSkeleton />;
   const s = data.summary;
+  const nextChapter = data.chapters.find((chapter) => chapter.solved < chapter.total) ?? data.chapters[0];
   return (
     <div className="space-y-6">
       <PageHeader title={`Hi, ${user?.fullName.split(' ')[0]}`} subtitle={data.selected ? `${data.selected.courseTitle} · ${data.selected.batchName}` : undefined}
         actions={<ContextPicker contexts={data.contexts} value={selectedId} onChange={choose} />} />
+      {nextChapter && data.selected && <Card title="Continue learning"
+        actions={<ButtonLink href={`/student/chapters/${nextChapter.chapterId}?batchCourseId=${data.selected.batchCourseId}`}>Open chapter</ButtonLink>}>
+        <p className="font-medium text-slate-900">{nextChapter.title}</p>
+        <p className="mt-1 text-sm text-slate-500">{nextChapter.solved} of {nextChapter.total} problems verified</p>
+      </Card>}
       <SyncPanel />
-      {view && view.link.state !== 'VERIFIED' && (
-        <Card><p className="text-sm text-slate-700">Your LeetCode account {view.link.state === 'UNLINKED' || view.link.state === 'REVOKED' ? 'is not linked' : view.link.state === 'REVALIDATION_REQUIRED' ? 'needs to be verified again' : 'is waiting for ownership verification'}. Progress only counts from a verified account. <Link className="font-medium text-indigo-600 hover:underline" href="/student/profile">Go to profile</Link></p></Card>
+      {view && view.link.state !== 'LINKED' && (
+        <Card><p className="text-sm text-slate-700">Link your LeetCode username to track accepted submissions. <Link className="font-medium text-indigo-600 hover:underline" href="/student/profile">Go to profile</Link></p></Card>
       )}
       {!s ? (
         <EmptyState title="No courses yet" body="You are not enrolled in an active course. Your trainer will enroll you using your roll number; courses appear here automatically." />

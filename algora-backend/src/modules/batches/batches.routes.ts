@@ -26,11 +26,19 @@ const batchFields = {
   status: z.enum(['DRAFT', 'ACTIVE', 'COMPLETED', 'ARCHIVED']),
 };
 const dateOrder = (v: { startDate?: Date; endDate?: Date }) => !v.startDate || !v.endDate || v.endDate >= v.startDate;
+/** Optional per-batch synchronization calendar; unset parts fall back to the server defaults. */
+const scheduleSchema = z.object({
+  hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/).optional(),
+  days: z.string().regex(/^[0-6](,[0-6])*$/).optional(),
+  tzOffsetMin: z.number().int().min(-720).max(840).optional(),
+  termStart: z.coerce.date().optional(),
+  termEnd: z.coerce.date().optional(),
+}).strict();
 
 // ---------- Batches (independent of courses) ----------
 batchesRouter.post('/', async (req, res) => {
   const b = parse(
-    z.object({ name: batchFields.name, description: batchFields.description.default(''), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.default('DRAFT') })
+    z.object({ name: batchFields.name, description: batchFields.description.default(''), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.default('DRAFT'), leetcodeSchedule: scheduleSchema.optional() })
       .refine(dateOrder, 'endDate must not be before startDate'),
     req.body,
   );
@@ -76,7 +84,7 @@ batchesRouter.get('/:id', async (req, res) => {
 batchesRouter.patch('/:id', async (req, res) => {
   const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
   const b = parse(
-    z.object({ name: batchFields.name.optional(), description: batchFields.description.optional(), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.optional() }).strict(),
+    z.object({ name: batchFields.name.optional(), description: batchFields.description.optional(), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.optional(), leetcodeSchedule: scheduleSchema.nullable().optional() }).strict(),
     req.body,
   );
   if (batch.status === 'ARCHIVED' && b.status === undefined) throw forbidden('Batch is archived', 'BATCH_ARCHIVED');

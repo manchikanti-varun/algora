@@ -1,5 +1,6 @@
 import { availableTokens, refundToken, takeToken } from '../../lib/ratelimit';
 import { env } from '../../config/env';
+import { AccountProbe } from '../../models';
 import type { BreakerConfig } from './circuit-breaker';
 import { loadSettings, rawSettings, type Effective } from './integration-settings';
 import { ProviderError, scopeOf } from './leetcode.types';
@@ -8,7 +9,7 @@ import {
   recordAnswered, recordFailure, recordProviderRateLimited, recordSuccess, technicalHealthOf, upstreamBlock, type HealthStatus, type StateDoc, type TechnicalHealth,
 } from './provider-health.service';
 import { providerEnvEnabled, registry } from './providers/provider.registry';
-import type { FetchResult, SubmissionProvider } from './providers/provider.interface';
+import type { AccountProbeResult, FetchResult, SubmissionProvider } from './providers/provider.interface';
 
 export const upstreamBucket = (u: string) => `upstream:${u}`;
 export const providerBucket = (id: string) => `provider:${id}`;
@@ -16,6 +17,7 @@ const burstOf = (perMin: number) => Math.max(5, perMin);
 const breakerCfg = (s: Effective): BreakerConfig => ({ threshold: s.failureThreshold, baseOpenMs: s.recoveryMs, maxOpenMs: Math.max(s.recoveryMs, 15 * 60_000) });
 
 export interface Attempt { provider: string; outcome: 'OK' | 'FAILED' | 'SKIPPED'; kind?: string; reason?: string; latencyMs?: number }
+export interface AccountProbeInfo { exists: boolean; calendarTotal: number | null; provider: string; cached: boolean }
 export type ManagerResult<T> =
   | { ok: true; value: T; provider: SubmissionProvider; attempts: Attempt[]; failedOver: boolean }
   | { ok: false; reason: 'PAUSED' | 'NO_ELIGIBLE_PROVIDER' | 'PROVIDERS_UNAVAILABLE' | 'GLOBAL_RATE_LIMITED' | 'UPSTREAM_BLOCKED' | 'NOT_FOUND' | 'ALL_FAILED'; error?: ProviderError; retryAfterSec?: number; attempts: Attempt[] };
@@ -27,9 +29,12 @@ export interface ProviderView {
   status: HealthStatus; breaker: string; nextEligibleAt: Date | null;
   /** Three independent dimensions for display. */
   authorizationStatus: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED';
+  /** The access basis this provider is authorised under (never a secret). */
+  accessBasis: string | null;
   activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null;
   technicalHealth: TechnicalHealth;
   totalRequests: number; successes: number; failures: number; rateLimited: number; consecutiveFailures: number; successRate: number | null;
+  acceptedRetrievals: number; lastAcceptedRetrievalAt: Date | null;
   avgLatencyMs: number | null; lastSuccessAt: Date | null; lastFailureAt: Date | null; lastError: string | null; lastErrorKind: string | null;
   ratePerMin: number; tokensAvailable: number;
 }
@@ -54,10 +59,12 @@ export async function providerViews(): Promise<{ settings: Effective; views: Pro
       envEnabled: providerEnvEnabled(p.id), adminEnabled: !s.disabled.has(p.id), authorized: auth.authorized, authorizationReason: auth.reason, transportKind: p.transportKind,
       status: h.status, breaker: h.breaker, nextEligibleAt: h.nextEligibleAt,
       authorizationStatus: auth.authorized ? 'AUTHORIZED' : requestedAt && p.id !== 'mock' ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED',
+      accessBasis: auth.basis ?? null,
       ...activationOf(p, s, auth.authorized),
       technicalHealth: technicalHealthOf(d, { upstreamBlocked: blocked, cfg: breakerCfg(s), timeoutMs: s.timeoutMs }),
       totalRequests: total, successes: d?.successes ?? 0, failures: d?.failures ?? 0, rateLimited: d?.rateLimited ?? 0, consecutiveFailures: d?.consecutiveFailures ?? 0,
       successRate: total ? Math.round(((d?.successes ?? 0) / total) * 1000) / 10 : null, avgLatencyMs: d?.latencyEwmaMs != null ? Math.round(d.latencyEwmaMs) : null,
+      acceptedRetrievals: d?.acceptedRetrievals ?? 0, lastAcceptedRetrievalAt: d?.lastAcceptedRetrievalAt ?? null,
       lastSuccessAt: d?.lastSuccessAt ?? null, lastFailureAt: d?.lastFailureAt ?? null, lastError: d?.lastError ?? null, lastErrorKind: d?.lastErrorKind ?? null,
       ratePerMin: rate, tokensAvailable: await availableTokens(providerBucket(p.id), rate, burstOf(rate)),
     });
@@ -85,11 +92,11 @@ export async function primaryUpstream(): Promise<string | null> {
   return orderByPriority(registry(), s).find((p) => isEnabled(p, s) && p.authorization().authorized)?.capabilities.upstream ?? null;
 }
 
-/** Any provider that could ever serve requests right now (enabled + authorised), ignoring health. Cheap; no DB reads besides settings. */
-export async function hasEligibleProvider(capability?: 'profileText', opts: { ignorePause?: boolean } = {}): Promise<boolean> {
+/** Any provider that could ever serve requests right now (enabled + authorised), ignoring health. Cheap. */
+export async function hasEligibleProvider(opts: { ignorePause?: boolean } = {}): Promise<boolean> {
   const s = await loadSettings();
   if (s.paused && !opts.ignorePause) return false;
-  return registry().some((p) => isEnabled(p, s) && p.authorization().authorized && (!capability || p.capabilities[capability]));
+  return registry().some((p) => isEnabled(p, s) && p.authorization().authorized);
 }
 
 /**
@@ -98,12 +105,11 @@ export async function hasEligibleProvider(capability?: 'profileText', opts: { ig
  * place: demoting them would starve them of traffic, so they would never recover or close their breaker (sticky failover).
  * Repeated failures and timeouts open the breaker, which is what removes a bad provider; a half-open probe restores it.
  */
-function candidates(s: Effective, states: Map<string, StateDoc>, capability?: 'profileText') {
+function candidates(s: Effective, states: Map<string, StateDoc>) {
   const out: { p: SubmissionProvider; halfOpenAt?: Date; tier: number }[] = [];
   let enabledAuthorized = 0;
   for (const p of orderByPriority(registry(), s)) {
     if (!isEnabled(p, s) || !p.authorization().authorized) continue;
-    if (capability && !p.capabilities[capability]) continue;
     enabledAuthorized++;
     const d = states.get(pKey(p.id));
     const h = healthOf(d, { enabled: true, authorized: true, upstreamBlocked: false, cfg: breakerCfg(s), timeoutMs: s.timeoutMs });
@@ -123,13 +129,13 @@ function candidates(s: Effective, states: Map<string, StateDoc>, capability?: 'p
  */
 export async function runWithFailover<T>(
   op: (p: SubmissionProvider, signal: AbortSignal) => Promise<T>,
-  ctx: { capability?: 'profileText'; studentId?: unknown; isProbe?: boolean } = {},
+  ctx: { studentId?: unknown; isProbe?: boolean; signal?: AbortSignal; retrievedAccepted?: (result: T) => boolean } = {},
 ): Promise<ManagerResult<T>> {
   const s = await loadSettings();
   const attempts: Attempt[] = [];
   if (s.paused) return { ok: false, reason: 'PAUSED', attempts };
   const states = await getStates();
-  const { list, enabledAuthorized } = candidates(s, states, ctx.capability);
+  const { list, enabledAuthorized } = candidates(s, states);
   if (!enabledAuthorized) return { ok: false, reason: 'NO_ELIGIBLE_PROVIDER', attempts };
   if (!list.length) {
     const next = [...states.values()].map((d) => d.rateLimitedUntil ?? null).filter(Boolean) as Date[];
@@ -138,8 +144,10 @@ export async function runWithFailover<T>(
   let lastErr: ProviderError | undefined;
   let tried = 0;
   for (const c of list) {
+    ctx.signal?.throwIfAborted();
     if (tried > s.maxFailover) break;
     const { p } = c;
+    if (ctx.isProbe && !p.probeAccount) continue;
     const upstream = p.capabilities.upstream;
     const blocked = upstreamBlock(await getStatesCached(states, tried), upstream);
     if (blocked) return { ok: false, reason: 'UPSTREAM_BLOCKED', attempts, retryAfterSec: Math.max(1, Math.ceil((blocked.until.getTime() - Date.now()) / 1000)), error: lastErr ?? new ProviderError(blocked.reason as ProviderError['kind'], 'LeetCode is currently restricted or unavailable') };
@@ -163,15 +171,18 @@ export async function runWithFailover<T>(
     const timer = setTimeout(() => ctl.abort(), s.timeoutMs);
     const t0 = Date.now();
     try {
-      const value = await op(p, ctl.signal);
+      const signal = ctx.signal ? AbortSignal.any([ctl.signal, ctx.signal]) : ctl.signal;
+      const value = await op(p, signal);
+      ctx.signal?.throwIfAborted();
       const ms = Date.now() - t0;
-      await recordSuccess(p.id, ms);
+      await recordSuccess(p.id, ms, ctx.retrievedAccepted?.(value));
       if (p.capabilities.reachesUpstreamDirectly) await noteUpstreamSuccess(upstream);
       attempts.push({ provider: p.id, outcome: 'OK', latencyMs: ms });
       const failedOver = attempts.some((a) => a.outcome === 'FAILED');
       if (failedOver) await event({ type: 'FAILOVER', provider: attempts.find((a) => a.outcome === 'FAILED')!.provider, toProvider: p.id, kind: attempts.find((a) => a.outcome === 'FAILED')!.kind, studentId: ctx.studentId });
       return { ok: true, value, provider: p, attempts, failedOver };
     } catch (raw) {
+      ctx.signal?.throwIfAborted();
       const e = raw instanceof ProviderError ? raw : new ProviderError('CLIENT_ERROR', String((raw as Error)?.message ?? raw).slice(0, 200));
       const ms = Date.now() - t0;
       lastErr = e;
@@ -199,20 +210,57 @@ export async function runWithFailover<T>(
 /** Re-read upstream state after a failed attempt (another instance or our own attempt may have blocked it). */
 async function getStatesCached(initial: Map<string, StateDoc>, tried: number) { return tried === 0 ? initial : getStates(); }
 
-export const fetchAccepted = (username: string, limit: number, studentId?: unknown) =>
-  runWithFailover<FetchResult>((p, signal) => p.fetchAccepted(username, limit, signal), { studentId });
+export const fetchAccepted = (username: string, limit: number, studentId?: unknown, signal?: AbortSignal) =>
+  runWithFailover<FetchResult>((p, requestSignal) => p.fetchAccepted(username, limit, requestSignal), { studentId, signal, retrievedAccepted: (result) => result.submissions.length > 0 });
 
-export const fetchProfileText = (username: string, studentId?: unknown) =>
-  runWithFailover<string>((p, signal) => p.fetchProfileText(username, signal), { capability: 'profileText', studentId });
+const PROBE_TTL_EXISTS_MS = 30 * 60_000;
+const PROBE_TTL_MISSING_MS = 6 * 3600_000;
 
 /**
- * Admin-triggered, controlled health check: one tiny request per enabled + authorised provider against a CONSENTING account
- * (LEETCODE_HEALTHCHECK_USERNAME). Respects upstream blocks and every rate budget; does not fail over.
+ * Cached account-existence probe. Called ONLY when a submission window is empty. Results are shared across instances
+ * (account_probes, with a TTL index) so a wrong username is not re-queried on every sync. Returns null when no eligible
+ * provider can answer: absence of evidence is not evidence the account does not exist.
  */
-export async function runHealthChecks(username = env.LEETCODE_HEALTHCHECK_USERNAME) {
+export async function probeAccount(username: string, studentId?: unknown, signal?: AbortSignal): Promise<AccountProbeInfo | null> {
+  signal?.throwIfAborted();
+  const norm = username.trim().toLowerCase();
+  const hit = await AccountProbe.findOne({ usernameNorm: norm, expiresAt: { $gt: new Date() } }).lean();
+  if (hit) return { exists: hit.exists, calendarTotal: hit.calendarTotal ?? null, provider: hit.provider, cached: true };
+  const r = await runWithFailover<AccountProbeResult | null>(
+    (p, signal) => (p.probeAccount ? p.probeAccount(username, signal) : Promise.resolve(null)),
+    { studentId, isProbe: true, signal },
+  );
+  if (!r.ok || !r.value) return null;
+  const ttl = r.value.exists ? PROBE_TTL_EXISTS_MS : PROBE_TTL_MISSING_MS;
+  await AccountProbe.updateOne(
+    { _id: `probe:${r.provider.id}:${norm}` },
+    { $set: { provider: r.provider.id, usernameNorm: norm, exists: r.value.exists, calendarTotal: r.value.calendarTotal, checkedAt: new Date(), expiresAt: new Date(Date.now() + ttl) } },
+    { upsert: true },
+  ).catch(() => {});
+  return { exists: r.value.exists, calendarTotal: r.value.calendarTotal, provider: r.provider.id, cached: false };
+}
+
+export interface HealthCheckResult {
+  provider: string;
+  /** OK only when accepted submissions were actually retrieved for the consenting account. */
+  result: 'OK' | 'EMPTY_WINDOW' | 'EMPTY_WINDOW_WITH_ACTIVITY' | 'ACCOUNT_NOT_FOUND' | 'INVALID_RESPONSE' | 'SKIPPED_NOT_ELIGIBLE' | 'SKIPPED_UPSTREAM_BLOCKED' | 'SKIPPED_RATE_BUDGET' | 'SKIPPED_PROVIDER_BUDGET' | string;
+  latencyMs?: number;
+  diagnostics?: { reachable: boolean; structureValid: boolean; submissionsRetrieved: number; rawRows: number; acceptedOnly: boolean; accountExistence: 'EXISTS' | 'NOT_FOUND' | 'UNKNOWN'; calendarActivity: number | null };
+}
+
+/**
+ * Admin-triggered, controlled health check against a CONSENTING account (LEETCODE_HEALTHCHECK_USERNAME).
+ * Connectivity, response structure, actual submission retrieval and data completeness are reported separately: an empty
+ * window is recorded as a valid response and never counts as an accepted-submission retrieval. Respects upstream blocks and every rate budget; does not fail over. At most one run/min.
+ */
+export async function runHealthChecks(username = env.LEETCODE_HEALTHCHECK_USERNAME, opts: { force?: boolean } = {}) {
   const s = await loadSettings();
   if (!username) return { ran: false as const, reason: 'LEETCODE_HEALTHCHECK_USERNAME is not configured' };
-  const out: { provider: string; result: string; latencyMs?: number }[] = [];
+  if (s.paused) return { ran: false as const, reason: 'Synchronization is paused' };
+  if (!(opts.force && env.NODE_ENV === 'test') && !(await takeToken('leetcode:admin-health-check', 1, 1))) {
+    return { ran: false as const, reason: 'A health check ran less than a minute ago', retryAfterSec: 60 };
+  }
+  const out: HealthCheckResult[] = [];
   for (const p of orderByPriority(registry(), s)) {
     if (!isEnabled(p, s) || !p.authorization().authorized) { out.push({ provider: p.id, result: 'SKIPPED_NOT_ELIGIBLE' }); continue; }
     const states = await getStates();
@@ -221,16 +269,20 @@ export async function runHealthChecks(username = env.LEETCODE_HEALTHCHECK_USERNA
     if (!(await takeToken(providerBucket(p.id), s.providerRatePerMin(p.id), burstOf(s.providerRatePerMin(p.id))))) { await refundToken(upstreamBucket(p.capabilities.upstream), burstOf(s.ratePerMin)); out.push({ provider: p.id, result: 'SKIPPED_PROVIDER_BUDGET' }); continue; }
     const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), s.timeoutMs); const t0 = Date.now();
     try {
-      await p.fetchAccepted(username, 1, ctl.signal);
-      await recordSuccess(p.id, Date.now() - t0);
-      out.push({ provider: p.id, result: 'OK', latencyMs: Date.now() - t0 });
+      const r = await p.fetchAccepted(username, 5, ctl.signal);
+      clearTimeout(timer);
+      const retrieved = r.submissions.length;
+      const diagnostics = { reachable: true, structureValid: true, submissionsRetrieved: retrieved, rawRows: r.rawCount, acceptedOnly: r.acceptedOnly, accountExistence: 'UNKNOWN' as const, calendarActivity: null as number | null };
+      await recordSuccess(p.id, Date.now() - t0, retrieved > 0);
+      out.push({ provider: p.id, result: retrieved > 0 ? 'OK' : 'EMPTY_WINDOW', latencyMs: Date.now() - t0, diagnostics });
     } catch (raw) {
+      clearTimeout(timer);
       const e = raw instanceof ProviderError ? raw : new ProviderError('CLIENT_ERROR', String(raw));
       if (scopeOf(e.kind) === 'UPSTREAM') await blockUpstream(p.capabilities.upstream, e, s.recoveryMs, p.id);
       else if (e.kind === 'PROVIDER_RATE_LIMITED') await recordProviderRateLimited(p.id, e.retryAfterSec, s.recoveryMs);
       else if (scopeOf(e.kind) === 'PROVIDER') await recordFailure(p.id, e, breakerCfg(s));
-      out.push({ provider: p.id, result: e.kind, latencyMs: Date.now() - t0 });
-    } finally { clearTimeout(timer); }
+      out.push({ provider: p.id, result: e.kind === 'BAD_RESPONSE' ? 'INVALID_RESPONSE' : e.kind, latencyMs: Date.now() - t0, diagnostics: { reachable: e.kind !== 'PROVIDER_UNAVAILABLE' && e.kind !== 'PROVIDER_TIMEOUT', structureValid: e.kind !== 'BAD_RESPONSE', submissionsRetrieved: 0, rawRows: 0, acceptedOnly: p.capabilities.acceptedOnly, accountExistence: 'UNKNOWN', calendarActivity: null } });
+    }
   }
   await event({ type: 'HEALTH_CHECK', message: out.map((o) => `${o.provider}:${o.result}`).join(', ') });
   return { ran: true as const, results: out };

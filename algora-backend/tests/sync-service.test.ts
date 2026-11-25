@@ -76,13 +76,23 @@ describe('syncStudent with mock provider', () => {
 
   it.each([
     ['UPSTREAM_RATE_LIMITED', 'RATE_LIMITED'], ['PROVIDER_UNAVAILABLE', 'PROVIDER_UNAVAILABLE'], ['PROVIDER_TIMEOUT', 'PROVIDER_UNAVAILABLE'],
-    ['BAD_RESPONSE', 'PROVIDER_UNAVAILABLE'], ['NOT_FOUND', 'VERIFICATION_UNAVAILABLE'],
+    ['BAD_RESPONSE', 'PROVIDER_UNAVAILABLE'], ['NOT_FOUND', 'ACCOUNT_NOT_FOUND'],
   ] as const)('provider error %s -> %s with backoff', async (kind, expected) => {
     const { u } = await student('asha'); mock.solve('asha', 'two-sum', T(0)); mock.failWith = kind;
     expect((await syncStudent(String(u._id), 'MANUAL')).status).toBe(expected);
     const s = (await User.findById(u._id))!.sync!;
-    if (kind !== 'UPSTREAM_RATE_LIMITED') expect(s.consecutiveFailures).toBe(1);
+    expect(s.consecutiveFailures).toBe(kind === 'UPSTREAM_RATE_LIMITED' || kind === 'NOT_FOUND' ? 0 : 1);
     expect(s.nextEligibleAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('manual and tab-return attempts respect account-level backoff', async () => {
+    const { u } = await student('asha');
+    const now = new Date();
+    await User.updateOne({ _id: u._id }, { $set: { 'sync.nextEligibleAt': new Date(now.getTime() + 3600_000) } });
+    for (const trigger of ['MANUAL', 'TAB_RETURN'] as const) {
+      expect(await requestSync(String(u._id), trigger, now)).toMatchObject({ accepted: false, retryAfterSec: 3600 });
+    }
+    expect(mock.calls).toBe(0);
   });
 
   it('unlinked, pending or revoked accounts are never synced and nothing counts', async () => {
@@ -119,13 +129,59 @@ describe('syncStudent with mock provider', () => {
   });
 });
 
+describe('empty submission windows are classified, never reported as a success with zero solves', () => {
+  it('an existing account with no accepted submissions -> NO_SUBMISSIONS_OBSERVED', async () => {
+    const { u } = await student('asha');
+    mock.register('asha', 0);
+    const o = await syncStudent(String(u._id), 'MANUAL');
+    expect(o.status).toBe('NO_SUBMISSIONS_OBSERVED');
+    const s = (await User.findById(u._id))!.sync!;
+    expect(s.statusDetail).toBe('NO_ACCEPTED_SUBMISSIONS');
+    expect(s.lastSuccessAt).toBeTruthy();
+    expect(s.possibleGap).toBe(false);
+    expect(mock.probeCalls).toBe(1);
+    expect(await SolveEvidence.countDocuments()).toBe(0);
+  });
+
+  it('calendar activity but an empty window -> SUBMISSIONS_UNAVAILABLE, with prior progress untouched', async () => {
+    const { u } = await student('asha');
+    mock.solve('asha', 'two-sum', T(0)); await syncStudent(String(u._id), 'MANUAL');
+    expect(await countableEvidence(u._id)).toHaveLength(1);
+    mock.clearAccepted('asha');
+    mock.register('asha', 7);
+    const o = await syncStudent(String(u._id), 'MANUAL');
+    expect(o.status).toBe('SUBMISSIONS_UNAVAILABLE');
+    expect((await User.findById(u._id))!.sync!.statusDetail).toBe('INCOMPLETE_VISIBILITY');
+    expect(await countableEvidence(u._id)).toHaveLength(1); // never deleted
+    expect((await User.findById(u._id))!.sync!.consecutiveFailures).toBe(0); // not a provider failure
+  });
+
+  it('an unknown account -> ACCOUNT_NOT_FOUND with a long retry and no evidence change', async () => {
+    const { u } = await student('ghost');
+    const o = await syncStudent(String(u._id), 'MANUAL');
+    expect(o.status).toBe('ACCOUNT_NOT_FOUND');
+    const s = (await User.findById(u._id))!.sync!;
+    expect(s.lastSuccessAt).toBeFalsy();
+    expect(s.nextEligibleAt!.getTime()).toBeGreaterThan(Date.now() + 5 * 3600_000);
+    expect(await SolveEvidence.countDocuments()).toBe(0);
+  });
+
+  it('the account probe is cached, so repeated empty windows do not repeat the extra request', async () => {
+    const { u } = await student('asha');
+    mock.register('asha', 0);
+    await syncStudent(String(u._id), 'MANUAL');
+    await syncStudent(String(u._id), 'MANUAL');
+    expect(mock.probeCalls).toBe(1);
+  });
+});
+
 describe('concurrency protection across workers', () => {
   it('manual and scheduled syncs share the per-student lease: a held lease means no provider call and status SYNCING', async () => {
     const { u } = await student('asha'); mock.solve('asha', 'two-sum', T(0));
     const held = await acquireLease(`leetcode-student:${u._id}`, 60_000); // "another instance" is syncing this student
     expect(held).toBeTruthy();
-    expect((await syncStudent(String(u._id), 'MANUAL')).status).toBe('SYNCING');
-    expect((await syncStudent(String(u._id), 'SCHEDULE')).status).toBe('SYNCING');
+    expect((await syncStudent(String(u._id), 'MANUAL')).status).toBe('SYNC_PENDING');
+    expect((await syncStudent(String(u._id), 'SCHEDULE')).status).toBe('SYNC_PENDING');
     expect(mock.calls).toBe(0);
   });
 
@@ -187,7 +243,7 @@ describe('HTTP: student-triggered sync', () => {
     expect((await User.findById(u._id))!.sync!.lastActiveAt).toBeTruthy();
     const st = (await s.call('get', '/leetcode/sync-status')).body;
     expect(st).toMatchObject({ status: 'SYNC_SUCCESS', syncEnabled: true, cooldownRemainingSec: expect.any(Number) });
-    expect(st.link.state).toBe('VERIFIED');
+    expect(st.link.state).toBe('LINKED');
     const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
     expect((await admin.call('post', '/leetcode/request-sync', {})).status).toBe(403);
     expect((await s.call('get', '/leetcode/health')).status).toBe(403);

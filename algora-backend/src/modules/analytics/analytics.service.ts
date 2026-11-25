@@ -6,7 +6,8 @@ import { getScoring } from '../progress/scoring';
 
 export interface Filters {
   collegeId?: string; batchId?: string; courseId?: string; chapterId?: string; difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
-  q?: string; verification?: 'VERIFIED' | 'PENDING_VERIFICATION' | 'REVALIDATION_REQUIRED' | 'UNLINKED'; minPct?: number; maxPct?: number;
+  /** LINKED/UNLINKED are current; the legacy values are accepted so old links keep working. */
+  q?: string; verification?: 'LINKED' | 'UNLINKED' | 'VERIFIED' | 'PENDING_VERIFICATION' | 'REVALIDATION_REQUIRED'; minPct?: number; maxPct?: number;
   from?: Date; to?: Date; dateBasis?: 'verified' | 'submitted';
 }
 
@@ -32,11 +33,10 @@ function narrow(content: ChapterInfo[], f: Filters): ChapterInfo[] {
     .map((c) => ({ ...c, problems: c.problems.filter((p) => !f.difficulty || p.difficulty === f.difficulty) }));
 }
 
+const COUNTING = new Set(['LINKED', 'VERIFIED']);
 const linkStates = async (ids: Types.ObjectId[]) => {
-  const links = await LeetcodeLink.find({ studentId: { $in: ids }, $or: [{ isCurrent: true }, { isPending: true }] }, 'studentId status').lean();
-  const m = new Map<string, string>();
-  for (const l of links) { const k = String(l.studentId); if (l.status !== 'PENDING_VERIFICATION' || !m.has(k)) m.set(k, l.status === 'PENDING_VERIFICATION' && m.has(k) ? m.get(k)! : l.status); }
-  return m;
+  const links = await LeetcodeLink.find({ studentId: { $in: ids }, isCurrent: true }, 'studentId status').lean();
+  return new Map(links.map((l) => [String(l.studentId), COUNTING.has(l.status) ? 'LINKED' : 'UNLINKED']));
 };
 
 /**
@@ -107,7 +107,7 @@ export async function overview(u: UserDoc, f: Filters) {
   const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
   const syncCounts: Record<string, number> = {};
   for (const x of users) { const st = x.sync?.status ?? 'IDLE'; syncCounts[st] = (syncCounts[st] ?? 0) + 1; }
-  const verified = [...links.values()].filter((s) => s === 'VERIFIED').length;
+  const verified = [...links.values()].filter((s) => s === 'LINKED').length;
   const withWork = rows.filter((r) => r.accessible > 0);
   const diff = { EASY: { solved: 0, available: 0 }, MEDIUM: { solved: 0, available: 0 }, HARD: { solved: 0, available: 0 } };
   for (const c of contexts) {
@@ -143,7 +143,7 @@ export async function overview(u: UserDoc, f: Filters) {
     sync: { byStatus: syncCounts, lastJob: lastJob ? { status: lastJob.status, at: lastJob.finishedAt ?? lastJob.startedAt, counts: lastJob.counts } : null },
     difficulty: diff,
     batchComparison, courseCompletion,
-    needsSupport: rows.filter((r) => (r.accessible > 0 && (r.completionPct ?? 0) < 25) || r.linkState !== 'VERIFIED').sort((a, b) => (a.completionPct ?? 0) - (b.completionPct ?? 0)).slice(0, 25),
+    needsSupport: rows.filter((r) => (r.accessible > 0 && (r.completionPct ?? 0) < 25) || (r.linkState !== 'LINKED' && r.linkState !== 'VERIFIED')).sort((a, b) => (a.completionPct ?? 0) - (b.completionPct ?? 0)).slice(0, 25),
   };
 }
 

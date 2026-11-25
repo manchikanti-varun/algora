@@ -29,9 +29,32 @@ const chapterSchema = new Schema(
 chapterSchema.index({ courseId: 1, status: 1, order: 1 });
 export const Chapter = model('Chapter', chapterSchema, 'chapters');
 
+const catalogSchema = new Schema(
+  {
+    problemNumber: Number,
+    title: { type: String, required: true },
+    titleKey: { type: String, required: true },
+    slug: { type: String, required: true },
+    url: { type: String, required: true },
+    difficulty: { type: String, enum: ['EASY', 'MEDIUM', 'HARD'], required: true },
+    topics: { type: [String], default: [] },
+    isPremium: Boolean,
+    source: { type: String, required: true },
+    metadataStatus: { type: String, enum: ['PARTIAL', 'AVAILABLE'], required: true },
+  },
+  { timestamps: true },
+);
+catalogSchema.index({ slug: 1 }, { unique: true });
+catalogSchema.index({ problemNumber: 1 }, { unique: true, partialFilterExpression: { problemNumber: { $type: 'number' } } });
+catalogSchema.index({ titleKey: 1 });
+catalogSchema.index({ topics: 1 });
+catalogSchema.index({ difficulty: 1, isPremium: 1 });
+export const CatalogProblem = model('CatalogProblem', catalogSchema, 'problem_catalog');
+
 const problemSchema = new Schema(
   {
     chapterId: oid('Chapter'),
+    catalogId: oid('CatalogProblem', false),
     courseId: oid('Course'), // denormalised for course-level queries
     title: { type: String, required: true, trim: true },
     url: { type: String, required: true },

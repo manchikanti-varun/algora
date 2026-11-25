@@ -87,17 +87,22 @@ export const RateBucket = model(
 );
 
 /**
- * LeetCode account link. Ownership must be proven before any evidence counts.
- * Lifecycle: PENDING_VERIFICATION -> VERIFIED -> (REVALIDATION_REQUIRED -> VERIFIED) | SUPERSEDED (replaced by a verified change) | REVOKED.
+ * LeetCode account link. A link records which public account a student says is theirs; it is NOT proof of ownership.
+ * Lifecycle: LINKED -> SUPERSEDED (replaced by a username change) | REVOKED (unlinked or consent withdrawn).
  * "Unlinked" is the absence of an active link. A username change creates a NEW link, so evidence from an old link is never
  * silently restored by changing the username back.
+ *
+ * PENDING_VERIFICATION, VERIFIED and REVALIDATION_REQUIRED are legacy states kept only so rows written before ownership
+ * verification was removed still validate. VERIFIED counts as linked (migration rewrites it to LINKED); the other two do not.
  */
-export const LINK_STATUSES = ['PENDING_VERIFICATION', 'VERIFIED', 'REVALIDATION_REQUIRED', 'SUPERSEDED', 'REVOKED'] as const;
+export const LINK_STATUSES = ['LINKED', 'PENDING_VERIFICATION', 'VERIFIED', 'REVALIDATION_REQUIRED', 'SUPERSEDED', 'REVOKED'] as const;
 export type LinkStatus = (typeof LINK_STATUSES)[number];
+/** Statuses whose evidence counts: the student's currently linked account. */
+export const COUNTING_LINK_STATUSES = ['LINKED', 'VERIFIED'] as const;
 export const linkFlags = (status: LinkStatus) => ({
-  isActive: status === 'PENDING_VERIFICATION' || status === 'VERIFIED' || status === 'REVALIDATION_REQUIRED', // reserves the username
-  isCurrent: status === 'VERIFIED' || status === 'REVALIDATION_REQUIRED', // the student's established link (at most one)
-  isPending: status === 'PENDING_VERIFICATION', // a not-yet-proven request (at most one)
+  isActive: status === 'LINKED' || status === 'PENDING_VERIFICATION' || status === 'VERIFIED' || status === 'REVALIDATION_REQUIRED', // reserves the username
+  isCurrent: status === 'LINKED' || status === 'VERIFIED' || status === 'REVALIDATION_REQUIRED', // the student's established link (at most one)
+  isPending: status === 'PENDING_VERIFICATION', // legacy: a not-yet-proven request (at most one)
 });
 const linkSchema = new Schema(
   {
@@ -111,11 +116,13 @@ const linkSchema = new Schema(
     kind: { type: String, enum: ['INITIAL', 'CHANGE'], default: 'INITIAL' },
     replacesLinkId: oid('LeetcodeLink', false),
     /** Challenge the student places in their public LeetCode profile summary. Not a secret. */
+    /** Legacy ownership-verification fields. Kept so historical rows validate; nothing writes them anymore. */
     challenge: String,
     challengeIssuedAt: Date,
     lastVerifyAttemptAt: Date,
     verifiedAt: Date,
     lastValidatedAt: Date,
+    linkedAt: Date,
     requestedAt: { type: Date, default: Date.now },
     /** Student agreed to Algora reading this account's public accepted submissions. Required for any synchronization. */
     consentedAt: Date,
@@ -188,6 +195,8 @@ export const ProviderState = model(
       rateLimited: { type: Number, default: 0 },
       consecutiveFailures: { type: Number, default: 0 },
       latencyEwmaMs: Number,
+      acceptedRetrievals: Number,
+      lastAcceptedRetrievalAt: Date,
       lastSuccessAt: Date,
       lastFailureAt: Date,
       lastError: String,
@@ -218,6 +227,30 @@ const eventSchema = new Schema({
 eventSchema.index({ at: -1 });
 eventSchema.index({ at: 1 }, { expireAfterSeconds: 30 * 24 * 3600 });
 export const ProviderEvent = model('ProviderEvent', eventSchema, 'provider_events');
+
+/**
+ * Short-lived cache of account-existence probes, so an empty submission window does not cause a second request on every sync.
+ * Shared across instances; documents expire automatically. Never contains submission data.
+ */
+export const AccountProbe = model(
+  'AccountProbe',
+  new Schema(
+    {
+      _id: String, // `probe:<provider>:<normalised username>`
+      provider: { type: String, required: true },
+      usernameNorm: { type: String, required: true },
+      exists: { type: Boolean, required: true },
+      /** Solve counts in the public submission calendar, when the provider reports them. */
+      calendarTotal: { type: Number, default: null },
+      checkedAt: { type: Date, default: Date.now },
+      expiresAt: { type: Date, required: true },
+    },
+    { timestamps: true },
+  ),
+  'account_probes',
+);
+// Expired probes are removed by MongoDB itself (TTL 0 = delete at expiresAt).
+AccountProbe.schema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 /** Submission ids seen per verified link (only when a provider returns ids). Used to detect cross-provider conflicts. */
 const obsSchema = new Schema({

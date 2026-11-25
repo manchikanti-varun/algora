@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { BatchCourse, LeetcodeLink, SolveEvidence, User } from '../src/models';
+import { BatchCourse, SolveEvidence, User } from '../src/models';
 import { evidenceFor, login, resetDb, startDb, stopDb, tok, verifiedLink } from './helpers';
 
 beforeAll(startDb);
@@ -90,25 +90,15 @@ describe('dashboard and progress calculation', () => {
     expect(lb.me.points).toBe(10);
   });
 
-  it('username change: old evidence keeps counting until the new account is verified, then stops, and changing back does NOT restore it', async () => {
+  it('username change stops counting old evidence immediately, including after switching back', async () => {
     const admin = await login(ADMIN); const w = await world(admin); const s = await mkStudent('a', 'old_name');
     await enroll(admin, w.bA, s.user); await w.unlock(w.bA, w.arrays); await solve(s, 'two-sum');
     const dash = async () => (await s.api.call('get', '/student/dashboard')).body.summary.verifiedSolved;
     expect(await dash()).toBe(1);
-    // request a change: the established link still counts while the request is pending
     expect((await s.api.call('post', '/student/leetcode/link', { username: 'new_name', consent: true })).status).toBe(201);
-    expect(await dash()).toBe(1);
-    // verification completes (simulate the provider proof): old link superseded, evidence stops counting
-    const pending = (await LeetcodeLink.findOne({ studentId: s.user._id, isPending: true }))!;
-    await LeetcodeLink.updateOne({ _id: s.link._id }, { $set: { status: 'SUPERSEDED', isActive: false, isCurrent: false } });
-    await LeetcodeLink.updateOne({ _id: pending._id }, { $set: { status: 'VERIFIED', isPending: false, isCurrent: true } });
     expect(await dash()).toBe(0);
-    expect(await SolveEvidence.countDocuments()).toBe(1); // kept
-    // changing back to the old username creates a brand-new link, so the old evidence is NOT restored
-    await s.api.call('post', '/student/leetcode/link', { username: 'OLD_NAME', consent: true });
-    const back = (await LeetcodeLink.findOne({ studentId: s.user._id, isPending: true }))!;
-    await LeetcodeLink.updateOne({ _id: pending._id }, { $set: { status: 'SUPERSEDED', isActive: false, isCurrent: false } });
-    await LeetcodeLink.updateOne({ _id: back._id }, { $set: { status: 'VERIFIED', isPending: false, isCurrent: true } });
+    expect(await SolveEvidence.countDocuments()).toBe(1);
+    expect((await s.api.call('post', '/student/leetcode/link', { username: 'OLD_NAME', consent: true })).status).toBe(201);
     expect(await dash()).toBe(0);
   });
 

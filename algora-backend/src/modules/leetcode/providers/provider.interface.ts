@@ -1,3 +1,4 @@
+import type { AccessBasis } from '../../../config/env';
 import type { AcceptedSubmission } from '../leetcode.types';
 
 export type ProviderId = string;
@@ -9,8 +10,8 @@ export interface ProviderCapabilities {
   windowSize: number;
   submissionIds: boolean;
   timestamps: boolean;
-  /** Can read the public profile summary (used to prove account ownership). */
-  profileText: boolean;
+  /** Can tell whether a public account exists (used only when a submission window is empty). */
+  accountProbe: boolean;
   /** Data source behind the provider. Providers sharing an upstream share its rate limits and restrictions. */
   upstream: 'leetcode-graphql' | string;
   /** The provider talks to the upstream from THIS server (Direct, LeetCode Query) rather than through a relay (Alfa). */
@@ -33,7 +34,14 @@ export interface FetchResult {
   stats?: { dropped: number; futureTimestamps: number; duplicates: number };
 }
 
-export interface Authorization { authorized: boolean; reason?: string }
+/** Result of a cheap existence probe. `calendarTotal` is null when the provider cannot report it. */
+export interface AccountProbeResult { exists: boolean; calendarTotal: number | null }
+
+/**
+ * Whether Algora may use this data source, and on what basis. `basis` describes OUR arrangement; it is never a claim that
+ * LeetCode itself issued a credential or key.
+ */
+export interface Authorization { authorized: boolean; reason?: string; basis?: AccessBasis; reference?: string | null }
 
 /**
  * Every provider implements this. Nothing outside src/modules/leetcode depends on a concrete provider.
@@ -48,6 +56,9 @@ export interface SubmissionProvider {
   authorization(): Authorization;
   /** Accepted submissions, newest first. Throws ProviderError (already classified). */
   fetchAccepted(username: string, limit: number, signal: AbortSignal): Promise<FetchResult>;
-  /** Public profile summary text. Throws ProviderError. */
-  fetchProfileText(username: string, signal: AbortSignal): Promise<string>;
+  /**
+   * Does this public account exist, and how much activity does its calendar report? Only called when a submission window is
+   * empty, and cached by the caller. Absent when the provider cannot answer.
+   */
+  probeAccount?(username: string, signal: AbortSignal): Promise<AccountProbeResult>;
 }

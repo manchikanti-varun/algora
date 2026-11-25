@@ -18,7 +18,7 @@ export class AlfaProvider implements SubmissionProvider {
   readonly displayName = 'Alfa LeetCode API';
   readonly capabilities: ProviderCapabilities;
   constructor(private transport: HttpTransport, private baseUrl: string, private auth: () => Authorization, private ua: string, cacheTtlSec = 300) {
-    this.capabilities = { acceptedOnly: true, windowSize: 20, submissionIds: false, timestamps: true, profileText: true, upstream: 'leetcode-graphql', reachesUpstreamDirectly: false, cacheTtlSec };
+    this.capabilities = { acceptedOnly: true, windowSize: 20, submissionIds: false, timestamps: true, accountProbe: false, upstream: 'leetcode-graphql', reachesUpstreamDirectly: false, cacheTtlSec };
   }
   get transportKind() { return this.transport.kind; }
   authorization() { return this.auth(); }
@@ -46,9 +46,4 @@ export class AlfaProvider implements SubmissionProvider {
     return { submissions, rawCount: stats.raw, limit: lim, oldestRawAt: stats.oldestRawAt, acceptedOnly: true, dataAsOf: new Date(Date.now() - this.capabilities.cacheTtlSec * 1000), stats };
   }
 
-  async fetchProfileText(username: string, signal: AbortSignal): Promise<string> {
-    const j = (await this.get(`/${encodeURIComponent(username)}`, signal)) as { about?: unknown; username?: unknown } | null;
-    if (!j || typeof j !== 'object' || !('username' in j)) throw new ProviderError('BAD_RESPONSE', 'Unexpected profile shape');
-    return typeof j.about === 'string' ? j.about : '';
-  }
 }

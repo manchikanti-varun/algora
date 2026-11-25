@@ -13,6 +13,8 @@
     "test:browser": "node tests/browser/run.mjs && node tests/browser/sync.mjs",
     "test:load": "node tests/load/run.mjs",
     "backup": "bash scripts/ops/backup.sh",
+    "migrate:problem-catalog": "tsx scripts/migrations/migrate-problem-catalog.ts",
+    "migrate:leetcode-links": "tsx scripts/migrations/migrate-leetcode-links.ts",
     "start:prod-local": "node --env-file=.env.production dist/server.js"
   },
   "engines": {

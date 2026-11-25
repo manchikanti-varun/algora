@@ -1,7 +1,7 @@
 'use client';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
-import { Button, Card, DataTable, EmptyState, ErrorState, fmtDate, fmtDateTime, Grid, Modal, Notice, PageHeader, PageSkeleton, ProgressBar, StatCard, StatusBadge, Textarea, timeAgo, useConfirm, useToast } from '@/components/ui';
+import { Button, Card, DataTable, EmptyState, ErrorState, fmtDate, fmtDateTime, Grid, Input, Modal, Notice, PageHeader, PageSkeleton, ProgressBar, StatCard, StatusBadge, Textarea, timeAgo, useConfirm, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { api, errorMessage } from '@/lib/api';
 import { isAdmin, useAuth } from '@/lib/auth';
@@ -11,7 +11,7 @@ interface Detail {
   student: { _id: string; fullName: string; rollNumber: string; email: string; college?: string; status: string; createdAt: string; sync?: { status: string; lastSuccessAt?: string; possibleGap?: boolean } };
   enrollments: { batchId: string; batch?: string; status: string; enrolledAt: string }[];
   contexts: PerfRow[];
-  link: { state: string; current: { username: string; verifiedAt: string | null } | null; request: { username: string; kind: string; requestedAt: string } | null };
+  link: { state: string; username: string | null; current: { username: string; linkedAt: string | null } | null; consentedAt: string | null };
   history: { slug: string; title?: string; firstVerifiedAt: string | null; earliestObservedSolvedAt: string | null; latestObservedSolvedAt: string | null }[];
 }
 export default function Page() {
@@ -20,6 +20,7 @@ export default function Page() {
   const d = useApi<Detail>(`/analytics/students/${studentId}`);
   const toast = useToast(); const confirm = useConfirm();
   const [revoke, setRevoke] = useState(false); const [reason, setReason] = useState('');
+  const [fixOpen, setFixOpen] = useState(false); const [fixName, setFixName] = useState(''); const [fixReason, setFixReason] = useState('');
   if (d.error) return <ErrorState message={d.error} retry={d.reload} />;
   if (!d.data) return <PageSkeleton />;
   const { student: s, link } = d.data;
@@ -36,18 +37,19 @@ export default function Page() {
         <StatCard label="Verified problems" value={totalSolved} hint="Across all courses, counted once" />
         <StatCard label="Batches" value={d.data.enrollments.filter((e) => e.status === 'ACTIVE').length} />
         <StatCard label="Last successful sync" value={timeAgo(s.sync?.lastSuccessAt)} hint={<StatusBadge status={s.sync?.status ?? 'IDLE'} />} />
-        <StatCard label="LeetCode account" value={link.current?.username ?? link.request?.username ?? '—'} hint={<StatusBadge status={link.state} />} />
+        <StatCard label="LeetCode account" value={link.current?.username ?? '—'} hint={<StatusBadge status={link.state} />} />
       </Grid>
       {s.sync?.possibleGap && <Notice tone="warn">The last sync returned a full submission window. Some accepted submissions between syncs may not have been captured.</Notice>}
-      <Card title="LeetCode account ownership" actions={<>
-        {link.state === 'VERIFIED' && <Button size="sm" variant="secondary" onClick={async () => { if (await confirm({ title: 'Require revalidation?', body: 'Their evidence stops counting until they prove ownership again.', confirmLabel: 'Require revalidation' })) run(() => api(`/students/${s._id}/leetcode/revalidate`, { method: 'POST' }), 'Revalidation required'); }}>Require revalidation</Button>}
+      <Card title="LeetCode account" actions={<>
+        {link.state !== 'REVOKED' && <Button size="sm" variant="secondary" onClick={() => { setFixName(link.current?.username ?? ''); setFixReason(''); setFixOpen(true); }}>{link.state === 'LINKED' ? 'Correct username' : 'Link username'}</Button>}
         {isAdmin(user) && link.state !== 'UNLINKED' && link.state !== 'REVOKED' && <Button size="sm" variant="danger" onClick={() => setRevoke(true)}>Revoke link</Button>}
       </>}>
         <dl className="grid gap-3 text-sm sm:grid-cols-3">
           <div><dt className="text-slate-500">State</dt><dd><StatusBadge status={link.state} /></dd></div>
-          <div><dt className="text-slate-500">Verified account</dt><dd>{link.current ? `${link.current.username} (since ${fmtDate(link.current.verifiedAt)})` : '—'}</dd></div>
-          <div><dt className="text-slate-500">Open request</dt><dd>{link.request ? `${link.request.username} · ${link.request.kind.toLowerCase()} · ${timeAgo(link.request.requestedAt)}` : '—'}</dd></div>
+          <div><dt className="text-slate-500">Linked account</dt><dd>{link.current ? `${link.current.username} (since ${fmtDate(link.current.linkedAt)})` : '—'}</dd></div>
+          <div><dt className="text-slate-500">Consent</dt><dd>{link.consentedAt ? `Given ${fmtDate(link.consentedAt)}` : 'Not given'}</dd></div>
         </dl>
+        <p className="mt-3 text-xs text-slate-500">The username is the account whose public accepted submissions Algora reads. It is not treated as proof of account ownership; submissions are still verified automatically.</p>
       </Card>
       <Card title="Progress by course">
         <DataTable rows={d.data.contexts} rowKey={(r) => r.batchCourseId} empty={<EmptyState title="No active courses" />} columns={[
@@ -70,8 +72,13 @@ export default function Page() {
         <ul className="divide-y divide-slate-100 text-sm">{d.data.enrollments.map((e) => <li key={e.batchId} className="flex justify-between py-1.5"><span>{e.batch ?? 'Batch'}</span><span className="flex items-center gap-2 text-slate-500">{fmtDate(e.enrolledAt)}<StatusBadge status={e.status} /></span></li>)}</ul>
       </Card>
       <Modal open={revoke} onClose={() => setRevoke(false)} title="Revoke LeetCode link" footer={<><Button variant="secondary" onClick={() => setRevoke(false)}>Cancel</Button><Button variant="danger" disabled={reason.trim().length < 3} onClick={() => run(() => api(`/students/${s._id}/leetcode/revoke`, { method: 'POST', body: { reason } }), 'Link revoked').then(() => setRevoke(false))}>Revoke</Button></>}>
-        <p className="text-sm text-slate-600">Evidence from this account stops counting. It is kept for audit. The student can link and verify an account again.</p>
+        <p className="text-sm text-slate-600">Evidence from this account stops counting. It is kept for audit. The student can link an account again.</p>
         <Textarea label="Reason (recorded in the audit log)" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} />
+      </Modal>
+      <Modal open={fixOpen} onClose={() => setFixOpen(false)} title="Correct LeetCode username" footer={<><Button variant="secondary" onClick={() => setFixOpen(false)}>Cancel</Button><Button disabled={!/^[A-Za-z0-9_-]{1,40}$/.test(fixName) || fixReason.trim().length < 3} onClick={() => run(() => api(`/students/${s._id}/leetcode/username`, { method: 'POST', body: { username: fixName, reason: fixReason } }), 'Username corrected').then(() => setFixOpen(false))}>Save</Button></>}>
+        <p className="text-sm text-slate-600">Takes effect immediately and is recorded in the audit log. The student&apos;s standing consent is required. Problems from the previous account stop counting and are not transferred to the new one.</p>
+        <Input label="LeetCode username" value={fixName} onChange={(e) => setFixName(e.target.value)} pattern="[A-Za-z0-9_\-]{1,40}" />
+        <Textarea label="Reason (recorded in the audit log)" value={fixReason} onChange={(e) => setFixReason(e.target.value)} maxLength={300} />
       </Modal>
     </div>
   );

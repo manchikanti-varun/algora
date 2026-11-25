@@ -78,7 +78,7 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
               <Input label="Roll number" name="rollNumber" required pattern="[A-Za-z0-9]{10}" maxLength={10} hint="Exactly 10 letters or digits. It cannot be changed later." />
               <Input label="College" name="college" required minLength={2} />
               <Input label="Mobile number" name="mobile" required pattern="\+?[0-9]{10,15}" type="tel" autoComplete="tel" />
-              <Input label="LeetCode username" name="leetcodeUsername" required pattern="[A-Za-z0-9_\-]{1,40}" hint="You will verify that this account is yours from your profile page." />
+              <Input label="LeetCode username" name="leetcodeUsername" required pattern="[A-Za-z0-9_\-]{1,40}" hint="The public LeetCode account whose accepted submissions Algora should read. You can change it later from your profile." />
               <Input label="Claim code (optional)" name="claimCode" hint="Only if your trainer gave you one for a reserved roll number." />
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" name="leetcodeConsent" required className="mt-1" />
