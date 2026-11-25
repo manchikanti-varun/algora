@@ -10,10 +10,12 @@ interface ProviderView {
   status: string; breaker: string; nextEligibleAt: string | null; totalRequests: number; successes: number; failures: number; rateLimited: number; consecutiveFailures: number;
   successRate: number | null; avgLatencyMs: number | null; lastSuccessAt: string | null; lastFailureAt: string | null; lastError: string | null; lastErrorKind: string | null;
   ratePerMin: number; tokensAvailable: number;
+  authorizationStatus: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED'; activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null;
+  technicalHealth: 'UNTESTED' | 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RATE_LIMITED' | 'CIRCUIT_OPEN';
   capabilities: { acceptedOnly: boolean; windowSize: number; submissionIds: boolean; cacheTtlSec: number; upstream: string; reachesUpstreamDirectly: boolean };
 }
 interface Overview {
-  overall: string; syncEnabled: boolean; paused: boolean; permissionConfigured: boolean; selectedProvider: string | null; priority: string[];
+  overall: string; syncEnabled: boolean; paused: boolean; permissionConfigured: boolean; authorization: { status: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED'; requestedAt: string | null }; selectedProvider: string | null; priority: string[];
   upstream: { id: string; blocked: boolean; blockedUntil: string | null; reason: string | null; ratePerMin: number; tokensAvailable: number; utilizationPct: number };
   providers: ProviderView[]; queue: { eligibleStudents: number; due: number; syncing: number };
   students: { withFailures: number; possibleGaps: number; reducedCoverage: number }; conflicts7d: number; healthCheckConfigured: boolean;
@@ -27,7 +29,13 @@ const OVERALL: Record<string, { tone: 'good' | 'warn' | 'bad' | 'default'; text:
   HEALTHY: { tone: 'good', text: 'Healthy' }, DEGRADED: { tone: 'warn', text: 'Degraded' }, UNAVAILABLE: { tone: 'bad', text: 'Unavailable' },
   UPSTREAM_BLOCKED: { tone: 'bad', text: 'LeetCode restricted' }, PAUSED: { tone: 'warn', text: 'Paused' }, DISABLED: { tone: 'default', text: 'Disabled' }, NO_AUTHORIZED_PROVIDER: { tone: 'warn', text: 'No authorised provider' },
 };
-const PROVIDER_TONE: Record<string, string> = { HEALTHY: 'ACTIVE', DEGRADED: 'PARTIAL', UNAVAILABLE: 'PROVIDER_UNAVAILABLE', RATE_LIMITED: 'RATE_LIMITED', CIRCUIT_OPEN: 'FAILED', DISABLED: 'INACTIVE', ACCESS_NOT_AUTHORIZED: 'REVOKED' };
+const AUTH_BADGE: Record<string, { tone: 'green' | 'amber' | 'gray'; text: string }> = {
+  AUTHORIZED: { tone: 'green', text: 'Authorized' }, AUTHORIZATION_PENDING: { tone: 'amber', text: 'Authorization pending' }, NOT_AUTHORIZED: { tone: 'gray', text: 'Not authorized' },
+};
+const HEALTH_BADGE: Record<string, { tone: 'green' | 'amber' | 'red' | 'gray'; text: string }> = {
+  UNTESTED: { tone: 'gray', text: 'Untested' }, HEALTHY: { tone: 'green', text: 'Healthy' }, DEGRADED: { tone: 'amber', text: 'Degraded' },
+  UNAVAILABLE: { tone: 'red', text: 'Unavailable' }, RATE_LIMITED: { tone: 'amber', text: 'Rate limited' }, CIRCUIT_OPEN: { tone: 'red', text: 'Circuit open' },
+};
 
 export default function Page() {
   const o = useApi<Overview>('/leetcode/integration');
@@ -61,7 +69,18 @@ export default function Page() {
         </>} />
 
       {!d.syncEnabled && <Notice tone="warn" title="Automatic verification is disabled by configuration">LEETCODE_SYNC_ENABLED is false. Providers stay off until LeetCode access is authorised and the live proof of concept passes (docs/LIVE_POC_RUNBOOK.md). Admin controls here cannot enable or authorise a provider.</Notice>}
-      {d.syncEnabled && !d.permissionConfigured && <Notice tone="warn" title="No LeetCode permission reference">Providers that reach LeetCode are not authorised until LEETCODE_PERMISSION_REF is configured.</Notice>}
+      <Card title="LeetCode authorization">
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Badge tone={AUTH_BADGE[d.authorization.status].tone}>{AUTH_BADGE[d.authorization.status].text}</Badge>
+          <span className="text-slate-600">{d.authorization.status === 'AUTHORIZED' ? 'A LeetCode permission reference is configured on the server.' : d.authorization.status === 'AUTHORIZATION_PENDING' ? `Permission request sent on ${fmtDateTime(d.authorization.requestedAt)}. Waiting for LeetCode's written reply.` : 'No permission request to LeetCode has been recorded yet.'}</span>
+          {d.authorization.status !== 'AUTHORIZED' && (
+            <Button size="sm" variant="secondary" loading={busy === 'save'} onClick={() => save({ permissionRequestedAt: d.authorization.requestedAt ? null : new Date().toISOString() }, d.authorization.requestedAt ? 'Request date cleared' : 'Permission request recorded')}>
+              {d.authorization.requestedAt ? 'Clear request date' : 'Record that the request was sent today'}
+            </Button>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">LeetCode issues no API keys. LEETCODE_PERMISSION_REF is Algora&apos;s own switch, set on the server only after LeetCode grants written permission. Recording the request date here is for tracking only and authorizes nothing.</p>
+      </Card>
       {d.upstream.blocked && <Notice tone="error" title="LeetCode is restricting or unavailable">Reason: {d.upstream.reason?.replace(/_/g, ' ').toLowerCase()}. Every provider that depends on LeetCode is paused until {fmtDateTime(d.upstream.blockedUntil)}. Algora does not switch providers to get around a LeetCode restriction.</Notice>}
       {d.providers.some((p) => p.transportKind === 'mock' && p.envEnabled) && <Notice tone="info">A development mock provider is active in this environment. Its data never counts in production.</Notice>}
 
@@ -85,7 +104,9 @@ export default function Page() {
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="grid h-7 w-7 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{i + 1}</span>
                     <span className="font-semibold">{p.displayName}</span>
-                    <StatusBadge status={PROVIDER_TONE[p.status] ?? p.status} /><span className="text-xs text-slate-500">{p.status.replace(/_/g, ' ').toLowerCase()}</span>
+                    <span className="text-xs text-slate-500">Authorization</span><Badge tone={AUTH_BADGE[p.authorizationStatus].tone}>{AUTH_BADGE[p.authorizationStatus].text}</Badge>
+                    <span className="text-xs text-slate-500">Activation</span><Badge tone={p.activation === 'ACTIVE' ? 'green' : 'gray'}>{p.activation === 'ACTIVE' ? 'Active' : 'Inactive'}</Badge>
+                    <span className="text-xs text-slate-500">Health</span><Badge tone={HEALTH_BADGE[p.technicalHealth].tone}>{HEALTH_BADGE[p.technicalHealth].text}</Badge>
                     {d.selectedProvider === p.id && <Badge tone="indigo">Serving</Badge>}
                     {!p.capabilities.acceptedOnly && <Badge tone="amber">Reduced coverage (all statuses)</Badge>}
                     {p.transportKind === 'mock' && <Badge>mock</Badge>}
@@ -96,8 +117,9 @@ export default function Page() {
                         title={!p.envEnabled ? 'Not enabled in the server environment' : !p.authorized ? p.authorizationReason : undefined} onClick={() => toggle(p)}>{p.adminEnabled ? 'Disable' : 'Enable'}</Button>
                     </span>
                   </div>
-                  {!p.authorized && <p className="mt-2 text-sm text-rose-700">Not authorised: {p.authorizationReason}</p>}
-                  {p.authorized && !p.envEnabled && <p className="mt-2 text-sm text-slate-500">Not enabled in the server environment.</p>}
+                  {!p.authorized && <p className="mt-2 text-sm text-slate-600">{p.authorizationStatus === 'AUTHORIZATION_PENDING' ? 'Waiting for LeetCode\'s written permission' : 'No permission from LeetCode recorded'}: {p.authorizationReason}</p>}
+                  {p.activationReason && <p className="mt-1 text-sm text-slate-500">Inactive because: {p.activationReason}.</p>}
+                  {p.technicalHealth === 'UNTESTED' && <p className="mt-1 text-sm text-slate-500">Untested: this provider has never made a live request, so its technical health is unknown.</p>}
                   <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3 lg:grid-cols-6">
                     <div><dt className="text-xs text-slate-500">Success rate</dt><dd>{p.successRate === null ? '—' : `${p.successRate}%`} <span className="text-xs text-slate-400">({p.successes}/{p.totalRequests})</span></dd></div>
                     <div><dt className="text-xs text-slate-500">Avg latency</dt><dd>{p.avgLatencyMs === null ? '—' : `${p.avgLatencyMs} ms`}</dd></div>

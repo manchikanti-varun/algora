@@ -472,3 +472,30 @@ describe('shared budget accounting', () => {
     expect(lc.calls).toBe(1); expect(alfaT.calls).toBe(1);
   });
 });
+
+describe('authorization, activation and technical health are reported separately', () => {
+  it('without LEETCODE_PERMISSION_REF: NOT_AUTHORIZED -> AUTHORIZATION_PENDING once a request is recorded; never Revoked, never active, health UNTESTED', async () => {
+    setProvidersForTests(undefined); // real registry: no permission reference in tests
+    const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
+    let o = (await admin.call('get', '/leetcode/integration')).body;
+    const real = o.providers.filter((p: any) => p.id !== 'mock');
+    expect(real.map((p: any) => p.authorizationStatus)).toEqual(['NOT_AUTHORIZED', 'NOT_AUTHORIZED', 'NOT_AUTHORIZED']);
+    expect(real.every((p: any) => p.activation === 'INACTIVE' && p.technicalHealth === 'UNTESTED')).toBe(true);
+    expect(o.authorization).toMatchObject({ status: 'NOT_AUTHORIZED', requestedAt: null });
+    const at = new Date('2026-11-26T10:00:00Z').toISOString();
+    expect((await admin.call('put', '/leetcode/integration/settings', { permissionRequestedAt: at })).status).toBe(200);
+    o = (await admin.call('get', '/leetcode/integration')).body;
+    expect(o.providers.filter((p: any) => p.id !== 'mock').every((p: any) => p.authorizationStatus === 'AUTHORIZATION_PENDING' && p.activation === 'INACTIVE')).toBe(true);
+    expect(o.authorization).toMatchObject({ status: 'AUTHORIZATION_PENDING', requestedAt: at });
+    expect(JSON.stringify(o)).not.toMatch(/REVOKED/);
+  });
+  it('technical health is measured from real requests, independent of authorization', async () => {
+    const { d } = trio(); d.solve('asha', 'x');
+    await fetchAccepted('asha', 20);
+    const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
+    const v = (await admin.call('get', '/leetcode/integration')).body.providers.find((p: any) => p.id === 'direct');
+    expect(v).toMatchObject({ authorizationStatus: 'AUTHORIZED', activation: 'ACTIVE', technicalHealth: 'HEALTHY' });
+    const alfa = (await admin.call('get', '/leetcode/integration')).body.providers.find((p: any) => p.id === 'alfa');
+    expect(alfa.technicalHealth).toBe('UNTESTED');
+  });
+});

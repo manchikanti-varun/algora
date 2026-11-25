@@ -67,6 +67,7 @@ leetcodeRouter.get('/integration', admin, async (_req, res) => {
   const tokens = await availableTokens(upstreamBucket('leetcode-graphql'), settings.ratePerMin, Math.max(5, settings.ratePerMin));
   res.json({
     overall, syncEnabled: env.LEETCODE_SYNC_ENABLED, paused: settings.paused, permissionConfigured: !!env.LEETCODE_PERMISSION_REF,
+    authorization: { status: env.LEETCODE_PERMISSION_REF ? 'AUTHORIZED' : (await rawSettings()).permissionRequestedAt ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED', requestedAt: (await rawSettings()).permissionRequestedAt ?? null },
     selectedProvider: selected?.id ?? null, priority: settings.priority,
     upstream: { id: 'leetcode-graphql', blocked: !!upstream, blockedUntil: upstream?.until ?? null, reason: upstream?.reason ?? null, ratePerMin: settings.ratePerMin, tokensAvailable: tokens, utilizationPct: Math.round((1 - tokens / Math.max(5, settings.ratePerMin)) * 100) },
     providers: views,

@@ -127,3 +127,15 @@ export function healthOf(d: StateDoc | undefined, opts: { enabled: boolean; auth
   if ((d?.latencyEwmaMs ?? 0) > opts.timeoutMs * 0.7) return { status: 'DEGRADED', breaker, nextEligibleAt: null };
   return { status: 'HEALTHY', breaker, nextEligibleAt: null };
 }
+
+export type TechnicalHealth = 'UNTESTED' | 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'RATE_LIMITED' | 'CIRCUIT_OPEN';
+
+/**
+ * Technical health only, measured from real requests, independent of authorisation and activation.
+ * UNTESTED = this provider has never been called (it cannot have been, while not authorised).
+ */
+export function technicalHealthOf(d: StateDoc | undefined, opts: { upstreamBlocked: boolean; cfg: BreakerConfig; timeoutMs: number }, now = Date.now()): TechnicalHealth {
+  if (!d || !(d.totalRequests ?? 0)) return 'UNTESTED';
+  const h = healthOf(d, { enabled: true, authorized: true, upstreamBlocked: opts.upstreamBlocked, cfg: opts.cfg, timeoutMs: opts.timeoutMs }, now);
+  return h.status === 'DISABLED' || h.status === 'ACCESS_NOT_AUTHORIZED' ? 'UNTESTED' : h.status;
+}

@@ -18,6 +18,8 @@ export const settingsSchema = z.object({
   idleIntervalMin: z.number().int().min(5).max(1440).optional(),
   offHoursIntervalMin: z.number().int().min(15).max(1440).optional(),
   studentCooldownSec: z.number().int().min(10).max(3600).optional(),
+  /** Record-keeping only: when the written-permission request to LeetCode was sent. Never authorises anything. */
+  permissionRequestedAt: z.string().datetime().optional().nullable(),
 });
 export type IntegrationSettings = z.infer<typeof settingsSchema>;
 

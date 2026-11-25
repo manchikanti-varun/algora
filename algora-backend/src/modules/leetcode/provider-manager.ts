@@ -1,11 +1,11 @@
 import { availableTokens, refundToken, takeToken } from '../../lib/ratelimit';
 import { env } from '../../config/env';
 import type { BreakerConfig } from './circuit-breaker';
-import { loadSettings, type Effective } from './integration-settings';
+import { loadSettings, rawSettings, type Effective } from './integration-settings';
 import { ProviderError, scopeOf } from './leetcode.types';
 import {
   blockUpstream, claimProbe, event, getStates, healthOf, noteUpstreamNetworkFailure, noteUpstreamSuccess, pKey,
-  recordAnswered, recordFailure, recordProviderRateLimited, recordSuccess, upstreamBlock, type HealthStatus, type StateDoc,
+  recordAnswered, recordFailure, recordProviderRateLimited, recordSuccess, technicalHealthOf, upstreamBlock, type HealthStatus, type StateDoc, type TechnicalHealth,
 } from './provider-health.service';
 import { providerEnvEnabled, registry } from './providers/provider.registry';
 import type { FetchResult, SubmissionProvider } from './providers/provider.interface';
@@ -23,7 +23,12 @@ export type ManagerResult<T> =
 export interface ProviderView {
   id: string; displayName: string; capabilities: SubmissionProvider['capabilities']; priority: number;
   envEnabled: boolean; adminEnabled: boolean; authorized: boolean; authorizationReason?: string; transportKind: string;
+  /** Combined status used for provider selection (kept for compatibility). */
   status: HealthStatus; breaker: string; nextEligibleAt: Date | null;
+  /** Three independent dimensions for display. */
+  authorizationStatus: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED';
+  activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null;
+  technicalHealth: TechnicalHealth;
   totalRequests: number; successes: number; failures: number; rateLimited: number; consecutiveFailures: number; successRate: number | null;
   avgLatencyMs: number | null; lastSuccessAt: Date | null; lastFailureAt: Date | null; lastError: string | null; lastErrorKind: string | null;
   ratePerMin: number; tokensAvailable: number;
@@ -34,6 +39,7 @@ const isEnabled = (p: SubmissionProvider, s: Effective) => providerEnvEnabled(p.
 
 export async function providerViews(): Promise<{ settings: Effective; views: ProviderView[]; states: Map<string, StateDoc> }> {
   const s = await loadSettings();
+  const requestedAt = (await rawSettings()).permissionRequestedAt ?? null;
   const states = await getStates();
   const views: ProviderView[] = [];
   for (const p of orderByPriority(registry(), s)) {
@@ -47,6 +53,9 @@ export async function providerViews(): Promise<{ settings: Effective; views: Pro
       id: p.id, displayName: p.displayName, capabilities: p.capabilities, priority: s.priority.indexOf(p.id),
       envEnabled: providerEnvEnabled(p.id), adminEnabled: !s.disabled.has(p.id), authorized: auth.authorized, authorizationReason: auth.reason, transportKind: p.transportKind,
       status: h.status, breaker: h.breaker, nextEligibleAt: h.nextEligibleAt,
+      authorizationStatus: auth.authorized ? 'AUTHORIZED' : requestedAt && p.id !== 'mock' ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED',
+      ...activationOf(p, s, auth.authorized),
+      technicalHealth: technicalHealthOf(d, { upstreamBlocked: blocked, cfg: breakerCfg(s), timeoutMs: s.timeoutMs }),
       totalRequests: total, successes: d?.successes ?? 0, failures: d?.failures ?? 0, rateLimited: d?.rateLimited ?? 0, consecutiveFailures: d?.consecutiveFailures ?? 0,
       successRate: total ? Math.round(((d?.successes ?? 0) / total) * 1000) / 10 : null, avgLatencyMs: d?.latencyEwmaMs != null ? Math.round(d.latencyEwmaMs) : null,
       lastSuccessAt: d?.lastSuccessAt ?? null, lastFailureAt: d?.lastFailureAt ?? null, lastError: d?.lastError ?? null, lastErrorKind: d?.lastErrorKind ?? null,
@@ -54,6 +63,15 @@ export async function providerViews(): Promise<{ settings: Effective; views: Pro
     });
   }
   return { settings: s, views, states };
+}
+
+function activationOf(p: SubmissionProvider, s: Effective, authorized: boolean): { activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null } {
+  if (!env.LEETCODE_SYNC_ENABLED) return { activation: 'INACTIVE', activationReason: 'LEETCODE_SYNC_ENABLED is false' };
+  if (!providerEnvEnabled(p.id)) return { activation: 'INACTIVE', activationReason: 'Not enabled in the server environment' };
+  if (s.disabled.has(p.id)) return { activation: 'INACTIVE', activationReason: 'Disabled by the Super Admin' };
+  if (!authorized) return { activation: 'INACTIVE', activationReason: 'Not authorised' };
+  if (s.paused) return { activation: 'INACTIVE', activationReason: 'Synchronization paused' };
+  return { activation: 'ACTIVE', activationReason: null };
 }
 
 function orderByPriority(list: SubmissionProvider[], s: Effective) {
