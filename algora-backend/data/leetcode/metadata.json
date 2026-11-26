@@ -1,0 +1,25 @@
+{
+  "datasetVersion": "2026.10.28",
+  "platform": "leetcode",
+  "totalProblems": 3511,
+  "sourceUrl": "https://huggingface.co/datasets/Hahho2/leetcode-problem-set",
+  "sourceName": "LeetCode Problem Set (metadata-only mirror of kaysss/leetcode-problem-set)",
+  "license": "MIT (as declared by the dataset card)",
+  "retrievedAt": "2026-11-26",
+  "lastUpdated": "2026-10-28",
+  "checksum": {
+    "algorithm": "sha256",
+    "target": "problems.json",
+    "value": "ed2af58b3b48d154c99c30d0a1971c6ad7294b78e18314fe6956eac16a398dce"
+  },
+  "fields": ["id", "title", "slug", "difficulty", "url", "isPremium", "topics", "platform"],
+  "counts": {
+    "easy": 871,
+    "medium": 1821,
+    "hard": 819,
+    "free": 2800,
+    "premium": 711,
+    "withoutTopics": 86
+  },
+  "excluded": ["problem statements", "solutions", "editorials", "test cases", "acceptance rates", "company tags"]
+}

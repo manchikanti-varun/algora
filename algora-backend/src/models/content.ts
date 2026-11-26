@@ -39,12 +39,14 @@ const catalogSchema = new Schema(
     difficulty: { type: String, enum: ['EASY', 'MEDIUM', 'HARD'], required: true },
     topics: { type: [String], default: [] },
     isPremium: Boolean,
+    /** Metadata provider. Only 'leetcode' is imported today; the pair with slug is the identity. */
+    platform: { type: String, required: true, default: 'leetcode', lowercase: true },
     source: { type: String, required: true },
     metadataStatus: { type: String, enum: ['PARTIAL', 'AVAILABLE'], required: true },
   },
   { timestamps: true },
 );
-catalogSchema.index({ slug: 1 }, { unique: true });
+catalogSchema.index({ platform: 1, slug: 1 }, { unique: true });
 catalogSchema.index({ problemNumber: 1 }, { unique: true, partialFilterExpression: { problemNumber: { $type: 'number' } } });
 catalogSchema.index({ titleKey: 1 });
 catalogSchema.index({ topics: 1 });

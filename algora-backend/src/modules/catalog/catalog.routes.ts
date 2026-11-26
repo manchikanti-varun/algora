@@ -9,6 +9,7 @@ import { requireAuth, requireRole } from '../../middleware/auth';
 import { CatalogProblem, Chapter, Problem } from '../../models';
 import { canManageCourses } from '../access';
 import { audit } from '../audit/audit';
+import { escapeRegex, metadataStatus, titleKey } from './catalog-shared';
 
 export const catalogRouter = Router();
 catalogRouter.use(requireAuth, requireRole('SUPER_ADMIN', 'TRAINER'));
@@ -16,8 +17,6 @@ catalogRouter.use(requireAuth, requireRole('SUPER_ADMIN', 'TRAINER'));
 const difficulty = z.enum(['EASY', 'MEDIUM', 'HARD']);
 const slug = z.string().trim().toLowerCase().regex(/^[a-z0-9-]{1,100}$/);
 const number = z.number().int().positive().max(99999999);
-const titleKey = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
-const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const metadata = z.object({
   problemNumber: number.optional(),
   title: z.string().trim().min(1).max(150),
@@ -32,10 +31,10 @@ function normalize(input: unknown, source: string) {
   const row = parse(metadata, input);
   const canonical = parseLeetCodeUrl(row.url);
   if (row.slug && row.slug !== canonical.slug) throw badRequest('Slug must match the LeetCode URL');
-  const metadataStatus: 'AVAILABLE' | 'PARTIAL' = row.problemNumber && row.topics.length && row.isPremium !== undefined ? 'AVAILABLE' : 'PARTIAL';
+  const topics = [...new Set(row.topics.map(titleKey))];
   return {
-    ...row, ...canonical, titleKey: titleKey(row.title), topics: [...new Set(row.topics.map(titleKey))], source,
-    metadataStatus,
+    ...row, ...canonical, titleKey: titleKey(row.title), topics, source, platform: 'leetcode',
+    metadataStatus: metadataStatus({ problemNumber: row.problemNumber, topics, isPremium: row.isPremium }),
   };
 }
 
@@ -50,15 +49,53 @@ catalogRouter.get('/', async (req, res) => {
   if (q.difficulty) filter.difficulty = q.difficulty;
   if (q.topic) filter.topics = titleKey(q.topic);
   if (q.premium) filter.isPremium = q.premium === 'true';
-  if (q.q) {
-    const key = titleKey(q.q);
-    if (/^\d+$/.test(key)) filter.problemNumber = Number(key);
-    else if (key.includes('://')) filter.slug = parseLeetCodeUrl(q.q).slug;
-    else filter.$or = [{ slug: key }, { topics: key }, { titleKey: { $regex: escapeRegex(key) } }];
+
+  // Local search only: number, slug, URL, title and topics. LeetCode is never contacted here.
+  const key = q.q ? titleKey(q.q) : undefined;
+  const numeric = key && /^\d+$/.test(key) ? Number(key) : undefined;
+  let urlSlug: string | undefined;
+  if (q.q?.includes('://')) {
+    try { urlSlug = parseLeetCodeUrl(q.q).slug; } catch { urlSlug = undefined; }
   }
-  const [items, total, catalogTotal, numbered] = await Promise.all([
-    CatalogProblem.find(filter).sort({ titleKey: 1, _id: 1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
-    CatalogProblem.countDocuments(filter),
+  if (key) {
+    const regex = escapeRegex(key);
+    const clauses: Record<string, unknown>[] = [{ slug: key }, { titleKey: { $regex: `^${regex}` } }, { titleKey: { $regex: regex } }, { topics: key }];
+    if (numeric !== undefined) clauses.push({ problemNumber: numeric });
+    if (urlSlug) clauses.push({ slug: urlSlug });
+    filter.$or = clauses;
+  }
+
+  const skip = (q.page - 1) * q.pageSize;
+  let items: Record<string, unknown>[];
+  let total: number;
+  if (key) {
+    // Rank: exact number, exact slug/URL, exact title, title prefix, partial title, topic match.
+    const branches: Record<string, unknown>[] = [];
+    if (numeric !== undefined) branches.push({ case: { $eq: ['$problemNumber', numeric] }, then: 0 });
+    branches.push({ case: { $in: ['$slug', [...new Set([urlSlug, key].filter((value): value is string => !!value))]] }, then: 1 });
+    const regex = escapeRegex(key);
+    branches.push({ case: { $eq: ['$titleKey', key] }, then: 2 });
+    branches.push({ case: { $regexMatch: { input: '$titleKey', regex: `^${regex}` } }, then: 3 });
+    branches.push({ case: { $regexMatch: { input: '$titleKey', regex } }, then: 4 });
+    branches.push({ case: { $in: [key, { $ifNull: ['$topics', []] }] }, then: 5 });
+    const [result] = await CatalogProblem.aggregate<{ items: Record<string, unknown>[]; total: { count: number }[] }>([
+      { $match: filter },
+      { $addFields: { _rank: { $switch: { branches, default: 6 } } } },
+      { $sort: { _rank: 1, problemNumber: 1, titleKey: 1, _id: 1 } },
+      { $facet: {
+        items: [{ $skip: skip }, { $limit: q.pageSize }, { $project: { _rank: 0 } }],
+        total: [{ $count: 'count' }],
+      } },
+    ]);
+    items = result?.items ?? [];
+    total = result?.total[0]?.count ?? 0;
+  } else {
+    [items, total] = await Promise.all([
+      CatalogProblem.find(filter).sort({ problemNumber: 1, titleKey: 1, _id: 1 }).skip(skip).limit(q.pageSize).lean(),
+      CatalogProblem.countDocuments(filter),
+    ]);
+  }
+  const [catalogTotal, numbered] = await Promise.all([
     CatalogProblem.countDocuments(),
     CatalogProblem.countDocuments({ problemNumber: { $exists: true } }),
   ]);
@@ -101,7 +138,8 @@ catalogRouter.post('/resolve', async (req, res) => {
   res.json({ rows });
 });
 
-catalogRouter.post('/', requireRole('SUPER_ADMIN'), async (req, res) => {
+// Trainers and Super Admins may add a missing problem by hand; nothing is fetched from LeetCode.
+catalogRouter.post('/', async (req, res) => {
   const problem = await CatalogProblem.create(normalize(req.body, 'MANUAL'));
   await audit(req, 'catalog.create', { type: 'CatalogProblem', id: problem._id });
   res.status(201).json(problem);

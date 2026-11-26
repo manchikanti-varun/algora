@@ -24,10 +24,10 @@ export default function Page() {
 
   return <>
     <PageHeader title="Problem Library" subtitle="Search reusable LeetCode metadata by number, title, topic, or URL."
-      actions={user?.role === 'SUPER_ADMIN' && <>
-        <Button variant="ghost" onClick={() => setOpen('history')}>Import history</Button>
+      actions={<>
+        {user?.role === 'SUPER_ADMIN' && <Button variant="ghost" onClick={() => setOpen('history')}>Import history</Button>}
         <Button variant="secondary" onClick={() => setOpen('manual')}>Add entry</Button>
-        <Button onClick={() => setOpen('import')}>Import metadata</Button>
+        {user?.role === 'SUPER_ADMIN' && <Button onClick={() => setOpen('import')}>Import metadata</Button>}
       </>} />
     <Card><CatalogBrowser key={version} /></Card>
     {open === 'import' && <CatalogImport onClose={() => setOpen(null)} onImport={changed} />}
@@ -143,6 +143,8 @@ function ManualEntry({ onClose, onSave }: { onClose: () => void; onSave: () => v
   const [url, setUrl] = useState('');
   const [problemNumber, setNumber] = useState('');
   const [difficulty, setDifficulty] = useState('EASY');
+  const [topics, setTopics] = useState('');
+  const [premium, setPremium] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   return <Modal open title="Add catalog entry" onClose={() => { if (!busy) onClose(); }}>
@@ -151,7 +153,10 @@ function ManualEntry({ onClose, onSave }: { onClose: () => void; onSave: () => v
       setBusy(true); setError('');
       try {
         await api('/problem-library', { method: 'POST', body: {
-          title, url, difficulty, ...(problemNumber ? { problemNumber: Number(problemNumber) } : {}),
+          title, url, difficulty,
+          topics: topics.split(',').map((topic) => topic.trim()).filter(Boolean),
+          ...(problemNumber ? { problemNumber: Number(problemNumber) } : {}),
+          ...(premium ? { isPremium: premium === 'true' } : {}),
         } });
         onSave();
       } catch (e) { setError(errorMessage(e)); }
@@ -162,6 +167,10 @@ function ManualEntry({ onClose, onSave }: { onClose: () => void; onSave: () => v
       <Input label="Problem number (optional)" type="number" min={1} max={99999999} value={problemNumber} onChange={(e) => setNumber(e.target.value)} />
       <Select label="Difficulty" value={difficulty} onChange={(e) => setDifficulty(e.target.value)}
         options={['EASY', 'MEDIUM', 'HARD'].map((value) => ({ value, label: value }))} />
+      <Input label="Topics (optional, comma separated)" value={topics} maxLength={400}
+        onChange={(e) => setTopics(e.target.value)} />
+      <Select label="Availability" value={premium} onChange={(e) => setPremium(e.target.value)}
+        options={[{ value: '', label: 'Unknown' }, { value: 'false', label: 'Free' }, { value: 'true', label: 'Premium' }]} />
       {error && <Notice tone="error">{error}</Notice>}
       <Button type="submit" loading={busy}>Save entry</Button>
     </form>

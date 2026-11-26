@@ -88,6 +88,23 @@ LEETCODE_DIRECT_ENABLED=true
 
 Then in Super Admin → LeetCode integration: **Run health check** once. `OK` or `EMPTY_WINDOW` means Railway can reach LeetCode. `UPSTREAM_ACCESS_DENIED` or `UPSTREAM_RATE_LIMITED` means LeetCode or Cloudflare is refusing the requests; synchronization pauses itself and must not be forced.
 
+## Problem catalog
+
+The problem library searches a local, version-controlled dataset (`data/leetcode/`) in MongoDB. It never calls
+LeetCode or GitHub, and it keeps working while LeetCode synchronization is paused or unavailable.
+
+```bash
+cd algora-backend
+npm run catalog:validate                      # checksum, duplicates, URLs, counts
+MONGODB_URI=<uri> npm run catalog:import:dry-run
+MONGODB_URI=<uri> npm run catalog:import     # idempotent bulk upsert
+```
+
+Run the import once against a new deployment, and again after updating `data/leetcode/` in the repository. It only
+inserts or refreshes catalog metadata: chapter assignments, custom problems and submission evidence are untouched,
+and catalog rows missing from a newer dataset are never deleted. See `data/leetcode/SOURCE.md` for provenance and
+the update workflow.
+
 ## Synchronization behaviour
 
 - `LEETCODE_SCHEDULER_ENABLED=true` runs both the scheduler and the queue worker. Keep it on: manual updates also go through the queue. With several API replicas, set it to `false` on the replicas and run `npm run start:worker` as one extra service.
