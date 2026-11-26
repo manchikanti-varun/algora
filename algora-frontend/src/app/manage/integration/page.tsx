@@ -16,7 +16,7 @@ interface ProviderView {
   capabilities: { acceptedOnly: boolean; windowSize: number; submissionIds: boolean; cacheTtlSec: number; upstream: string; reachesUpstreamDirectly: boolean };
 }
 interface Overview {
-  overall: ProviderState | 'DISABLED'; overallReason: string | null; syncEnabled: boolean; paused: boolean; activation: { basis: string; activated: boolean; reason: string | null }; lastSuccessfulSyncAt: string | null;
+  overall: ProviderState | 'DISABLED'; overallReason: string | null; syncEnabled: boolean; paused: boolean; activation: { basis: string; activated: boolean; reason: string | null; statement?: string | null }; lastSuccessfulSyncAt: string | null;
   configurationIssues?: Record<string, string>;
   selectedProvider: string | null; priority: string[];
   upstream: { id: string; blocked: boolean; blockedUntil: string | null; reason: string | null; ratePerMin: number; tokensAvailable: number; utilizationPct: number;
@@ -79,14 +79,18 @@ export default function Page() {
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <Badge tone={d.activation.activated ? 'green' : 'amber'}>{d.activation.activated ? 'Activated' : 'Not activated'}</Badge>
           <span className="text-slate-600">{d.activation.activated
-            ? <>Upstream authorization recorded on the server: <strong>{d.activation.basis.replace(/_/g, ' ').toLowerCase()}</strong>.</>
+            ? <>Access basis recorded on the server: <strong>{d.activation.basis.replace(/_/g, ' ').toLowerCase()}</strong>. {d.activation.statement}</>
             : d.activation.reason}</span>
         </div>
+        {!d.activation.activated && <p className="mt-2 text-xs text-slate-500">Set <code>LEETCODE_ACCESS_BASIS</code> in Railway to the basis that actually applies. Students each consent when they link their account, so <code>STUDENT_CONSENT</code> is available when no upstream agreement exists; it makes no claim that LeetCode authorised the access.</p>}
         {Object.entries(d.configurationIssues ?? {}).length > 0 && <ul className="mt-2 list-inside list-disc text-sm text-rose-700">
           {Object.entries(d.configurationIssues ?? {}).map(([key, reason]) => <li key={key}><code>{key}</code> · {reason}</li>)}
         </ul>}
-        <p className="mt-2 text-xs text-slate-500">Set by LEETCODE_ACCESS_BASIS on the server (the only activation switch). It records which upstream authorization covers Algora&apos;s automated access to LeetCode; it is not a LeetCode credential. NONE keeps real providers inactive. Internal risk acceptance is not accepted as a value.</p>
+        <p className="mt-2 text-xs text-slate-500">Set by LEETCODE_ACCESS_BASIS on the server (the only activation switch). It records the basis for reading a student&apos;s public submissions; it is not a LeetCode credential. NONE keeps real providers inactive. A provider runs only when it is listed in LEETCODE_PROVIDER_PRIORITY, the basis is set, and it is enabled here.</p>
       </Card>
+      {d.queue.queueDepth > 0 && d.queue.activeJobs === 0 && d.queue.oldestQueuedAgeSec > 120 && <Notice tone="warn" title="Queued jobs are not being processed">
+        {d.queue.queueDepth} job(s) have been waiting for {Math.round(d.queue.oldestQueuedAgeSec / 60)} minutes with nothing running. The worker process may be down, or this instance has LEETCODE_SCHEDULER_ENABLED=false and no worker service is running. Start a worker or set the scheduler back on; queued jobs are picked up automatically and are not lost.
+      </Notice>}
       {d.upstream.blocked && <Notice tone="error" title="LeetCode is restricting or unavailable">Reason: {d.upstream.reason?.replace(/_/g, ' ').toLowerCase()}. Every provider that depends on LeetCode is paused until {fmtDateTime(d.upstream.blockedUntil)}. Algora does not switch providers to get around a LeetCode restriction.</Notice>}
       {d.providers.some((p) => p.transportKind === 'mock' && p.envEnabled) && <Notice tone="info">A development mock provider is active in this environment. Its data never counts in production.</Notice>}
 

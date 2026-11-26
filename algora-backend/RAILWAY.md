@@ -38,11 +38,7 @@ LeetCode (sync requested, but inactive until access is authorised):
 ```dotenv
 LEETCODE_SYNC_ENABLED=true
 LEETCODE_SCHEDULER_ENABLED=true
-LEETCODE_PROVIDER_PRIORITY=direct,leetcode-query
-LEETCODE_DIRECT_ENABLED=false
-LEETCODE_QUERY_ENABLED=false
-LEETCODE_ALFA_ENABLED=false
-LEETCODE_MOCK_ENABLED=false
+LEETCODE_PROVIDER_PRIORITY=direct
 LEETCODE_ACCESS_BASIS=NONE
 LEETCODE_HEALTHCHECK_USERNAME=<your own consenting LeetCode username>
 LEETCODE_QUERY_MODE=accepted
@@ -63,30 +59,31 @@ LEETCODE_BOOTCAMP_START=2026-12-07
 LEETCODE_BOOTCAMP_END=2026-12-11
 ```
 
-Remove if present (no longer read): `LEETCODE_ACCESS_REF`, `LEETCODE_PERMISSION_REF`, `LEETCODE_ALFA_PERMISSION_REF`. Also unnecessary while Alfa is off: `LEETCODE_ALFA_BASE_URL`, `LEETCODE_ALFA_CACHE_SEC`, `LEETCODE_ALFA_RATE_PER_MIN`.
+Remove if present (no longer read): `LEETCODE_ACCESS_REF`, `LEETCODE_PERMISSION_REF`, `LEETCODE_ALFA_PERMISSION_REF`, `LEETCODE_DIRECT_ENABLED`, `LEETCODE_QUERY_ENABLED`, `LEETCODE_ALFA_ENABLED`, `LEETCODE_MOCK_ENABLED`. Provider enablement is now `LEETCODE_PROVIDER_PRIORITY` alone. Also unnecessary while Alfa is off: `LEETCODE_ALFA_BASE_URL`, `LEETCODE_ALFA_CACHE_SEC`, `LEETCODE_ALFA_RATE_PER_MIN`.
 
 Vercel needs `BACKEND_URL=https://<railway-domain>` (read at build time) and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
 
 ## Access and activation
 
-`LEETCODE_ACCESS_BASIS` is the single production activation safeguard. It is not a LeetCode credential (the GraphQL endpoint needs none); it is the owner's record of which upstream authorization covers Algora's automated access. No reference document variable is required.
+`LEETCODE_ACCESS_BASIS` is the single production activation safeguard. It is not a LeetCode credential (the GraphQL endpoint needs none); it records the basis on which Algora may read a student's public submissions. No reference document variable is required.
 
 | `LEETCODE_ACCESS_BASIS` | Real providers |
 | --- | --- |
 | `NONE` (default) | Inactive: "Awaiting activation" |
-| `TERMS`, `WRITTEN_PERMISSION`, `LICENSED_THIRD_PARTY`, `INSTITUTIONAL`, `COMMERCIAL` | Active |
+| `TERMS`, `WRITTEN_PERMISSION`, `LICENSED_THIRD_PARTY`, `INSTITUTIONAL`, `COMMERCIAL` | Active (an upstream authorization is recorded) |
+| `STUDENT_CONSENT` | Active: each synchronized student consented inside Algora to reading their own public profile. No LeetCode permission is claimed. |
 | `OWN_RISK` or anything else | Rejected as invalid; providers stay inactive. Internal risk acceptance is not upstream authorization. |
 
-A provider runs only when `LEETCODE_SYNC_ENABLED=true`, its `LEETCODE_*_ENABLED=true`, the basis is set, MongoDB supports transactions (Atlas does) and the Super Admin has not paused or disabled it. The basis is read at startup. The backend always starts; when any condition fails, the Super Admin page shows the exact reason and students see "Verification unavailable".
+A provider runs only when `LEETCODE_SYNC_ENABLED=true`, it is listed in `LEETCODE_PROVIDER_PRIORITY`, the basis is set, MongoDB supports transactions (Atlas does) and the Super Admin has not paused or disabled it. That list is the only per-provider switch; there are no per-provider enable booleans. The basis is read at startup. The backend always starts; when any condition fails, the Super Admin page shows the exact reason and students see "Synchronization unavailable".
 
-Activation (only when the basis is true):
+Activation:
 
 ```dotenv
 LEETCODE_ACCESS_BASIS=<the basis that actually applies>
-LEETCODE_DIRECT_ENABLED=true
+LEETCODE_PROVIDER_PRIORITY=direct
 ```
 
-Then in Super Admin → LeetCode integration: **Run health check** once. `OK` or `EMPTY_WINDOW` means Railway can reach LeetCode. `UPSTREAM_ACCESS_DENIED` or `UPSTREAM_RATE_LIMITED` means LeetCode or Cloudflare is refusing the requests; synchronization pauses itself and must not be forced.
+Then in Super Admin → LeetCode integration: if the provider shows **Disabled by the Super Admin**, press **Enable**. **Run health check** once. `OK` or `EMPTY_WINDOW` means Railway can reach LeetCode. `SKIPPED_NO_ACCESS_BASIS` means the basis is still NONE; `SKIPPED_DISABLED_BY_ADMIN` means it is switched off in the dashboard; `UPSTREAM_ACCESS_DENIED` or `UPSTREAM_RATE_LIMITED` means LeetCode or Cloudflare is refusing Railway's requests; synchronization pauses itself and must not be forced.
 
 ## Problem catalog
 

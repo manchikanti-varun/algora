@@ -460,23 +460,28 @@ describe('Super Admin integration controls', () => {
     (env as any).LEETCODE_HEALTHCHECK_USERNAME = 'hc_user';
     try {
       const h = (await admin.call('post', '/leetcode/integration/health-check', {})).body;
-      expect(h.results.map((x: any) => x.result)).toEqual(['OK', 'OK', 'SKIPPED_NOT_ELIGIBLE']);
+      expect(h.results.map((x: any) => x.result)).toEqual(['OK', 'OK', 'SKIPPED_DISABLED_BY_ADMIN']);
     } finally { delete (env as any).LEETCODE_HEALTHCHECK_USERNAME; }
     expect((await admin.call('get', '/leetcode/integration/events?type=HEALTH_CHECK')).body.total).toBe(1);
     const t = await login(tok(`s${seq}`, `s${seq}@x.com`));
     expect((await t.call('get', '/leetcode/integration')).status).toBe(403);
   });
 
-  it('an admin cannot enable a provider the environment did not enable', async () => {
-    (env as any).LEETCODE_ALFA_ENABLED = false;
+  it('an admin cannot enable a provider that is misconfigured or absent from the priority list', async () => {
     setProvidersForTests(undefined);
     const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
     await admin.call('put', '/leetcode/integration/settings', { disabled: [] });
     const o = (await admin.call('get', '/leetcode/integration')).body;
-    const alfa = o.providers.find((p: any) => p.id === 'alfa');
+    const alfa = o.providers.find((p: any) => p.id === 'alfa'); // listed in priority but has no base URL
     expect(alfa.envEnabled).toBe(false);
     expect(alfa.state).toBe('DISABLED');
-    expect(o.providers.find((p: any) => p.id === 'direct').state).toBe('DISABLED'); // LEETCODE_DIRECT_ENABLED is not set in tests
+    expect(alfa.stateReason).toContain('LEETCODE_ALFA_BASE_URL');
+    const savedPriority = env.LEETCODE_PROVIDER_PRIORITY;
+    (env as any).LEETCODE_PROVIDER_PRIORITY = ['direct'];
+    try {
+      const q = (await admin.call('get', '/leetcode/integration')).body;
+      expect(q.providers.find((p: any) => p.id === 'alfa')).toMatchObject({ envEnabled: false, state: 'DISABLED', stateReason: expect.stringContaining('not in LEETCODE_PROVIDER_PRIORITY') });
+    } finally { (env as any).LEETCODE_PROVIDER_PRIORITY = savedPriority; }
   });
 });
 
@@ -522,21 +527,26 @@ describe('shared budget accounting', () => {
 
 describe('provider state and the single activation safeguard', () => {
   const real = async () => (await (await login(tok('sub-admin', 'admin@example.com', 'Admin'))).call('get', '/leetcode/integration')).body;
-  const saved = { basis: env.LEETCODE_ACCESS_BASIS, direct: env.LEETCODE_DIRECT_ENABLED };
-  afterEach(() => { (env as any).LEETCODE_ACCESS_BASIS = saved.basis; (env as any).LEETCODE_DIRECT_ENABLED = saved.direct; });
-  it('disabled -> enabled awaiting activation -> active and untested, each with its exact reason; no request is ever made', async () => {
+  const saved = { basis: env.LEETCODE_ACCESS_BASIS, sync: env.LEETCODE_SYNC_ENABLED };
+  afterEach(() => { (env as any).LEETCODE_ACCESS_BASIS = saved.basis; (env as any).LEETCODE_SYNC_ENABLED = saved.sync; });
+  it('awaiting activation -> active and untested, each with its exact reason; no request is ever made', async () => {
     setProvidersForTests(undefined); // real registry, real (denied) network transport
+    (env as any).LEETCODE_SYNC_ENABLED = true;
+    (env as any).LEETCODE_ACCESS_BASIS = 'NONE';
     let o = await real();
-    expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'DISABLED', stateReason: expect.stringContaining('LEETCODE_DIRECT_ENABLED=false') });
-    expect(o.overall).toBe('DISABLED');
-    (env as any).LEETCODE_DIRECT_ENABLED = true;
-    o = await real();
     expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'AWAITING_ACTIVATION', activation: 'INACTIVE' });
     expect(o).toMatchObject({ overall: 'AWAITING_ACTIVATION', overallReason: expect.stringContaining('LEETCODE_ACCESS_BASIS is NONE'), activation: { basis: 'NONE', activated: false } });
     (env as any).LEETCODE_ACCESS_BASIS = 'WRITTEN_PERMISSION';
     o = await real();
     expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'UNTESTED', activation: 'ACTIVE' });
-    expect(o).toMatchObject({ overall: 'UNTESTED', activation: { basis: 'WRITTEN_PERMISSION', activated: true } });
+    expect(o).toMatchObject({ overall: 'UNTESTED', activation: { basis: 'WRITTEN_PERMISSION', activated: true, statement: expect.stringContaining('written permission') } });
+    // The priority list is the only per-provider switch: removing direct disables it with an exact reason.
+    const savedPriority = env.LEETCODE_PROVIDER_PRIORITY;
+    (env as any).LEETCODE_PROVIDER_PRIORITY = ['alfa'];
+    try {
+      o = await real();
+      expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'DISABLED', stateReason: expect.stringContaining('not in LEETCODE_PROVIDER_PRIORITY') });
+    } finally { (env as any).LEETCODE_PROVIDER_PRIORITY = savedPriority; }
     expect(JSON.stringify(o)).not.toMatch(/OWN_RISK|internalRiskAcceptance|AUTHORIZATION_PENDING/);
   });
   it('healthy only after a real answer; paused, rate limited and restricted are distinct', async () => {

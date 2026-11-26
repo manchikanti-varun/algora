@@ -102,6 +102,7 @@ function buttonState(view: SyncView, cooldown: number, busy: boolean, requesting
   if (view.job?.status === 'RUNNING') return { label: 'Updating progress…', disabled: true };
   if (view.job) return { label: view.job.delayed ? 'Update delayed' : 'Update queued', disabled: true };
   if (cooldown > 0) return { label: `Update available in ${mmss(cooldown)}`, disabled: true };
+  if (!view.canRequest) return { label: 'Update Progress', disabled: true };
   return { label: 'Update Progress', disabled: busy };
 }
 
@@ -109,7 +110,7 @@ function buttonState(view: SyncView, cooldown: number, busy: boolean, requesting
 export function SyncButton() {
   const { view, cooldown, busy, requesting, request } = useSync();
   if (!view) return null;
-  if (!view.syncEnabled) return <span className="hidden rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-amber-200 sm:inline" title="Automatic LeetCode verification is not available yet">Verification unavailable</span>;
+  if (!view.syncEnabled) return <span className="hidden rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-amber-200 sm:inline" title="Synchronization is temporarily unavailable. Your verified progress is unchanged.">Synchronization unavailable</span>;
   if (view.link.state !== 'LINKED') return null;
   if (view.paused) return <span className="hidden rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-amber-200 sm:inline">Updates paused</span>;
   const b = buttonState(view, cooldown, busy, requesting);
@@ -127,7 +128,7 @@ const STATE_COPY: Record<string, { tone: string; text: string }> = {
   NO_SUBMISSIONS_OBSERVED: { tone: 'gray', text: 'No accepted submissions observed yet' }, SUBMISSIONS_UNAVAILABLE: { tone: 'amber', text: 'Submissions not visible' },
   ACCOUNT_NOT_FOUND: { tone: 'red', text: 'Username not found' }, SYNC_FAILED: { tone: 'red', text: 'Last update failed' },
   SYNC_PAUSED: { tone: 'amber', text: 'Paused by administrator' }, RATE_LIMITED: { tone: 'amber', text: 'Synchronization delayed' },
-  PROVIDER_UNAVAILABLE: { tone: 'amber', text: 'Provider temporarily unavailable' }, VERIFICATION_UNAVAILABLE: { tone: 'amber', text: 'Verification unavailable' },
+  PROVIDER_UNAVAILABLE: { tone: 'amber', text: 'Synchronization temporarily unavailable' }, VERIFICATION_UNAVAILABLE: { tone: 'amber', text: 'Synchronization unavailable' },
 };
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 
@@ -137,7 +138,7 @@ export function SyncPanel({ verified }: { verified?: { solved: number; total: nu
   if (!view) return null;
   const s = STATE_COPY[view.status] ?? STATE_COPY.IDLE;
   let body: ReactNode;
-  if (!view.syncEnabled) body = <p>Automatic LeetCode verification is not available yet. Keep solving your assigned problems on LeetCode; once verification is enabled, accepted submissions Algora can see will be verified. Nothing is marked unsolved in the meantime, it is simply not verified.</p>;
+  if (!view.syncEnabled) body = <p>Synchronization is temporarily unavailable. Your verified progress is unchanged. Keep solving on LeetCode; accepted submissions Algora can see will be verified once synchronization resumes. Nothing is marked unsolved in the meantime.</p>;
   else if (view.paused) body = <p>Synchronization is paused by the administrator. Your verified progress is unchanged and new solves will be checked when it resumes.</p>;
   else if (view.link.state !== 'LINKED') body = <p>Link your LeetCode username on your <a className="font-medium underline" href="/student/profile">profile</a> to start counting progress.</p>;
   else if (view.status === 'ACCOUNT_NOT_FOUND') body = <p>LeetCode could not find <strong>{view.link.username}</strong>. Check the spelling on your <a className="font-medium underline" href="/student/profile">profile</a> and update it.</p>;

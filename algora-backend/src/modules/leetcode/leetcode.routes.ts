@@ -86,11 +86,15 @@ leetcodeRouter.get('/integration', admin, async (_req, res) => {
     User.countDocuments({ role: 'STUDENT', 'sync.coverage': 'REDUCED' }),
     EvidenceConflict.countDocuments({ at: { $gte: new Date(Date.now() - 7 * 24 * 3600 * 1000) } }),
   ]);
-  // One overall state and the exact reason synchronization is (un)available.
-  const enabledViews = views.filter((v) => v.envEnabled && v.adminEnabled);
+  // One overall state and the EXACT reason synchronization is (un)available, so an admin never has to guess which switch is off.
+  const configured = views.filter((v) => v.requested);
+  const usable = configured.filter((v) => v.envEnabled && v.adminEnabled);
   const primary = eligible[0] ?? null;
   const [overall, overallReason] = !env.LEETCODE_SYNC_ENABLED ? ['DISABLED', 'LEETCODE_SYNC_ENABLED is false']
-    : !enabledViews.length ? ['DISABLED', 'No provider is enabled (set LEETCODE_DIRECT_ENABLED=true)']
+    : !configured.length ? ['DISABLED', 'LEETCODE_PROVIDER_PRIORITY names no known provider']
+    : !usable.length ? ['DISABLED', configured.every((v) => !v.adminEnabled)
+      ? 'Every configured provider is disabled by the Super Admin on the Providers tab'
+      : (configured.find((v) => v.configurationReason)?.configurationReason ?? 'No configured provider is enabled in this environment')]
     : !access.activated && !eligible.length ? ['AWAITING_ACTIVATION', access.reason]
     : !eligible.length ? ['DISABLED', views.find((v) => v.envEnabled)?.stateReason ?? 'No eligible provider']
     : settings.paused ? ['PAUSED', 'Synchronization paused by the Super Admin']
@@ -99,7 +103,7 @@ leetcodeRouter.get('/integration', admin, async (_req, res) => {
   const tokens = await availableTokens(upstreamBucket('leetcode-graphql'), settings.ratePerMin, burstOf(settings.ratePerMin));
   res.json({
     overall, overallReason, syncEnabled: env.LEETCODE_SYNC_ENABLED, paused: settings.paused, configurationIssues: leetcodeConfigIssues,
-    activation: { basis: access.basis, activated: access.activated, reason: access.reason },
+    activation: { basis: access.basis, activated: access.activated, reason: access.reason, statement: access.statement },
     lastSuccessfulSyncAt: (await User.findOne({ role: 'STUDENT', 'sync.lastSuccessAt': { $exists: true } }, 'sync.lastSuccessAt').sort({ 'sync.lastSuccessAt': -1 }).lean())?.sync?.lastSuccessAt ?? null,
     selectedProvider: selected?.id ?? null, priority: settings.priority,
     upstream: { id: 'leetcode-graphql', blocked: !!upstream, blockedUntil: upstream?.until ?? null, reason: upstream?.reason ?? null, ratePerMin: settings.ratePerMin, tokensAvailable: tokens, utilizationPct: Math.round((1 - tokens / burstOf(settings.ratePerMin)) * 100), requests },

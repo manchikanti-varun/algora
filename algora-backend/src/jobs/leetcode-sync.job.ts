@@ -14,6 +14,8 @@ export function startLeetcodeSyncJob(): () => Promise<void> {
   const noop = async () => {};
   if (!env.LEETCODE_SYNC_ENABLED) { log.info('leetcode sync disabled (LEETCODE_SYNC_ENABLED=false)'); return noop; }
   if (!env.LEETCODE_SCHEDULER_ENABLED || leetcodeConfigIssues.LEETCODE_SCHEDULER_ENABLED) { log.info('leetcode scheduler disabled in this process'); return noop; }
+  // Start whenever a provider is configured and activated, even if an admin has disabled it right now: re-enabling it in the
+  // dashboard must not require a restart. Every tick re-checks enablement and pause, so nothing is contacted while inactive.
   if (!registry().some((provider) => providerEnvEnabled(provider.id) && provider.authorization().authorized)) {
     log.info('LeetCode scheduler inactive because no provider can be activated');
     return noop;

@@ -9,22 +9,16 @@ import { ProviderError } from '../leetcode.types';
 
 export const KNOWN_PROVIDERS = ['direct', 'alfa', 'leetcode-query', 'mock'] as const;
 
-const providerFlags = {
-  direct: 'LEETCODE_DIRECT_ENABLED',
-  alfa: 'LEETCODE_ALFA_ENABLED',
-  'leetcode-query': 'LEETCODE_QUERY_ENABLED',
-  mock: 'LEETCODE_MOCK_ENABLED',
-} as const;
-
+/** The priority list is the only per-provider switch: listed means requested, absent means disabled. */
 export function providerRequested(id: string) {
-  const flag = providerFlags[id as keyof typeof providerFlags];
-  return !!flag && env[flag];
+  return (env.LEETCODE_PROVIDER_PRIORITY as string[]).includes(id);
 }
 
 let runtimeBlock: string | null = null;
 export function blockIntegration(reason: string) { runtimeBlock = reason; }
 
 export function providerConfigurationReason(id: string): string | null {
+  if (!providerRequested(id)) return `${id} is not in LEETCODE_PROVIDER_PRIORITY`;
   const groups = ['DIRECT', 'ALFA', 'QUERY', 'MOCK'];
   const group = { direct: 'DIRECT', alfa: 'ALFA', 'leetcode-query': 'QUERY', mock: 'MOCK' }[id];
   const invalid = Object.entries(leetcodeConfigIssues).filter(([key]) =>
@@ -40,16 +34,25 @@ export function envEnabled(id: string): boolean {
   return env.LEETCODE_SYNC_ENABLED && providerRequested(id) && !providerConfigurationReason(id);
 }
 
-/** The single activation safeguard: an upstream authorization basis other than NONE. */
+const BASIS_STATEMENTS: Record<string, string> = {
+  TERMS: 'Access is covered by LeetCode terms as the owner has read them.',
+  WRITTEN_PERMISSION: 'LeetCode gave written permission for this access.',
+  LICENSED_THIRD_PARTY: 'Access runs through a licensed third-party data provider.',
+  INSTITUTIONAL: 'An institutional agreement covers this access.',
+  COMMERCIAL: 'A commercial agreement covers this access.',
+  STUDENT_CONSENT: 'Each synchronized student consented in Algora to Algora reading their own public LeetCode profile. No LeetCode permission is claimed.',
+};
+
+/** The single activation safeguard: a recorded access basis other than NONE. */
 function externalAccess(): Authorization {
   const basis = env.LEETCODE_ACCESS_BASIS;
   if (leetcodeConfigIssues.LEETCODE_ACCESS_BASIS) return { authorized: false, reason: `LEETCODE_ACCESS_BASIS: ${leetcodeConfigIssues.LEETCODE_ACCESS_BASIS}`, basis: 'NONE' };
-  if (basis === 'NONE') return { authorized: false, reason: 'Awaiting activation: LEETCODE_ACCESS_BASIS is NONE (no upstream authorization recorded)', basis };
+  if (basis === 'NONE') return { authorized: false, reason: 'Awaiting activation: LEETCODE_ACCESS_BASIS is NONE (no access basis recorded)', basis };
   return { authorized: true, basis };
 }
 export function accessSummary() {
   const access = externalAccess();
-  return { basis: access.basis ?? 'NONE', activated: access.authorized, reason: access.reason ?? null };
+  return { basis: access.basis ?? 'NONE', activated: access.authorized, reason: access.reason ?? null, statement: access.authorized ? BASIS_STATEMENTS[access.basis ?? 'NONE'] ?? null : null };
 }
 export function authorizationFor(id: string): Authorization {
   if (id === 'mock') return env.isProd ? { authorized: false, reason: 'Mock provider is disabled in production' } : { authorized: true };

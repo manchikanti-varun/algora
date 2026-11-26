@@ -5,7 +5,7 @@ import { authorizationFor, blockIntegration, providerConfigurationReason, provid
 
 export async function initializeLeetcodeIntegration() {
   const requested = registry().filter((provider) => providerRequested(provider.id));
-  if (env.isProd && env.LEETCODE_MOCK_ENABLED) log.warn('LeetCode fixture provider ignored in production');
+  if (env.isProd && env.LEETCODE_PROVIDER_PRIORITY.includes('mock')) log.warn('LeetCode fixture provider ignored in production');
   if (env.isProd && env.LEETCODE_PROVIDER_PRIORITY.includes('mock')) log.warn('LeetCode fixture priority ignored in production');
   for (const [key, reason] of Object.entries(leetcodeConfigIssues)) log.warn('invalid optional LeetCode setting', { key, reason });
   if (!env.LEETCODE_SYNC_ENABLED) return;

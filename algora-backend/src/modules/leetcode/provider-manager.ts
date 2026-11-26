@@ -89,7 +89,7 @@ function activationOf(p: SubmissionProvider, s: Effective, auth: ReturnType<Subm
 function providerState(p: SubmissionProvider, s: Effective, auth: ReturnType<SubmissionProvider['authorization']>, configurationReason: string | null, health: TechnicalHealth, block: { reason: string; until: Date } | null): { state: ProviderState; stateReason: string | null } {
   if (configurationReason) return { state: 'DISABLED', stateReason: configurationReason };
   if (!env.LEETCODE_SYNC_ENABLED) return { state: 'DISABLED', stateReason: 'LEETCODE_SYNC_ENABLED is false' };
-  if (!providerEnvEnabled(p.id)) return { state: 'DISABLED', stateReason: `Not enabled in the server environment${p.id === 'direct' ? ' (LEETCODE_DIRECT_ENABLED=false)' : p.id === 'leetcode-query' ? ' (LEETCODE_QUERY_ENABLED=false)' : ''}` };
+  if (!providerEnvEnabled(p.id)) return { state: 'DISABLED', stateReason: providerRequested(p.id) ? 'Not enabled in the server environment' : `Not in LEETCODE_PROVIDER_PRIORITY` };
   if (s.disabled.has(p.id)) return { state: 'DISABLED', stateReason: 'Disabled by the Super Admin' };
   if (!auth.authorized) return { state: 'AWAITING_ACTIVATION', stateReason: auth.reason ?? 'Awaiting activation' };
   if (s.paused) return { state: 'PAUSED', stateReason: 'Synchronization paused by the Super Admin' };
@@ -265,8 +265,12 @@ export async function probeAccount(username: string, studentId?: unknown, signal
 export interface HealthCheckResult {
   provider: string;
   /** OK only when accepted submissions were actually retrieved for the consenting account. */
-  result: 'OK' | 'EMPTY_WINDOW' | 'EMPTY_WINDOW_WITH_ACTIVITY' | 'ACCOUNT_NOT_FOUND' | 'INVALID_RESPONSE' | 'SKIPPED_NOT_ELIGIBLE' | 'SKIPPED_UPSTREAM_BLOCKED' | 'SKIPPED_RATE_BUDGET' | 'SKIPPED_PROVIDER_BUDGET' | string;
+  result: 'OK' | 'EMPTY_WINDOW' | 'EMPTY_WINDOW_WITH_ACTIVITY' | 'ACCOUNT_NOT_FOUND' | 'INVALID_RESPONSE'
+    | 'SKIPPED_SYNC_DISABLED' | 'SKIPPED_NOT_IN_PRIORITY' | 'SKIPPED_CONFIGURATION' | 'SKIPPED_DISABLED_BY_ADMIN'
+    | 'SKIPPED_NO_ACCESS_BASIS' | 'SKIPPED_NOT_ELIGIBLE' | 'SKIPPED_UPSTREAM_BLOCKED' | 'SKIPPED_RATE_BUDGET' | 'SKIPPED_PROVIDER_BUDGET' | string;
   latencyMs?: number;
+  /** Exact prerequisite that was missing, when the provider was skipped. Never includes credentials. */
+  description?: string;
   diagnostics?: { reachable: boolean; structureValid: boolean; submissionsRetrieved: number; rawRows: number; acceptedOnly: boolean; accountExistence: 'EXISTS' | 'NOT_FOUND' | 'UNKNOWN'; calendarActivity: number | null };
 }
 
@@ -283,8 +287,15 @@ export async function runHealthChecks(username = env.LEETCODE_HEALTHCHECK_USERNA
     return { ran: false as const, reason: 'A health check ran less than a minute ago', retryAfterSec: 60 };
   }
   const out: HealthCheckResult[] = [];
+  const testOverride = isTestOverride();
   for (const p of orderByPriority(registry(), s)) {
-    if (!isEnabled(p, s) || !p.authorization().authorized) { out.push({ provider: p.id, result: 'SKIPPED_NOT_ELIGIBLE' }); continue; }
+    // Report the precise prerequisite that is missing, so the Super Admin does not have to guess.
+    if (!env.LEETCODE_SYNC_ENABLED) { out.push({ provider: p.id, result: 'SKIPPED_SYNC_DISABLED' }); continue; }
+    if (!testOverride && !providerRequested(p.id)) { out.push({ provider: p.id, result: 'SKIPPED_NOT_IN_PRIORITY' }); continue; }
+    const configuration = testOverride ? null : providerConfigurationReason(p.id);
+    if (configuration) { out.push({ provider: p.id, result: 'SKIPPED_CONFIGURATION', diagnostics: { reachable: false, structureValid: false, submissionsRetrieved: 0, rawRows: 0, acceptedOnly: p.capabilities.acceptedOnly, accountExistence: 'UNKNOWN', calendarActivity: null }, description: configuration }); continue; }
+    if (s.disabled.has(p.id)) { out.push({ provider: p.id, result: 'SKIPPED_DISABLED_BY_ADMIN' }); continue; }
+    if (!p.authorization().authorized) { out.push({ provider: p.id, result: 'SKIPPED_NO_ACCESS_BASIS', description: p.authorization().reason }); continue; }
     const states = await getStates();
     if (upstreamBlock(states, p.capabilities.upstream)) { out.push({ provider: p.id, result: 'SKIPPED_UPSTREAM_BLOCKED' }); continue; }
     if (!(await takeToken(upstreamBucket(p.capabilities.upstream), s.ratePerMin, burstOf(s.ratePerMin)))) { out.push({ provider: p.id, result: 'SKIPPED_RATE_BUDGET' }); continue; }

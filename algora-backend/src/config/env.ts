@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 const bool = z.enum(['true', 'false']).default('false').transform((v) => v === 'true');
-const flag = bool;
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -22,8 +21,13 @@ const schema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
 });
 
-/** Upstream authorizations that activate real providers. */
+/**
+ * Access bases that activate real providers. The first five are upstream authorizations. STUDENT_CONSENT records that each
+ * synchronized student consented, inside Algora, to Algora reading their own public LeetCode profile; it makes no claim that
+ * LeetCode authorized the access. NONE keeps every real provider inactive.
+ */
 export const EXTERNAL_BASES = ['TERMS', 'WRITTEN_PERMISSION', 'LICENSED_THIRD_PARTY', 'INSTITUTIONAL', 'COMMERCIAL'] as const;
+export const ACCESS_BASES = ['NONE', ...EXTERNAL_BASES, 'STUDENT_CONSENT'] as const;
 const integrationSchema = z.object({
   LEETCODE_SYNC_ENABLED: bool,
   /** Run the background scheduler in this process. Set false on API replicas when a separate worker service runs it. */
@@ -31,22 +35,21 @@ const integrationSchema = z.object({
   /** Automatic synchronization interval in bootcamp hours, measured from each student's last SUCCESSFUL sync. */
   LEETCODE_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(5).default(30),
   /**
-   * THE production activation safeguard (the only one). The owner's statement of which upstream authorization covers
-   * Algora's automated access to LeetCode. It is not a LeetCode credential: the GraphQL endpoint needs none.
-   * NONE (default) keeps every real provider inactive. Internal risk acceptance is not upstream authorization and is not a value.
+   * THE production activation safeguard (the only one). It is not a LeetCode credential: the GraphQL endpoint needs none.
+   * It records the basis on which Algora may read a student's public submissions: an upstream authorization, or the
+   * student's own recorded consent (STUDENT_CONSENT), which claims no LeetCode permission. NONE keeps every real provider
+   * inactive. Internal risk acceptance is not upstream authorization and is not a value.
    */
-  LEETCODE_ACCESS_BASIS: z.string().trim().toUpperCase().pipe(z.enum(['NONE', ...EXTERNAL_BASES], {
-    error: (i) => i.input === 'OWN_RISK' ? 'OWN_RISK is not accepted: internal risk acceptance is not upstream authorization' : `must be one of NONE, ${EXTERNAL_BASES.join(', ')}`,
+  LEETCODE_ACCESS_BASIS: z.string().trim().toUpperCase().pipe(z.enum([...ACCESS_BASES], {
+    error: (i) => i.input === 'OWN_RISK' ? 'OWN_RISK is not accepted: internal risk acceptance is not upstream authorization' : `must be one of ${ACCESS_BASES.join(', ')}`,
   })).optional(),
-  /** Comma-separated provider ids in preferred order. Admins may reorder at runtime; unknown ids fail validation. */
-  LEETCODE_PROVIDER_PRIORITY: z.string().trim().default('direct,leetcode-query')
+  /**
+   * The providers that may serve requests, in preferred order. This is the ONLY per-provider switch: a provider not listed here
+   * is disabled. Admins may reorder or disable at runtime; they can never enable one that is not listed.
+   */
+  LEETCODE_PROVIDER_PRIORITY: z.string().trim().default('direct')
     .transform((v) => v.split(',').map((x) => x.trim()).filter(Boolean))
     .pipe(z.array(z.enum(['direct', 'alfa', 'leetcode-query', 'mock'])).min(1)),
-  LEETCODE_DIRECT_ENABLED: flag,
-  LEETCODE_ALFA_ENABLED: flag,
-  LEETCODE_QUERY_ENABLED: flag,
-  /** Development/test only. Refused in production. */
-  LEETCODE_MOCK_ENABLED: flag,
   LEETCODE_ALFA_BASE_URL: z.string().trim().url().refine((value) => {
     try {
       const url = new URL(value);
@@ -101,7 +104,7 @@ if (!parsed.success) {
   throw new Error('Invalid environment configuration');
 }
 
-export type AccessBasis = 'NONE' | (typeof EXTERNAL_BASES)[number];
+export type AccessBasis = (typeof ACCESS_BASES)[number];
 
 type IntegrationKey = keyof typeof integrationSchema.shape;
 const integrationInput = Object.fromEntries(Object.keys(integrationSchema.shape).flatMap((key) => {

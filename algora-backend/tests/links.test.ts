@@ -12,7 +12,7 @@ import { app, evidenceFor, login, resetDb, startDb, stopDb, studentBody, tok, ve
 beforeAll(startDb);
 afterAll(stopDb);
 beforeEach(resetDb);
-afterEach(() => { setProviderForTests(undefined); (env as any).LEETCODE_SYNC_ENABLED = false; (env as any).LEETCODE_MOCK_ENABLED = false; });
+afterEach(() => { setProviderForTests(undefined); (env as any).LEETCODE_SYNC_ENABLED = false; });
 
 const reg = (sub: string, email: string, over: Record<string, unknown> = {}) => request(app).post('/api/v1/auth/register/student').set('Origin', 'http://localhost:3000')
   .send({ idToken: tok(sub, email, 'Some Student'), ...studentBody(over) });
@@ -62,9 +62,8 @@ describe('simplified LeetCode account linking', () => {
   });
 
   it('OWN_RISK is rejected (not upstream authorization): sync stays inactive while linking and core routes keep working', async () => {
-    const { LEETCODE_ACCESS_BASIS: basis, LEETCODE_DIRECT_ENABLED: direct } = env;
+    const { LEETCODE_ACCESS_BASIS: basis } = env;
     env.LEETCODE_SYNC_ENABLED = true;
-    env.LEETCODE_DIRECT_ENABLED = true;
     (leetcodeConfigIssues as any).LEETCODE_ACCESS_BASIS = 'OWN_RISK is not accepted: internal risk acceptance is not upstream authorization';
     try {
       expect((await reg('s1', 'a@x.com')).status).toBe(201);
@@ -87,7 +86,6 @@ describe('simplified LeetCode account linking', () => {
     } finally {
       env.LEETCODE_ACCESS_BASIS = basis;
       delete (leetcodeConfigIssues as any).LEETCODE_ACCESS_BASIS;
-      env.LEETCODE_DIRECT_ENABLED = direct;
     }
   });
 

@@ -59,7 +59,7 @@ it.each([
   [{ LEETCODE_ACCESS_BASIS: 'bogus' }, 'must be one of NONE'],
   [{ LEETCODE_ACCESS_BASIS: 'WRITTEN_PERMISSION' }, 'MongoDB transactions are unavailable'],
 ] as const)('production starts with an inactive external provider (%j)', async (settings, reason) => {
-  await boot({ LEETCODE_SYNC_ENABLED: 'true', LEETCODE_DIRECT_ENABLED: 'true', ...settings }, (output) => {
+  await boot({ LEETCODE_SYNC_ENABLED: 'true', ...settings }, (output) => {
     expect(output).toContain(reason);
     expect(output).toContain('no provider can be activated');
     expect(output).not.toContain('startup failed');
@@ -68,8 +68,8 @@ it.each([
 
 it('invalid provider options and mock switches never prevent production readiness', async () => {
   await boot({
-    LEETCODE_SYNC_ENABLED: 'true', LEETCODE_ALFA_ENABLED: 'true', LEETCODE_ALFA_BASE_URL: 'not-a-url',
-    LEETCODE_MOCK_ENABLED: 'true', LEETCODE_PROVIDER_PRIORITY: 'mock,alfa', LEETCODE_PROVIDER_TIMEOUT_MS: 'NaN',
+    LEETCODE_SYNC_ENABLED: 'true', LEETCODE_ALFA_BASE_URL: 'not-a-url',
+    LEETCODE_PROVIDER_PRIORITY: 'mock,alfa', LEETCODE_PROVIDER_TIMEOUT_MS: 'NaN',
   }, (output) => {
     expect(output).toContain('LEETCODE_ALFA_BASE_URL');
     expect(output).toContain('LEETCODE_PROVIDER_TIMEOUT_MS');
