@@ -26,7 +26,12 @@ cd algora-backend
 npm test                       # unit, integration and multi-process (in-memory replica set)
 npm run test:browser           # Chromium e2e; first build the frontend with:
                                #   NEXT_PUBLIC_GOOGLE_CLIENT_ID=e2e-test-client BACKEND_URL=http://127.0.0.1:5100 npm run build
-npm run test:load              # 200 students, mocked provider (LOAD_STUDENTS, LOAD_SECONDS)
+npm run test:load              # 200 students over HTTP, mocked provider (LOAD_STUDENTS, LOAD_SECONDS)
+LOAD_SIM=1 npx vitest run tests/load/simulate.test.ts   # queue simulation: 50-1000 students, virtual clock
 ```
 
 The browser and load harnesses stub Google token verification and use the development mock LeetCode provider. They never contact Google or LeetCode.
+
+## Deployment and LeetCode synchronization
+
+See [algora-backend/RAILWAY.md](algora-backend/RAILWAY.md) for Railway settings, environment variables, LeetCode access and activation, synchronization behaviour and rollback. Environment templates: `algora-backend/.env.example`, `algora-frontend/.env.example`. Real `.env*` files are never committed.
