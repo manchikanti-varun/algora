@@ -1,12 +1,14 @@
 'use client';
 import { useState } from 'react';
-import { Button, Input, Notice, Select, Textarea } from '@/components/ui';
+import { Button, Combobox, Input, Notice, Select, Textarea } from '@/components/ui';
+import { loadActiveColleges } from '@/lib/options';
 import type { Batch } from './types';
 
 const d = (s?: string) => (s ? s.slice(0, 10) : '');
 
 export function BatchForm({ initial, onSubmit, submitLabel }: { initial?: Batch; onSubmit: (b: Record<string, unknown>) => Promise<void>; submitLabel: string }) {
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string>();
+  const [collegeId, setCollegeId] = useState(initial?.collegeId ?? '');
   const [start, setStart] = useState(d(initial?.startDate)); const [end, setEnd] = useState(d(initial?.endDate));
   const dateError = start && end && end < start ? 'End date must not be before the start date.' : undefined;
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -14,7 +16,8 @@ export function BatchForm({ initial, onSubmit, submitLabel }: { initial?: Batch;
     if (dateError) return;
     const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
     const body: Record<string, unknown> = { name: f.name, description: f.description, status: f.status };
-    if (f.college) body.college = f.college;
+    if (collegeId) body.collegeId = collegeId;
+    else if (initial?.collegeId) body.collegeId = null;
     if (f.startDate) body.startDate = f.startDate;
     if (f.endDate) body.endDate = f.endDate;
     setBusy(true);
@@ -27,7 +30,8 @@ export function BatchForm({ initial, onSubmit, submitLabel }: { initial?: Batch;
         <legend className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Details</legend>
         <Input label="Name" name="name" required maxLength={120} defaultValue={initial?.name} placeholder="JNTU Java Bootcamp – Jan 2026" />
         <Textarea label="Description (optional)" name="description" maxLength={2000} defaultValue={initial?.description} />
-        <Input label="College (optional)" name="college" defaultValue={initial?.college ?? ''} hint="Matched to an existing college by name, or added as a new one." />
+        <Combobox label="College (optional)" labelHidden={false} value={collegeId} selectedLabel={initial?.college ?? undefined} onChange={setCollegeId}
+          load={loadActiveColleges} loadOnFocus emptyLabel="No college" hint="Search by name or code. Ask a Super Admin if your college is missing." />
       </fieldset>
       <fieldset className="space-y-4">
         <legend className="mb-3 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Schedule and visibility</legend>

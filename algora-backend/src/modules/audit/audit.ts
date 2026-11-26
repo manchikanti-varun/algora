@@ -1,4 +1,5 @@
 import { log } from '../../lib/logger';
+import type { ClientSession } from 'mongoose';
 import type { Request } from 'express';
 import { AuditLog } from '../../models';
 
@@ -8,10 +9,11 @@ export async function audit(
   target?: { type: string; id: unknown },
   metadata?: Record<string, unknown>,
   actor?: { _id: unknown; role: string },
+  session?: ClientSession,
 ) {
   try {
     const a = actor ?? (req as any)?.user;
-    await AuditLog.create({
+    await AuditLog.create([{
       actorId: a?._id,
       actorRole: a?.role,
       action,
@@ -19,8 +21,9 @@ export async function audit(
       targetId: target ? String(target.id) : undefined,
       metadata,
       ip: req?.ip,
-    });
+    }], { session });
   } catch (e) {
+    if (session) throw e;
     log.error('audit write failed', { action, error: e });
   }
 }

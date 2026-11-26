@@ -5,8 +5,10 @@ import { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
 import { homeFor, useAuth, type SessionUser } from '@/lib/auth';
 import { GoogleSignIn } from './GoogleSignIn';
+import { BrandMark } from './BrandMark';
 import { ThemePicker } from './ThemePicker';
-import { Button, Checkbox, Input, Notice, Spinner, Textarea, usePageTitle } from './ui';
+import { Button, Checkbox, Combobox, Input, Notice, Spinner, Textarea, usePageTitle } from './ui';
+import { loadPublicColleges } from '@/lib/options';
 
 type Step =
   | { kind: 'signin' }
@@ -25,6 +27,8 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [hasClaim, setHasClaim] = useState(false);
+  const [collegeId, setCollegeId] = useState('');
+  const [collegeName, setCollegeName] = useState('');
   useEffect(() => { if (user) router.replace(homeFor(user.role)); }, [user, router]);
   const MESSAGES: Record<string, string> = {
     rollNumber: 'Enter exactly 10 letters or digits.',
@@ -71,10 +75,15 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
     e.preventDefault();
     setBusy(true); setError(undefined); setFieldErrors({});
     const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+    if (mode === 'student' && !collegeId) {
+      setBusy(false);
+      setFieldErrors({ college: 'Select your college from the list.' });
+      return;
+    }
     try {
-      if (mode === 'student') finish(await api<AuthResponse>('/auth/register/student', { method: 'POST', body: { idToken, ...f, claimCode: f.claimCode || undefined, leetcodeConsent: f.leetcodeConsent === 'on' } }));
+      if (mode === 'student') finish(await api<AuthResponse>('/auth/register/student', { method: 'POST', body: { idToken, ...f, collegeId, claimCode: f.claimCode || undefined, leetcodeConsent: f.leetcodeConsent === 'on' } }));
       else {
-        await api('/trainer-requests', { method: 'POST', body: { idToken, fullName: f.fullName, phone: f.phone || undefined, college: f.college || undefined, note: f.note || undefined } });
+        await api('/trainer-requests', { method: 'POST', body: { idToken, fullName: f.fullName, phone: f.phone || undefined, collegeId: collegeId || undefined, note: f.note || undefined } });
         setStep({ kind: 'pending' });
       }
     } catch (err) { setError(errorMessage(err)); } finally { setBusy(false); }
@@ -84,13 +93,13 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
   const title = mode === 'student' ? 'Student sign in' : 'Trainer and admin sign in';
   const subtitle = mode === 'student' ? 'Use the Google account you want to learn with.' : 'Management access requires approval by the Super Admin.';
   return (
-    <main className="relative grid min-h-screen place-items-center bg-canvas p-4">
+    <main className="relative grid min-h-screen place-items-center bg-canvas px-4 pb-10 pt-16">
       <div className="absolute right-4 top-4"><ThemePicker /></div>
       <div className="w-full max-w-md">
-        <Link href="/" className="mb-6 flex items-center justify-center gap-2 text-lg font-semibold text-fg"><span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-bold text-white" aria-hidden>A</span>Algora</Link>
-        <div className="space-y-5 rounded-xl border border-line bg-surface p-6 sm:p-8">
+        <Link href="/" className="mb-5 flex items-center justify-center gap-2 text-lg font-semibold tracking-tight text-fg"><BrandMark />Algora</Link>
+        <div className="space-y-5 rounded-xl border border-line bg-surface p-6 shadow-panel sm:p-8">
           <div>
-            <h1 className="text-xl font-semibold text-fg">{step.kind === 'register' ? (mode === 'student' ? 'Create your account' : 'Request management access') : title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-fg">{step.kind === 'register' ? (mode === 'student' ? 'Create your account' : 'Request management access') : title}</h1>
             <p className="mt-1 text-sm text-fg-muted">{step.kind === 'register' ? (mode === 'student' ? 'A few details so your trainer can find you.' : 'The Super Admin reviews every request.') : subtitle}</p>
           </div>
           {waiting && <p role="status" className="flex items-center justify-center gap-2 py-4 text-sm text-fg-muted"><Spinner />{user ? 'Signing you in…' : 'Checking your session…'}</p>}
@@ -113,12 +122,15 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
               </fieldset>
               <fieldset className="space-y-3">
                 <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">College</legend>
-                <Input label="Roll number" name="rollNumber" required pattern="[A-Za-z0-9]{10}" maxLength={10} error={fe('rollNumber')} hint="Exactly 10 letters or digits. You cannot change it later, so check it carefully." />
-                <Input label="College" name="college" required minLength={2} error={fe('college')} />
+                <Input label="Roll number" name="rollNumber" required pattern="[A-Za-z0-9]{10}" maxLength={10} error={fe('rollNumber')} hint="Exactly 10 letters or digits. Contact your trainer if it needs to change later." />
+                <Combobox label="College" value={collegeId} selectedLabel={collegeName} load={loadPublicColleges} labelHidden={false}
+                  onChange={(value, option) => { setCollegeId(value); setCollegeName(option?.label ?? ''); setFieldErrors((prev) => { const rest = { ...prev }; delete rest.college; return rest; }); }}
+                  placeholder="Search and select your college" hint="Can’t find your college? Ask your trainer or administrator to add it." className="[&_input]:h-9" />
+                {fe('college') && <p role="alert" className="text-xs text-danger-fg">{fe('college')}</p>}
               </fieldset>
               <fieldset className="space-y-3">
                 <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">LeetCode</legend>
-                <Input label="LeetCode username" name="leetcodeUsername" required pattern="[A-Za-z0-9_\-]{1,40}" error={fe('leetcodeUsername')} hint="The public account whose accepted submissions Algora should read. You can change it later from your profile." />
+                <Input label="LeetCode username" name="leetcodeUsername" required pattern="[A-Za-z0-9_\-]{1,40}" error={fe('leetcodeUsername')} hint="The public account whose accepted submissions Algora should read. You can request a change from your profile." />
                 <div>
                   <Checkbox name="leetcodeConsent" required
                     label={<>I agree that Algora may read the <strong>public accepted submissions</strong> of this LeetCode account to verify my progress. Algora never asks for my LeetCode password. I can withdraw and delete this data from my profile at any time.</>} />
@@ -136,7 +148,8 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
               <p className="text-sm text-fg-muted"><strong className="text-fg">{step.email}</strong> is not an approved trainer yet. Request access:</p>
               <Input label="Full name" name="fullName" defaultValue={step.name} required minLength={2} error={fe('fullName')} />
               <Input label="Phone (optional)" name="phone" pattern="\+?[0-9]{10,15}" type="tel" error={fe('phone')} />
-              <Input label="College or organisation (optional)" name="college" />
+              <Combobox label="College or organisation (optional)" value={collegeId} selectedLabel={collegeName} load={loadPublicColleges} labelHidden={false}
+                onChange={(value, option) => { setCollegeId(value); setCollegeName(option?.label ?? ''); }} emptyLabel="No college" placeholder="Search colleges" className="[&_input]:h-9" />
               <Textarea label="Note for the Super Admin (optional)" name="note" maxLength={1000} />
               <Button loading={busy} type="submit" className="w-full">Request access</Button>
             </form>

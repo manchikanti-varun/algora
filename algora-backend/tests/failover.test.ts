@@ -507,7 +507,7 @@ describe('consent and withdrawal', () => {
     const r = await c.call('delete', '/student/leetcode/data', { confirm: 'DELETE' });
     expect(r.body).toMatchObject({ ok: true, evidence: 1 });
     expect(await SolveEvidence.countDocuments({ studentId: s.u._id })).toBe(0);
-    expect(r.body.link.state).toBe('UNLINKED');
+    expect(r.body.link.state).toBe('CONSENT_WITHDRAWN'); // sharing stopped immediately; the association needs approval to remove
   });
 });
 

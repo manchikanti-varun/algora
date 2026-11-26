@@ -1,3 +1,4 @@
+import { activeCollege, collegeLabel } from '../colleges/registry';
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
@@ -7,7 +8,7 @@ import { requireAuth, requireRole } from '../../middleware/auth';
 import { TrainerRequest, User } from '../../models';
 import { audit } from '../audit/audit';
 import { idTokenSchema, trainerRequestSchema } from '../auth/auth.schemas';
-import { verifyGoogleIdToken } from '../auth/google';
+import { checkedGoogleIdentity } from '../auth/credential-guard';
 import { env } from '../../config/env';
 
 const objectId = z.string().refine((v) => Types.ObjectId.isValid(v), 'Invalid id');
@@ -23,7 +24,7 @@ export const trainersRouter = Router();
 // Public (identity proven by the Google ID token in the body).
 trainerRequestsRouter.post('/', async (req, res) => {
   const { idToken, ...input } = parse(trainerRequestSchema, req.body);
-  const id = await verifyGoogleIdToken(idToken);
+  const id = await checkedGoogleIdentity(req, res, idToken, 'trainer-access');
   if (id.email === env.SUPER_ADMIN_EMAIL) throw new AppError(403, 'ACCOUNT_CONFLICT', 'Not applicable to this account');
   if (await User.exists({ $or: [{ googleSub: id.sub }, { email: id.email }] })) {
     throw conflict('This account is already registered', 'ALREADY_REGISTERED');
@@ -32,9 +33,11 @@ trainerRequestsRouter.post('/', async (req, res) => {
   if (existing && existing.status !== 'REJECTED') {
     return void res.status(200).json({ status: existing.status });
   }
+  const { collegeId, ...details } = input;
+  const college = collegeId ? collegeLabel(await activeCollege(collegeId)) : undefined;
   const doc = await TrainerRequest.findOneAndUpdate(
     { googleSub: id.sub },
-    { $set: { ...input, email: id.email, status: 'PENDING_APPROVAL' }, $unset: { rejectionReason: 1, reviewedAt: 1, reviewedBy: 1 } },
+    { $set: { ...details, ...(college ? { college } : {}), email: id.email, status: 'PENDING_APPROVAL' }, $unset: { rejectionReason: 1, reviewedAt: 1, reviewedBy: 1 } },
     { upsert: true, returnDocument: 'after' },
   );
   await audit(null, 'trainer_request.submit', { type: 'TrainerRequest', id: doc._id }, { email: id.email });

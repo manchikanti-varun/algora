@@ -3,7 +3,8 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { vi } from 'vitest';
 import { createApp } from '../src/app';
-import { syncAllIndexes } from '../src/models';
+import { College, syncAllIndexes } from '../src/models';
+import { registryFields } from '../src/modules/colleges/registry';
 
 // Fake Google verification: token format "tok|sub|email|name"
 vi.mock('../src/modules/auth/google', () => ({
@@ -33,7 +34,20 @@ export async function resetDb() {
   (await import('../src/modules/leetcode/integration-settings.js')).invalidateSettings();
   const cols = await mongoose.connection.db!.collections();
   await Promise.all(cols.map((c) => c.deleteMany({})));
+  defaultCollegeId = String((await seedCollege('JNTU', 'JNTU'))._id);
 }
+
+/** Create a canonical college the way an administrator would. */
+export async function seedCollege(name: string, code: string, aliases: string[] = []) {
+  return College.create(await registryFields({ name, code, aliases }));
+}
+
+export async function otherCollege(name = 'Other College', code = 'OTHER') {
+  return seedCollege(name, code);
+}
+
+let defaultCollegeId = '';
+export const collegeId = () => defaultCollegeId;
 
 export const app = createApp();
 // Leaderboard memoisation is a production optimisation; tests assert immediate consistency.
@@ -41,7 +55,7 @@ process.env.ALGORA_BOARD_CACHE = 'off';
 export const tok = (sub: string, email: string, name = 'Test User') => `tok-${'x'.repeat(20)}`.replace(/^tok-.*/, `tok|${sub}|${email}|${name}`).padEnd(20, ' ');
 
 export const studentBody = (over: Record<string, unknown> = {}) => ({
-  firstName: 'Asha', lastName: 'Rao', rollNumber: 'ab12cd34ef', college: 'JNTU',
+  firstName: 'Asha', lastName: 'Rao', rollNumber: 'ab12cd34ef', collegeId: defaultCollegeId,
   mobile: '9876543210', leetcodeUsername: 'asha_rao', leetcodeConsent: true, ...over,
 });
 

@@ -1,4 +1,5 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@source "../";
 
 /*
  * Algora design tokens. Every colour is defined once with light-dark(), so a component written with these tokens is
@@ -8,18 +9,18 @@
 :root {
   color-scheme: light dark;
   /* neutrals */
-  --al-canvas: light-dark(#f7f7f8, #0c0d10);
-  --al-surface: light-dark(#ffffff, #141519);
-  --al-subtle: light-dark(#f3f3f5, #1a1b20);
-  --al-hover: light-dark(#ececef, #22232a);
-  --al-line: light-dark(#e6e6ea, #2a2b32);
+  --al-canvas: light-dark(#f3f5fb, #10121c);
+  --al-surface: light-dark(#ffffff, #191c29);
+  --al-subtle: light-dark(#eef1f8, #222637);
+  --al-hover: light-dark(#e9edfa, #282e42);
+  --al-line: light-dark(#dce2ef, #32384d);
   --al-line-strong: light-dark(#d4d4da, #3a3b44);
-  --al-fg: light-dark(#18181b, #ededf0);
+  --al-fg: light-dark(#19213a, #ededf0);
   --al-fg-muted: light-dark(#52525b, #a8a8b3);
   --al-fg-subtle: light-dark(#6b6b76, #8e8e99); /* >= 4.5:1 on surface and canvas in both themes */
   /* accent */
-  --al-accent: light-dark(#4f46e5, #6366f1);
-  --al-accent-hover: light-dark(#4338ca, #7476f4);
+  --al-accent: light-dark(#4f46e5, #4c43cf);
+  --al-accent-hover: light-dark(#4338ca, #5549d8);
   --al-accent-fg: light-dark(#4338ca, #a9abff); /* accent-coloured text and links */
   --al-accent-soft: light-dark(#eef0ff, #1e1f3d);
   --al-accent-line: light-dark(#c7cbfb, #383b78);
@@ -33,6 +34,7 @@
   --al-warning-soft: light-dark(#fffbeb, #2a2011);
   --al-warning-line: light-dark(#fde68a, #4d3a17);
   --al-danger: light-dark(#e11d48, #f43f5e);
+  --al-danger-action: light-dark(#be123c, #ad1742);
   --al-danger-fg: light-dark(#be123c, #fda4af);
   --al-danger-soft: light-dark(#fff1f2, #2d1419);
   --al-danger-line: light-dark(#fecdd3, #57202c);
@@ -46,12 +48,18 @@
   --al-silver-fg: light-dark(#3f3f46, #d4d4d8);
   --al-bronze: light-dark(#ffedd5, #3a2210);
   --al-bronze-fg: light-dark(#9a3412, #fdba74);
-  /* sidebar (always dark) */
-  --al-nav: #0f1014;
-  --al-nav-hover: #1c1d23;
-  --al-nav-active: #24252d;
-  --al-nav-fg: #c9c9d1;
-  --al-nav-fg-muted: #8a8a96;
+  --al-nav: light-dark(#fafbff, #151826);
+  --al-nav-hover: var(--al-hover);
+  --al-nav-active: var(--al-accent-soft);
+  --al-nav-fg: var(--al-fg-muted);
+  --al-nav-fg-muted: var(--al-fg-subtle);
+  --al-elevated: light-dark(#ffffff, #23283a);
+  --al-progress-track: light-dark(#e1e6f4, #363d55);
+  --al-progress-fill: light-dark(#554be4, #9c9bff);
+  --al-focus: var(--al-accent-fg);
+  --al-chart-easy: var(--al-success);
+  --al-chart-medium: var(--al-warning);
+  --al-chart-hard: var(--al-danger);
 }
 html[data-theme="light"] { color-scheme: light; }
 html[data-theme="dark"] { color-scheme: dark; }
@@ -82,6 +90,7 @@ html[data-theme="dark"] { color-scheme: dark; }
   --color-warning-soft: var(--al-warning-soft);
   --color-warning-line: var(--al-warning-line);
   --color-danger: var(--al-danger);
+  --color-danger-action: var(--al-danger-action);
   --color-danger-fg: var(--al-danger-fg);
   --color-danger-soft: var(--al-danger-soft);
   --color-danger-line: var(--al-danger-line);
@@ -99,15 +108,21 @@ html[data-theme="dark"] { color-scheme: dark; }
   --color-nav-active: var(--al-nav-active);
   --color-nav-fg: var(--al-nav-fg);
   --color-nav-fg-muted: var(--al-nav-fg-muted);
+  --color-elevated: var(--al-elevated);
+  --color-progress-track: var(--al-progress-track);
+  --color-progress-fill: var(--al-progress-fill);
+  --shadow-panel: 0 1px 2px rgb(19 28 62 / 0.05), 0 5px 18px -12px rgb(19 28 62 / 0.2);
   --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -6px rgb(0 0 0 / 0.18);
 }
 
-body { background: var(--al-canvas); color: var(--al-fg); }
-dialog { background: var(--al-surface); color: var(--al-fg); }
-dialog::backdrop { background: rgb(9 9 11 / 0.45); }
-::selection { background: color-mix(in srgb, var(--al-accent) 25%, transparent); }
-input[type="checkbox"], input[type="radio"] { accent-color: var(--al-accent); }
-:focus-visible { outline-color: var(--al-accent); }
+@layer base {
+  body { background: var(--al-canvas); color: var(--al-fg); }
+  dialog { background: var(--al-elevated); color: var(--al-fg); }
+  dialog::backdrop { background: rgb(9 9 11 / 0.45); }
+  ::selection { background: color-mix(in srgb, var(--al-accent) 25%, transparent); }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--al-accent); }
+  :focus-visible { outline-color: var(--al-focus); }
+}
 
 @keyframes al-pop-in { from { opacity: 0; transform: translateY(-2px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes al-fade-in { from { opacity: 0; } to { opacity: 1; } }

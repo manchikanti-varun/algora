@@ -10,7 +10,7 @@ import { Button, ButtonLink, fmtTime, Notice, Popover, Spinner, timeAgo, useToas
  * verification). This file only displays state and sends the one "request an update" call. Reloading or switching pages
  * never contacts LeetCode: polling reads Algora's own database through /leetcode/sync-status.
  */
-export interface LinkView { state: 'LINKED' | 'UNLINKED'; username: string | null; current: { username: string; linkedAt: string | null } | null; countsEvidence: boolean; consentedAt?: string | null }
+export interface LinkView { state: 'LINKED' | 'UNLINKED' | 'CONSENT_WITHDRAWN'; username: string | null; current: { username: string; linkedAt: string | null } | null; countsEvidence: boolean; consentedAt?: string | null }
 export interface JobInfo { id: string; status: 'QUEUED' | 'RUNNING'; trigger: string; attempts: number; enqueuedAt: string; runAfter: string; startedAt: string | null; delayed: boolean }
 export interface SyncView {
   serverTime: string; syncEnabled: boolean; paused?: boolean; coverage?: 'FULL' | 'REDUCED' | null;
@@ -30,7 +30,7 @@ interface Ctx {
 const SyncCtx = createContext<Ctx | null>(null);
 export const useSync = () => { const c = useContext(SyncCtx); if (!c) throw new Error('useSync outside SyncProvider'); return c; };
 
-const POLL_ACTIVE_MS = 4_000;
+const POLL_ACTIVE_MS = 5_000;
 const POLL_IDLE_MS = 60_000;
 export const mmss = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 const verifiedText = (n: number) => (n > 0 ? `${n} new ${n === 1 ? 'problem' : 'problems'} verified` : 'No new verified problems');
@@ -42,11 +42,15 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [requesting, setRequesting] = useState(false);
   const [version, setVersion] = useState(0);
   const toast = useToast();
+  // Keep notifications out of effect dependencies: a new toast object must never restart the status loop.
+  const toastRef = useRef(toast);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
   const prev = useRef<{ active: boolean; success: string | null } | null>(null);
   const requestedByMe = useRef(false);
 
   const apply = useCallback((v: SyncView) => {
-    setView(v); setSkew(new Date(v.serverTime).getTime() - Date.now());
+    const toast = toastRef.current;
+    setView(v); setNow(Date.now()); setSkew(new Date(v.serverTime).getTime() - Date.now());
     const before = prev.current;
     if (before?.active && !v.job) {
       const ok = v.lastJob?.status === 'SUCCEEDED';
@@ -58,42 +62,115 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       setVersion((n) => n + 1);
     }
     prev.current = { active: !!v.job, success: v.lastSuccessAt };
-  }, [toast]);
+  }, []);
 
-  const refresh = useCallback(async () => {
-    try { apply(await api<SyncView>('/leetcode/sync-status')); } catch { /* pages show their own errors */ }
-  }, [apply]);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  const busy = !!view?.job;
+  const revision = useRef(0);
+  const submitInFlight = useRef(false);
+  const mounted = useRef(false);
+  const refreshStatus = useRef<() => Promise<void>>(async () => {});
+  const refresh = useCallback(() => refreshStatus.current(), []);
+
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') void refresh(); };
-    const t = setInterval(tick, busy ? POLL_ACTIVE_MS : POLL_IDLE_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); }; // a status read, not an update request
-    document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
-  }, [busy, refresh]);
+    mounted.current = true;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pending: Promise<void> | undefined;
+    let nextAt = 0;
+    let blockedUntil = 0;
+    let failures = 0;
+
+    function schedule() {
+      clearTimeout(timer);
+      if (stopped || document.hidden || pending) return;
+      timer = setTimeout(() => { void read(); }, Math.min(2_147_483_647, Math.max(0, nextAt - Date.now())));
+    }
+
+    function read(force = false): Promise<void> {
+      if (pending) return pending;
+      if (stopped || document.hidden) return Promise.resolve();
+      if (submitInFlight.current) {
+        nextAt = Math.max(nextAt, Date.now() + POLL_ACTIVE_MS);
+        schedule();
+        return Promise.resolve();
+      }
+      if (Date.now() < (force ? blockedUntil : nextAt)) {
+        schedule();
+        return Promise.resolve();
+      }
+      const requestVersion = revision.current;
+      pending = api<SyncView>('/leetcode/sync-status').then((status) => {
+        if (stopped) return;
+        if (requestVersion === revision.current) apply(status);
+        failures = 0;
+        blockedUntil = 0;
+        nextAt = Date.now() + (requestVersion !== revision.current || status.job ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+      }).catch((error: unknown) => {
+        if (stopped) return;
+        failures++;
+        const delay = Math.min(120_000, 5_000 * 2 ** Math.min(failures - 1, 5));
+        blockedUntil = Date.now() + (error instanceof ApiError && error.status === 429
+          ? Math.max(delay, error.retryAfterMs ?? POLL_IDLE_MS) : delay);
+        nextAt = blockedUntil;
+      }).finally(() => {
+        pending = undefined;
+        schedule();
+      });
+      return pending;
+    }
+
+    function onVisibility() {
+      if (document.hidden) clearTimeout(timer);
+      else void read();
+    }
+
+    refreshStatus.current = () => read(true);
+    document.addEventListener('visibilitychange', onVisibility);
+    void read();
+    return () => {
+      stopped = true;
+      mounted.current = false;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+      refreshStatus.current = async () => {};
+    };
+  }, [apply]);
+
+  useEffect(() => {
+    if (!view?.nextManualAt) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [view?.nextManualAt]);
+  const busy = !!view?.job;
 
   const cooldown = view?.nextManualAt ? Math.max(0, Math.ceil((new Date(view.nextManualAt).getTime() - (now + skew)) / 1000)) : 0;
 
   const request = useCallback(async () => {
-    if (requesting) return;
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
+    revision.current++;
     setRequesting(true);
     try {
       const r = await api<{ accepted: boolean; created?: boolean; sync: SyncView; outcome?: { message?: string } }>('/leetcode/request-sync', { method: 'POST', body: {} });
+      if (!mounted.current) return;
       requestedByMe.current = true;
       apply(r.sync);
       if (r.accepted === false) { requestedByMe.current = false; toast.info('Progress updates are unavailable right now.'); }
       else toast.info(r.created === false ? 'An update is already queued.' : 'Update queued. Your progress will refresh when it finishes.');
     } catch (e) {
+      if (!mounted.current) return;
       if (e instanceof ApiError && e.status === 429) {
         const d = e.details as { sync?: SyncView; retryAfterSec?: number } | undefined;
         if (d?.sync) apply(d.sync);
         toast.info(`Next update available in ${mmss(d?.retryAfterSec ?? 60)}.`);
       } else toast.error('Unable to update progress. Please try again later.');
-    } finally { setRequesting(false); }
-  }, [apply, requesting, toast]);
+    } finally {
+      submitInFlight.current = false;
+      if (mounted.current) {
+        setRequesting(false);
+        void refresh();
+      }
+    }
+  }, [apply, refresh, toast]);
 
   return <SyncCtx.Provider value={{ view, cooldown, busy, requesting, version, request, refresh }}>{children}</SyncCtx.Provider>;
 }
@@ -115,12 +192,13 @@ export function UpdateProgress() {
   const { view, cooldown, requesting, request } = useSync();
   if (!view) return null;
   if (!view.syncEnabled) return <span className="hidden text-xs text-fg-subtle sm:inline">Progress updates unavailable</span>;
+  if (view.link.state === 'CONSENT_WITHDRAWN') return <ButtonLink href="/student/profile#connected-accounts" variant="secondary" size="sm" icon={<Link2 size={14} aria-hidden />}>Review account</ButtonLink>;
   if (view.link.state !== 'LINKED') return <ButtonLink href="/student/profile#connected-accounts" variant="secondary" size="sm" icon={<Link2 size={14} aria-hidden />}>Connect LeetCode</ButtonLink>;
   if (view.paused) return <span className="text-xs text-fg-subtle">Updates paused</span>;
   const s = controlState(view, cooldown, requesting);
   return (
     <div className="flex items-center">
-      <Button variant="secondary" size="sm" disabled={s.disabled} onClick={() => void request()} aria-live="polite"
+      <Button variant="secondary" size="sm" disabled={s.disabled} onClick={() => void request()}
         icon={s.spin ? <Spinner /> : s.clock ? <Clock size={14} aria-hidden /> : <RefreshCw size={14} aria-hidden />}
         className="rounded-r-none" title={s.label}>
         <span className="hidden sm:inline">{s.label}</span><span className="sm:hidden">{s.short}</span>
@@ -151,12 +229,10 @@ function ProgressDetails({ view, cooldown }: { view: SyncView; cooldown: number 
 /** One quiet line for the home page. Not a second control: it only describes the current state. */
 export function ProgressStatusLine() {
   const { view } = useSync();
-  if (!view || !view.syncEnabled || view.paused || view.link.state !== 'LINKED') return null;
-  const parts = [
-    view.job ? (view.job.status === 'RUNNING' ? 'Updating your progress…' : 'Update queued') : `Progress last updated ${timeAgo(view.lastSuccessAt)}`,
-    !view.job && view.nextAutoSyncAt ? `next automatic update at ${fmtTime(view.nextAutoSyncAt)}` : null,
-  ].filter(Boolean);
-  return <p className="text-[13px] text-fg-subtle" aria-live="polite">{parts.join(' · ')}</p>;
+  if (!view || view.link.state !== 'LINKED') return null;
+  const text = view.job ? (view.job.status === 'RUNNING' ? 'Updating progress…' : 'Update queued')
+    : view.lastSuccessAt ? `Last updated ${timeAgo(view.lastSuccessAt)}` : 'No progress updates yet';
+  return <p className="mt-3 text-xs text-fg-subtle" aria-live="polite">{text}</p>;
 }
 
 /**
@@ -168,6 +244,7 @@ export function ProgressNotices() {
   if (!view) return null;
   const out: ReactNode[] = [];
   if (!view.syncEnabled) out.push(<Notice key="off" tone="info" title="Progress updates are not available yet">Keep solving your assigned problems on LeetCode. They will be verified once updates are turned on. Problems that are not verified yet are not marked as unsolved.</Notice>);
+  else if (view.link.state === 'CONSENT_WITHDRAWN') out.push(<Notice key="consent" tone="info" title="You have stopped sharing submissions" action={<ButtonLink href="/student/profile#connected-accounts" size="sm" variant="secondary">Review account</ButtonLink>}>Algora is not reading your LeetCode account. Verified problems stay counted.</Notice>);
   else if (view.link.state !== 'LINKED') out.push(<Notice key="link" tone="warn" title="Connect your LeetCode account" action={<ButtonLink href="/student/profile#connected-accounts" size="sm">Connect</ButtonLink>}>Algora verifies problems from the accepted submissions on your LeetCode account.</Notice>);
   else if (view.paused) out.push(<Notice key="paused" tone="info" title="Progress updates are paused">Your verified progress is unchanged. New solves will be checked when updates resume.</Notice>);
   else {

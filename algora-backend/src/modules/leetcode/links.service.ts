@@ -1,7 +1,7 @@
 import type { ClientSession, Types } from 'mongoose';
 import { badRequest, conflict } from '../../lib/errors';
 import { maybeTransaction } from '../../lib/lease';
-import { LeetcodeLink, linkFlags, User, type LinkStatus } from '../../models';
+import { LeetcodeLink, linkFlags, StudentRequest, User, type LinkStatus } from '../../models';
 import { clearBoardCache } from '../progress/progress.service';
 import { cancelJobsForStudent } from './sync-jobs';
 
@@ -56,14 +56,14 @@ export interface LinkOptions {
  * A change ends the previous link immediately (it stops being synchronized and stops counting) and creates a NEW link, so
  * evidence is never transferred to the new account.
  */
-export async function linkAccount(studentId: Id, rawUsername: string, opts: LinkOptions = {}) {
+export async function linkAccount(studentId: Id, rawUsername: string, opts: LinkOptions = {}, transaction?: ClientSession) {
   const username = normalizeUsername(rawUsername);
   if (!USERNAME.test(username)) throw badRequest('Invalid LeetCode username');
   const norm = username.toLowerCase();
   try {
-    const result = await maybeTransaction(async (session) => {
+    const write = async (session?: ClientSession) => {
       const current = await LeetcodeLink.findOne({ studentId, isCurrent: true }).session(session ?? null);
-      if (current?.usernameNorm === norm) throw conflict('This account is already linked to your profile', 'ALREADY_LINKED');
+      if (current?.usernameNorm === norm && current.consentedAt) throw conflict('This account is already linked to your profile', 'ALREADY_LINKED');
       const consentedAt = opts.consent ? new Date() : current?.consentedAt;
       if (!consentedAt) throw conflict('Consent is required to link a LeetCode account', 'CONSENT_REQUIRED');
       if (!session && await LeetcodeLink.exists({ usernameNorm: norm, isActive: true })) {
@@ -90,8 +90,9 @@ export async function linkAccount(studentId: Id, rawUsername: string, opts: Link
       await resetSyncState(studentId, username, session);
       await cancelJobsForStudent(studentId, 'LINK_CHANGED', session);
       return link;
-    });
-    clearBoardCache();
+    };
+    const result = transaction ? await write(transaction) : await maybeTransaction(write);
+    if (!transaction) clearBoardCache();
     return result;
   } catch (e: any) {
     if (e?.code === 11000) throw conflict('That LeetCode username is already linked to another student', 'USERNAME_IN_USE');
@@ -100,36 +101,45 @@ export async function linkAccount(studentId: Id, rawUsername: string, opts: Link
 }
 
 /** Student withdraws their link, or an administrator revokes it. Evidence is kept; it stops counting. */
-export async function revokeLinks(studentId: Id, reason: string, by?: Id) {
-  const count = await maybeTransaction(async (session) => {
+export async function revokeLinks(studentId: Id, reason: string, by?: Id, transaction?: ClientSession) {
+  const write = async (session?: ClientSession) => {
     const revoked = await LeetcodeLink.updateMany({ studentId, isActive: true }, {
       $set: { status: 'REVOKED', ...linkFlags('REVOKED'), endedAt: new Date(), endedReason: reason, ...(by ? { endedBy: by } : {}) },
     }, { session });
+    await StudentRequest.updateMany({ studentId, kind: 'LEETCODE', status: 'PENDING', ...(transaction ? { linkAction: { $ne: 'UNLINK' } } : {}) }, { $set: { status: 'CANCELLED', reviewedAt: new Date() } }, { session });
     await resetSyncState(studentId, null, session);
     await cancelJobsForStudent(studentId, 'LINK_REVOKED', session);
     return revoked.modifiedCount;
-  });
-  clearBoardCache();
+  };
+  const count = transaction ? await write(transaction) : await maybeTransaction(write);
+  if (!transaction) clearBoardCache();
   return count;
 }
 
-/**
- * Trainer/Super Admin correction. Uses the student's standing consent; if they never consented, the correction is refused
- * and the student must link themselves. Audited by the caller.
- */
-export async function correctUsername(studentId: Id, username: string, by: Id) {
-  return linkAccount(studentId, username, { by, reason: 'TRAINER_CORRECTED_USERNAME' });
+/** Stop verification immediately while keeping the approved association for administrative review. */
+export async function withdrawConsent(studentId: Id, transaction?: ClientSession) {
+  const write = async (session?: ClientSession) => {
+    await LeetcodeLink.updateMany({ studentId, isActive: true }, { $unset: { consentedAt: 1 } }, { session });
+    await StudentRequest.updateMany({ studentId, kind: 'LEETCODE', status: 'PENDING', linkAction: { $ne: 'UNLINK' } },
+      { $set: { status: 'CANCELLED', reviewedAt: new Date() } }, { session });
+    await resetSyncState(studentId, null, session);
+    await cancelJobsForStudent(studentId, 'CONSENT_WITHDRAWN', session);
+  };
+  if (transaction) await write(transaction);
+  else {
+    await maybeTransaction(write);
+    clearBoardCache();
+  }
 }
 
-/** What the UI needs. There is no challenge, request or verification step in this model. */
 export async function linkView(studentId: Id) {
   const current = await LeetcodeLink.findOne({ studentId, isCurrent: true }).lean();
   const linked = !!current?.consentedAt && (current.status === 'LINKED' || current.status === 'VERIFIED');
-  const state: LinkState = linked ? 'LINKED' : 'UNLINKED';
+  const state = linked ? 'LINKED' : current ? 'CONSENT_WITHDRAWN' : 'UNLINKED';
   return {
     state,
-    username: linked ? current.username : null,
-    current: linked ? { username: current.username, linkedAt: current.linkedAt ?? current.createdAt ?? null } : null,
+    username: current?.username ?? null,
+    current: current ? { username: current.username, linkedAt: current.linkedAt ?? current.createdAt ?? null } : null,
     countsEvidence: linked,
     consentedAt: linked ? current.consentedAt : null,
   };

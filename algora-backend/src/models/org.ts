@@ -8,6 +8,11 @@ export const College = model(
     {
       name: { type: String, required: true, trim: true },
       nameKey: { type: String, required: true, unique: true },
+      code: { type: String, unique: true, sparse: true },
+      aliases: { type: [String], default: undefined },
+      searchKeys: { type: [String], default: undefined, unique: true, sparse: true },
+      mergedInto: oid('College', false),
+      selectionVersion: Number,
       status: { type: String, enum: ['ACTIVE', 'ARCHIVED'], default: 'ACTIVE' },
     },
     { timestamps: true },
@@ -109,3 +114,6 @@ pendingSchema.index(
 );
 pendingSchema.index({ rollNumber: 1, status: 1 });
 export const PendingEnrollment = model('PendingEnrollment', pendingSchema, 'pending_enrollments');
+
+/** Serialize changes that claim or reserve a roll number across backend instances. */
+export const RollLock = model('RollLock', new Schema({ _id: String, revision: Number }), 'roll_locks');

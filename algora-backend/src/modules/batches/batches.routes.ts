@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
+import { activeCollege, collegeLabel } from '../colleges/registry';
 import { badRequest, forbidden, notFound, parse } from '../../lib/errors';
 import { parseCsv } from '../../lib/csv';
 import { normalizeRoll } from '../../lib/normalize';
@@ -11,7 +12,7 @@ import {
 } from '../../models';
 import { audit } from '../audit/audit';
 import { loadBatchFor, trainerBatchIds } from '../access';
-import { enrollByRoll, resolveCollege } from './enrollment.service';
+import { enrollByRoll } from './enrollment.service';
 
 export const batchesRouter = Router();
 batchesRouter.use(requireAuth, requireRole('SUPER_ADMIN', 'TRAINER'));
@@ -20,7 +21,7 @@ const rollSchema = z.string().trim().regex(/^[A-Za-z0-9]{10}$/, 'Roll number mus
 const batchFields = {
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000),
-  college: z.string().trim().min(2).max(120),
+  collegeId: objectId,
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),
   status: z.enum(['DRAFT', 'ACTIVE', 'COMPLETED', 'ARCHIVED']),
@@ -38,12 +39,12 @@ const scheduleSchema = z.object({
 // ---------- Batches (independent of courses) ----------
 batchesRouter.post('/', async (req, res) => {
   const b = parse(
-    z.object({ name: batchFields.name, description: batchFields.description.default(''), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.default('DRAFT'), leetcodeSchedule: scheduleSchema.optional() })
-      .refine(dateOrder, 'endDate must not be before startDate'),
+    z.object({ name: batchFields.name, description: batchFields.description.default(''), collegeId: batchFields.collegeId.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.default('DRAFT'), leetcodeSchedule: scheduleSchema.optional() })
+      .strict().refine(dateOrder, 'endDate must not be before startDate'),
     req.body,
   );
-  const { college, ...rest } = b;
-  const batch = await Batch.create({ ...rest, collegeId: college ? (await resolveCollege(college))._id : undefined, createdBy: req.user!._id });
+  const { collegeId, ...rest } = b;
+  const batch = await Batch.create({ ...rest, collegeId: collegeId ? (await activeCollege(collegeId))._id : undefined, createdBy: req.user!._id });
   if (req.user!.role === 'TRAINER') {
     await TrainerBatchAssignment.create({ trainerId: req.user!._id, batchId: batch._id, assignedBy: req.user!._id });
   }
@@ -57,7 +58,7 @@ batchesRouter.get('/', async (req, res) => {
   if (req.user!.role === 'TRAINER') filter._id = { $in: await trainerBatchIds(req.user!) };
   if (q.q) filter.name = { $regex: q.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
   const [items, total] = await Promise.all([
-    Batch.find(filter).populate('collegeId', 'name').sort({ createdAt: -1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
+    Batch.find(filter).populate('collegeId', 'name code').sort({ createdAt: -1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
     Batch.countDocuments(filter),
   ]);
   const ids = items.map((b) => b._id);
@@ -67,7 +68,7 @@ batchesRouter.get('/', async (req, res) => {
     PendingEnrollment.aggregate([{ $match: { batchId: { $in: ids }, status: 'PENDING' } }, { $group: { _id: '$batchId', n: { $sum: 1 } } }]),
   ]);
   const n = (arr: any[], id: unknown) => arr.find((x) => String(x._id) === String(id))?.n ?? 0;
-  res.json({ items: items.map((b) => ({ ...b, college: (b.collegeId as any)?.name ?? null, collegeId: (b.collegeId as any)?._id ?? null, studentCount: n(st, b._id), courseCount: n(co, b._id), pendingCount: n(pe, b._id) })), total, page: q.page, pageSize: q.pageSize });
+  res.json({ items: items.map((b) => ({ ...b, college: collegeLabel(b.collegeId as any), collegeId: (b.collegeId as any)?._id ?? null, studentCount: n(st, b._id), courseCount: n(co, b._id), pendingCount: n(pe, b._id) })), total, page: q.page, pageSize: q.pageSize });
 });
 
 batchesRouter.get('/:id', async (req, res) => {
@@ -77,24 +78,24 @@ batchesRouter.get('/:id', async (req, res) => {
     Enrollment.countDocuments({ batchId: batch._id, status: 'ACTIVE' }),
     BatchCourse.countDocuments({ batchId: batch._id, status: 'ACTIVE' }),
   ]);
-  const college = batch.collegeId ? await (await import('../../models/index.js')).College.findById(batch.collegeId, 'name').lean() : null;
-  res.json({ ...batch.toObject(), college: college?.name ?? null, trainers: trainers.map((t) => t.trainerId), studentCount, courseCount });
+  const college = batch.collegeId ? await (await import('../../models/index.js')).College.findById(batch.collegeId, 'name code').lean() : null;
+  res.json({ ...batch.toObject(), college: collegeLabel(college), trainers: trainers.map((t) => t.trainerId), studentCount, courseCount });
 });
 
 batchesRouter.patch('/:id', async (req, res) => {
   const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
   const b = parse(
-    z.object({ name: batchFields.name.optional(), description: batchFields.description.optional(), college: batchFields.college.optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.optional(), leetcodeSchedule: scheduleSchema.nullable().optional() }).strict(),
+    z.object({ name: batchFields.name.optional(), description: batchFields.description.optional(), collegeId: batchFields.collegeId.nullable().optional(), startDate: batchFields.startDate.optional(), endDate: batchFields.endDate.optional(), status: batchFields.status.optional(), leetcodeSchedule: scheduleSchema.nullable().optional() }).strict(),
     req.body,
   );
   if (batch.status === 'ARCHIVED' && b.status === undefined) throw forbidden('Batch is archived', 'BATCH_ARCHIVED');
   const merged = { startDate: b.startDate ?? batch.startDate ?? undefined, endDate: b.endDate ?? batch.endDate ?? undefined };
   if (!dateOrder(merged)) throw badRequest('endDate must not be before startDate');
-  const { college, ...rest } = b;
+  const { collegeId, ...rest } = b;
   Object.assign(batch, rest);
-  if (college) batch.collegeId = (await resolveCollege(college))._id;
+  if (collegeId !== undefined && collegeId !== String(batch.collegeId)) batch.set('collegeId', collegeId ? (await activeCollege(collegeId))._id : undefined);
   await batch.save();
-  await audit(req, 'batch.update', { type: 'Batch', id: batch._id }, rest);
+  await audit(req, 'batch.update', { type: 'Batch', id: batch._id }, { ...rest, ...(collegeId !== undefined ? { collegeId } : {}) });
   res.json(batch);
 });
 

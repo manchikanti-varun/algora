@@ -1,8 +1,10 @@
+import { lockRolls } from '../batches/roll-lock';
 import { env } from '../../config/env';
 import { conflict, forbidden } from '../../lib/errors';
-import { nameKey, normalizeEmail, safeEqual, sha256 } from '../../lib/normalize';
+import { normalizeEmail, safeEqual, sha256 } from '../../lib/normalize';
+import { activeCollege } from '../colleges/registry';
 import { maybeTransaction } from '../../lib/lease';
-import { College, Enrollment, LeetcodeLink, linkFlags, PendingEnrollment, TrainerRequest, User, type UserDoc } from '../../models';
+import { Enrollment, LeetcodeLink, linkFlags, PendingEnrollment, TrainerRequest, User, type UserDoc } from '../../models';
 import { normalizeUsername } from '../leetcode/links.service';
 import type { GoogleIdentity } from './google';
 import { loginOrCreateSuperAdmin } from './superAdmin';
@@ -57,34 +59,40 @@ export async function loginWithGoogle(id: GoogleIdentity): Promise<LoginResult> 
 }
 
 export interface StudentInput {
-  firstName: string; lastName: string; rollNumber: string; college: string;
+  firstName: string; lastName: string; rollNumber: string; collegeId: string;
   mobile: string; leetcodeUsername: string; claimCode?: string; leetcodeConsent: true;
 }
 
 export async function registerStudent(id: GoogleIdentity, input: StudentInput) {
   if (id.email === env.SUPER_ADMIN_EMAIL) throw forbidden('This account cannot register as a student', 'ACCOUNT_CONFLICT');
-  if (await User.exists({ googleSub: id.sub })) throw conflict('Already registered', 'ALREADY_REGISTERED');
-  if (await User.exists({ email: id.email })) throw conflict('Email already registered', 'IDENTITY_CONFLICT');
-  if (await TrainerRequest.exists({ googleSub: id.sub })) throw conflict('This account has a trainer access request', 'ACCOUNT_CONFLICT');
-  if (await User.exists({ rollNumber: input.rollNumber })) throw conflict('Roll number already registered', 'ROLL_NUMBER_TAKEN');
   const leetcodeUsername = normalizeUsername(input.leetcodeUsername);
-  if (await LeetcodeLink.exists({ usernameNorm: leetcodeUsername.toLowerCase(), isActive: true })) throw conflict('That LeetCode username is already linked to another student', 'USERNAME_IN_USE');
+  // Independent checks share one round-trip window. Unique indexes still arbitrate concurrent registrations.
+  const [existing, trainer, usernameTaken] = await Promise.all([
+    User.find({ $or: [{ googleSub: id.sub }, { email: id.email }, { rollNumber: input.rollNumber }] }, 'googleSub email rollNumber').lean(),
+    TrainerRequest.exists({ googleSub: id.sub }),
+    LeetcodeLink.exists({ usernameNorm: leetcodeUsername.toLowerCase(), isActive: true }),
+  ]);
+  if (existing.some((user) => user.googleSub === id.sub)) throw conflict('Already registered', 'ALREADY_REGISTERED');
+  if (existing.some((user) => user.email === id.email)) throw conflict('Email already registered', 'IDENTITY_CONFLICT');
+  if (trainer) throw conflict('This account has a trainer access request', 'ACCOUNT_CONFLICT');
+  if (existing.some((user) => user.rollNumber === input.rollNumber)) throw conflict('Roll number already registered', 'ROLL_NUMBER_TAKEN');
+  if (usernameTaken) throw conflict('That LeetCode username is already linked to another student', 'USERNAME_IN_USE');
 
-  // A roll number reserved by a pending enrollment can only be claimed by the matching verified email or by the claim code.
-  const pendings = await PendingEnrollment.find({ rollNumber: input.rollNumber, status: 'PENDING' });
+  // A reserved roll number can only be claimed by the matching verified email or claim code.
   const codeHash = input.claimCode ? sha256(input.claimCode) : null;
-  const authorised = pendings.filter((p) => (p.email && p.email === normalizeEmail(id.email)) || (codeHash && safeEqual(p.claimCodeHash, codeHash)));
-  if (pendings.length && !authorised.length) {
-    throw forbidden('This roll number is reserved. Use the claim code from your trainer or sign in with the email they registered.', 'ROLL_NUMBER_RESERVED');
-  }
-  const key = nameKey(input.college);
-  const college = await College.findOneAndUpdate({ nameKey: key }, { $setOnInsert: { name: input.college.trim(), nameKey: key } }, { upsert: true, returnDocument: 'after' });
-
   // One transaction: user, LeetCode link request, claims and enrollments succeed or fail together.
   // Each claim is an atomic PENDING -> CLAIMED transition, so a cancelled or already-claimed reservation cannot be used.
   let enrolled = 0;
   const user = await maybeTransaction(async (session) => {
     enrolled = 0;
+    await lockRolls([input.rollNumber], session);
+    const pendings = await PendingEnrollment.find({ rollNumber: input.rollNumber, status: 'PENDING' }).session(session ?? null);
+    const authorised = pendings.filter((p) => (p.email && p.email === normalizeEmail(id.email)) || (codeHash && safeEqual(p.claimCodeHash, codeHash)));
+    if (pendings.length && !authorised.length) {
+      throw forbidden('This roll number is reserved. Use the claim code from your trainer or sign in with the email they registered.', 'ROLL_NUMBER_RESERVED');
+    }
+
+    const college = await activeCollege(input.collegeId, session, true);
     const [u] = await User.create([{
       googleSub: id.sub, email: id.email, role: 'STUDENT', firstName: input.firstName, lastName: input.lastName,
       fullName: `${input.firstName} ${input.lastName}`, picture: id.picture, rollNumber: input.rollNumber, collegeId: college._id,

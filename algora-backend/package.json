@@ -17,6 +17,7 @@
     "catalog:import:dry-run": "tsx scripts/import-leetcode-catalog.ts --dry-run",
     "catalog:import": "tsx scripts/import-leetcode-catalog.ts --apply",
     "migrate:problem-catalog": "tsx scripts/migrations/migrate-problem-catalog.ts",
+    "migrate:colleges": "tsx scripts/migrations/reconcile-colleges.ts",
     "migrate:leetcode-links": "tsx scripts/migrations/migrate-leetcode-links.ts",
     "start:prod-local": "node --env-file=.env.production dist/server.js"
   },

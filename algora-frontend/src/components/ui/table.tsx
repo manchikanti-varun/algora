@@ -67,14 +67,14 @@ export function DataTable<T>({ columns, rows, rowKey, empty, sort, onSort, rowCl
         </div>
       )}
       {!rows.length ? (empty ?? <EmptyState title="Nothing here yet" compact />) : (
-        <div className="relative overflow-x-auto">
+        <div className="relative overflow-x-auto focus-visible:outline-2 focus-visible:-outline-offset-2" role="region" aria-label={caption ?? 'Table'} tabIndex={0}>
           <table className="min-w-full text-sm">
             {caption && <caption className="sr-only">{caption}</caption>}
             <thead>
-              <tr className="border-b border-line">
+              <tr className="border-b border-line bg-subtle">
                 {cols.map((c) => (
                   <th key={c.key} scope="col" aria-sort={sort?.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                    className={cx('whitespace-nowrap px-4 py-2 text-left text-xs font-medium text-fg-subtle', c.align === 'right' && 'text-right', c.className)}>
+                    className={cx('whitespace-nowrap px-4 py-2.5 text-left text-xs font-semibold text-fg-muted', c.align === 'right' && 'text-right', c.className)}>
                     {c.sortable && onSort
                       ? <button type="button" className="inline-flex items-center gap-1 rounded hover:text-fg" onClick={() => onSort(c.key)}>
                         {c.header}{sort?.key === c.key && (sort.dir === 'asc' ? <ArrowUp size={12} aria-hidden /> : <ArrowDown size={12} aria-hidden />)}
@@ -87,7 +87,7 @@ export function DataTable<T>({ columns, rows, rowKey, empty, sort, onSort, rowCl
               {rows.map((r) => (
                 <tr key={rowKey(r)} onClick={onRowClick ? (e) => { if ((e.target as HTMLElement).closest('a,button,input,select,label,[role="menuitem"]')) return; onRowClick(r); } : undefined}
                   className={cx('border-b border-line last:border-0 transition-colors hover:bg-hover/60', onRowClick && 'cursor-pointer', rowClassName?.(r))}>
-                  {cols.map((c) => <td key={c.key} className={cx('whitespace-nowrap px-4 py-2.5 text-fg', c.align === 'right' && 'text-right', c.className)}>{c.cell(r)}</td>)}
+                  {cols.map((c) => <td key={c.key} className={cx('whitespace-nowrap px-4 py-3 text-fg', c.align === 'right' && 'text-right', c.className)}>{c.cell(r)}</td>)}
                 </tr>
               ))}
             </tbody>

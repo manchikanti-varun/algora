@@ -14,7 +14,7 @@ type SortKey = 'title' | 'first' | 'latest';
 export default function Page() {
   const { version } = useSync();
   const dash = useStudentDashboard();
-  const p = useApi<{ history: Hist[] }>(dash.selectedId ? `/student/progress${qs({ batchCourseId: dash.selectedId, v: version })}` : null);
+  const p = useApi<{ history: Hist[] }>(dash.selectedId ? `/student/progress${qs({ batchCourseId: dash.selectedId, view: 'history', v: version })}` : null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'first', dir: 'desc' });
   const [page, setPage] = useState(1);
   const history = p.data?.history;
@@ -39,7 +39,11 @@ export default function Page() {
   return (
     <div className="space-y-6">
       <PageHeader title="Progress" subtitle={`${d.selected.courseTitle} · ${d.selected.batchName}`} actions={<ContextPicker contexts={d.contexts} value={dash.selectedId} onChange={dash.choose} />} />
-      <div className="grid gap-6 lg:grid-cols-3">
+      <Card title="Overall completion" tone="accent">
+        <p className="mb-2 text-sm text-fg-muted">{d.summary?.verifiedSolved ?? 0} of {d.summary?.accessibleProblems ?? 0} problems verified</p>
+        <ProgressBar value={d.summary?.completionPct ?? null} label="Overall completion" />
+      </Card>
+      <div className="grid items-start gap-5 lg:grid-cols-3">
         <Card title="By difficulty">
           {d.difficulty ? (
             <div className="space-y-4">{(['EASY', 'MEDIUM', 'HARD'] as const).map((k) => (
@@ -59,7 +63,7 @@ export default function Page() {
           )}
         </Card>
       </div>
-      <Card title="Verified each week" description="Counted by the date Algora first verified each problem, across all your courses. Past ranks are not shown because Algora does not store them.">
+      <Card title="Verified each week" description="Based on when Algora first verified each problem across your courses.">
         {!wk.length ? <EmptyState compact title="Nothing verified yet" body="Solve a problem on LeetCode, then use Update progress." />
           : <BarList items={wk.map(([k, n, cum]) => ({ key: k, label: `Week of ${fmtDate(k)}`, value: n, sub: `${cum} in total` }))} format={(n) => `+${n}`} />}
       </Card>

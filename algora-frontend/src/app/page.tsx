@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ChevronRight, GraduationCap, ShieldCheck } from 'lucide-react';
+import { BrandMark } from '@/components/BrandMark';
 import { ThemePicker } from '@/components/ThemePicker';
 
 const choices = [
@@ -15,14 +16,14 @@ export default function Home() {
       <div className="absolute right-4 top-4"><ThemePicker /></div>
       <div className="w-full max-w-lg">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-xl bg-accent text-lg font-bold text-white" aria-hidden>A</div>
-          <h1 className="text-3xl font-semibold tracking-tight text-fg">Algora</h1>
+          <div className="mb-4"><BrandMark large /></div>
+          <h1 className="text-4xl font-semibold tracking-tight text-fg">Algora</h1>
           <p className="mt-2 text-sm text-fg-muted">Bootcamp courses, LeetCode practice and verified progress in one place.</p>
         </div>
         <ul className="grid gap-3">
           {choices.map(({ href, title, body, icon: Icon }) => (
             <li key={href}>
-              <Link href={href} className="group flex items-center gap-4 rounded-lg border border-line bg-surface p-4 transition-colors hover:border-line-strong hover:bg-hover">
+              <Link href={href} className="group flex items-center gap-4 rounded-xl border border-line bg-surface p-4 shadow-panel transition-colors hover:border-line-strong hover:bg-hover">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-accent-soft text-accent-fg"><Icon size={19} aria-hidden /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-fg">{title}</span>

@@ -14,7 +14,7 @@ export interface Overview {
   verification: { studentsInScope: number; verifiedLinks: number; coveragePct: number | null; linkStates: Record<string, number> };
   sync: { byStatus: Record<string, number>; lastJob: { status: string; at: string; counts?: Record<string, number> } | null };
   difficulty: Record<'EASY' | 'MEDIUM' | 'HARD', { solved: number; available: number }>;
-  batchComparison: { batchId: string; name: string; status: string; students: number; avgCompletionPct: number | null; verifiedCompletions: number }[];
+  batchComparison: { batchId: string; name: string; status: string; college?: string | null; courses?: string[]; students: number; avgCompletionPct: number | null; verifiedCompletions: number }[];
   courseCompletion: { courseId: string; title: string; rows: number; avgCompletionPct: number | null; completed: number }[];
   needsSupport: PerfRow[];
 }

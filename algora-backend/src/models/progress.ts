@@ -82,7 +82,7 @@ export const JobLease = model(
 /** Global rate-limit bucket (see lib/ratelimit.ts). */
 export const RateBucket = model(
   'RateBucket',
-  new Schema({ _id: String, tokens: Number, ts: Date, granted: Boolean }),
+  new Schema({ _id: String, tokens: Number, ts: Date, granted: Boolean, expiresAt: { type: Date, expires: 0 } }),
   'rate_buckets',
 );
 

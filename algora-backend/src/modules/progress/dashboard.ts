@@ -3,7 +3,7 @@ import { BatchCourse, SolveEvidence, User } from '../../models';
 import { countingSources, verifiedLinkIds } from '../leetcode/evidence.repository';
 import { linkView } from '../leetcode/links.service';
 import { studentContexts } from '../student/contexts';
-import { batchBoard, batchCourseBoard, cachedBoard, courseBoard, scopeProblems, scoreStudents, visibleContent } from './progress.service';
+import { batchBoard, batchCourseBoard, cachedBoard, scopeProblems, scoreStudents, visibleContent } from './progress.service';
 import { getScoring } from './scoring';
 
 export async function buildDashboard(studentId: Types.ObjectId, batchCourseId?: string) {
@@ -35,10 +35,7 @@ export async function buildDashboard(studentId: Types.ObjectId, batchCourseId?: 
       problems: c.problems.map((p) => ({ ...p, verified: score.solved.has(p.slug) })),
     };
   });
-  const [bcBoard, cBoard] = await Promise.all([
-    cachedBoard(`bc:${ctx.bc._id}`, () => batchCourseBoard(String(ctx.bc._id))),
-    cachedBoard(`c:${ctx.course._id}`, () => courseBoard(String(ctx.course._id))),
-  ]);
+  const bcBoard = await cachedBoard(`bc:${ctx.bc._id}`, () => batchCourseBoard(String(ctx.bc._id)));
   // Unranked until at least one problem is verified: a rank with zero verified evidence would misrepresent standing.
   const rankIn = (b: { rows: { studentId: string; rank: number; points: number }[] } | null) => { const r = b?.rows.find((x) => x.studentId === String(studentId)); return r && r.points > 0 ? r.rank : null; };
   return {
@@ -48,7 +45,7 @@ export async function buildDashboard(studentId: Types.ObjectId, batchCourseId?: 
     summary: {
       accessibleProblems: scope.size, verifiedSolved: score.solved.size,
       completionPct: scope.size ? Math.round((score.solved.size / scope.size) * 1000) / 10 : null, // null when nothing is unlocked
-      points: score.points, batchRank: rankIn(bcBoard), courseRank: cBoard?.scope.problems ? rankIn(cBoard) : null,
+      points: score.points, batchRank: rankIn(bcBoard),
       unlockedChapters: chapters.length, completedChapters: chapters.filter((c) => c.total > 0 && c.solved === c.total).length,
       scoring,
     },

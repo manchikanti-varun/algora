@@ -4,7 +4,7 @@ import { countingSources, verifiedLinkIds } from '../leetcode/evidence.repositor
 import { getScoring, type Scoring } from './scoring';
 
 type Diff = 'EASY' | 'MEDIUM' | 'HARD';
-export interface ScopeProblem { slug: string; difficulty: Diff; title: string }
+export interface ScopeProblem { slug: string; difficulty: Diff; title: string; url?: string }
 export interface ChapterInfo { chapterId: string; title: string; order: number; problems: ScopeProblem[] }
 
 /** Chapters and problems currently visible for a batch-course. Missing access record = hidden. Distinct by slug within each chapter. */
@@ -12,11 +12,16 @@ export async function visibleContent(batchCourseId: Types.ObjectId | string, cou
   const vis = await BatchChapterAccess.find({ batchCourseId, isVisible: true }, 'chapterId').lean();
   const chapters = await Chapter.find({ _id: { $in: vis.map((v) => v.chapterId) }, courseId, status: 'ACTIVE' }).sort({ order: 1 }).lean();
   const problems = await Problem.find({ chapterId: { $in: chapters.map((c) => c._id) }, status: 'ACTIVE' }).sort({ order: 1 }).lean();
+  const byChapter = new Map<string, Map<string, ScopeProblem>>();
+  for (const p of problems) {
+    const chapterId = String(p.chapterId);
+    let entries = byChapter.get(chapterId);
+    if (!entries) byChapter.set(chapterId, entries = new Map());
+    if (!entries.has(p.slug)) entries.set(p.slug, { slug: p.slug, difficulty: p.difficulty as Diff, title: p.title, url: p.url });
+  }
   return chapters.map((c) => {
-    const seen = new Set<string>();
-    const ps: ScopeProblem[] = [];
-    for (const p of problems) if (String(p.chapterId) === String(c._id) && !seen.has(p.slug)) { seen.add(p.slug); ps.push({ slug: p.slug, difficulty: p.difficulty as Diff, title: p.title }); }
-    return { chapterId: String(c._id), title: c.title, order: c.order, problems: ps };
+    const chapterId = String(c._id);
+    return { chapterId, title: c.title, order: c.order, problems: [...(byChapter.get(chapterId)?.values() ?? [])] };
   });
 }
 

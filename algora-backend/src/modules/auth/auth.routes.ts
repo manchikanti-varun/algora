@@ -1,11 +1,13 @@
+import { z } from 'zod';
+import { collegeLabel, collegeSearch } from '../colleges/registry';
 import { Router } from 'express';
 import { parse } from '../../lib/errors';
 import { audit } from '../audit/audit';
 import { requireAuth } from '../../middleware/auth';
 import { idTokenSchema, studentRegisterSchema } from './auth.schemas';
 import { loginWithGoogle, publicUser, registerStudent } from './auth.service';
-import { verifyGoogleIdToken } from './google';
-import { User } from '../../models';
+import { checkedGoogleIdentity } from './credential-guard';
+import { College, User } from '../../models';
 import { clearSessionCookie, csrfTokenFor, SESSION_COOKIE, setSessionCookie, signSession, verifySession } from './session';
 
 export const authRouter = Router();
@@ -16,9 +18,16 @@ function startSession(res: any, user: any) {
   return { user: publicUser(user), csrfToken: csrfTokenFor(token) };
 }
 
+authRouter.get('/colleges', async (req, res) => {
+  const { q } = parse(z.object({ q: z.string().trim().max(120).optional() }), req.query);
+  const items = await College.find({ status: 'ACTIVE', code: { $type: 'string' }, ...collegeSearch(q) }, 'name code')
+    .sort({ name: 1, _id: 1 }).limit(25).lean();
+  res.json({ items: items.map((college) => ({ _id: college._id, name: collegeLabel(college), code: college.code })) });
+});
+
 authRouter.post('/google', async (req, res) => {
   const { idToken } = parse(idTokenSchema, req.body);
-  const identity = await verifyGoogleIdToken(idToken);
+  const identity = await checkedGoogleIdentity(req, res, idToken, 'login');
   const r = await loginWithGoogle(identity);
   if (r.kind !== 'SESSION') return void res.json(r.kind === 'REGISTRATION_REQUIRED' ? { status: r.kind, profile: r.profile } : { status: r.status, reason: r.reason });
   await audit(req, 'auth.login', { type: 'User', id: r.user._id }, undefined, r.user);
@@ -27,7 +36,7 @@ authRouter.post('/google', async (req, res) => {
 
 authRouter.post('/register/student', async (req, res) => {
   const { idToken, ...input } = parse(studentRegisterSchema, req.body);
-  const identity = await verifyGoogleIdToken(idToken);
+  const identity = await checkedGoogleIdentity(req, res, idToken, 'registration');
   const { user, enrolledBatches } = await registerStudent(identity, input);
   await audit(req, 'student.register', { type: 'User', id: user._id }, { enrolledBatches }, user);
   res.status(201).json({ status: 'AUTHENTICATED', enrolledBatches, ...startSession(res, user) });

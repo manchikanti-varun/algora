@@ -40,15 +40,16 @@ function narrow(content: ChapterInfo[], f: Filters): ChapterInfo[] {
 
 const COUNTING = new Set(['LINKED', 'VERIFIED']);
 const linkStates = async (ids: Types.ObjectId[]) => {
-  const links = await LeetcodeLink.find({ studentId: { $in: ids }, isCurrent: true }, 'studentId status').lean();
-  return new Map(links.map((l) => [String(l.studentId), COUNTING.has(l.status) ? 'LINKED' : 'UNLINKED']));
+  const links = await LeetcodeLink.find({ studentId: { $in: ids }, isCurrent: true }, 'studentId status consentedAt').lean();
+  // Consent withdrawal stops verification immediately, so it must also stop counting as connected in analytics.
+  return new Map(links.map((l) => [String(l.studentId), COUNTING.has(l.status) && !!l.consentedAt ? 'LINKED' : 'UNLINKED']));
 };
 
 /**
  * One row per (student, batch-course). Ranking is competition ranking within the batch-course on the filtered problem set.
  * Every number comes from stored, verified evidence; nothing is extrapolated.
  */
-export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: PerfRow[]; contexts: { bc: any; batch: any; course: any; content: ChapterInfo[]; studentIds: Types.ObjectId[] }[] }> {
+export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: PerfRow[]; batches: Awaited<ReturnType<typeof scopedBatches>>; contexts: { bc: any; batch: any; course: any; content: ChapterInfo[]; studentIds: Types.ObjectId[] }[] }> {
   const batches = await scopedBatches(u, f);
   const bcs = await BatchCourse.find({ batchId: { $in: batches.map((b) => b._id) }, status: 'ACTIVE', ...(f.courseId ? { courseId: f.courseId } : {}) }).lean();
   const courses = new Map((await Course.find({ _id: { $in: bcs.map((b) => b.courseId) } }, 'title').lean()).map((c) => [String(c._id), c]));
@@ -98,7 +99,7 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
     .filter((r) => f.minPct === undefined || (r.completionPct ?? 0) >= f.minPct)
     .filter((r) => f.maxPct === undefined || (r.completionPct ?? 0) <= f.maxPct)
     .filter((r) => !f.collegeId || users.get(r.studentId)?.collegeId?.toString() === f.collegeId || batchMap.get(r.batchId)?.collegeId?.toString() === f.collegeId);
-  return { rows: out, contexts };
+  return { rows: out, contexts, batches };
 }
 
 function syncFlags(sync: any, job: any, linkState: string, now: Date, failed: Set<string>) {
@@ -109,16 +110,28 @@ function syncFlags(sync: any, job: any, linkState: string, now: Date, failed: Se
 const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
 
 export async function overview(u: UserDoc, f: Filters) {
-  const { rows, contexts } = await performanceRows(u, f);
-  const batches = await scopedBatches(u, f);
-  const studentIds = [...new Set(contexts.flatMap((c) => c.studentIds.map(String)))];
-  const ids = studentIds.map((i) => new Types.ObjectId(i));
-  const [pending, users, links] = await Promise.all([
-    PendingEnrollment.countDocuments({ batchId: { $in: batches.map((b) => b._id) }, status: 'PENDING' }),
-    User.find({ _id: { $in: ids } }, 'sync').lean(),
-    linkStates(ids),
+  const { rows, contexts, batches } = await performanceRows(u, f);
+  const batchIds = batches.map((batch) => batch._id);
+  const [pending, enrollments, batchColleges] = await Promise.all([
+    PendingEnrollment.countDocuments({ batchId: { $in: batchIds }, status: 'PENDING' }),
+    Enrollment.aggregate<{ _id: Types.ObjectId; students: Types.ObjectId[] }>([
+      { $match: { batchId: { $in: batchIds }, status: 'ACTIVE' } },
+      { $group: { _id: '$batchId', students: { $addToSet: '$studentId' } } },
+    ]),
+    College.find({ _id: { $in: batches.flatMap((batch) => batch.collegeId ? [batch.collegeId] : []) } }, 'name').lean(),
   ]);
-  const allEnrolled = (await Enrollment.distinct('studentId', { batchId: { $in: batches.map((b) => b._id) }, status: 'ACTIVE' })).length;
+  const ids = [...new Map(enrollments.flatMap((row) => row.students).map((id) => [String(id), id])).values()];
+  const [users, links] = await Promise.all([User.find({ _id: { $in: ids } }, 'sync').lean(), linkStates(ids)]);
+  const allEnrolled = ids.length;
+  const studentsByBatch = new Map(enrollments.map((row) => [String(row._id), row.students.length]));
+  const collegeNames = new Map(batchColleges.map((college) => [String(college._id), college.name]));
+  const coursesByBatch = new Map<string, Set<string>>();
+  for (const { bc, course } of contexts) {
+    const id = String(bc.batchId);
+    const titles = coursesByBatch.get(id) ?? new Set<string>();
+    if (course?.title) titles.add(course.title);
+    coursesByBatch.set(id, titles);
+  }
   const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
   const syncCounts: Record<string, number> = {};
   for (const x of users) { const st = x.sync?.status ?? 'IDLE'; syncCounts[st] = (syncCounts[st] ?? 0) + 1; }
@@ -137,7 +150,7 @@ export async function overview(u: UserDoc, f: Filters) {
   const batchComparison = batches.map((b) => {
     const rs = byBatch.get(String(b._id)) ?? [];
     const w = rs.filter((r) => r.accessible > 0);
-    return { batchId: String(b._id), name: b.name, status: b.status, students: new Set(rs.map((r) => r.studentId)).size, avgCompletionPct: avg(w.map((r) => r.completionPct ?? 0)), verifiedCompletions: rs.reduce((a, r) => a + r.solved, 0) };
+    return { batchId: String(b._id), name: b.name, status: b.status, college: collegeNames.get(String(b.collegeId)) ?? null, courses: [...(coursesByBatch.get(String(b._id)) ?? [])], students: studentsByBatch.get(String(b._id)) ?? 0, avgCompletionPct: avg(w.map((r) => r.completionPct ?? 0)), verifiedCompletions: rs.reduce((a, r) => a + r.solved, 0) };
   });
   const byCourse = new Map<string, PerfRow[]>();
   for (const r of rows) byCourse.set(r.courseId, [...(byCourse.get(r.courseId) ?? []), r]);
@@ -154,11 +167,11 @@ export async function overview(u: UserDoc, f: Filters) {
       avgCompletionPct: avg(withWork.map((r) => r.completionPct ?? 0)), completedAllAvailable: withWork.filter((r) => r.solved === r.accessible).length,
       lowProgress: withWork.filter((r) => (r.completionPct ?? 0) < 25).length,
     },
-    verification: { studentsInScope: studentIds.length, verifiedLinks: verified, coveragePct: studentIds.length ? Math.round((verified / studentIds.length) * 1000) / 10 : null, linkStates: countBy([...ids.map((i) => links.get(String(i)) ?? 'UNLINKED')]) },
-    sync: { byStatus: syncCounts, queued: rows.filter((r, i, a) => a.findIndex((x) => x.studentId === r.studentId) === i && r.syncDisplay === 'QUEUED').length, delayed: uniqueStudents(rows, (r) => r.syncDisplay === 'DELAYED'), failed: uniqueStudents(rows, (r) => ['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED', 'ACCOUNT_NOT_FOUND', 'SUBMISSIONS_UNAVAILABLE'].includes(r.syncDisplay)), possibleGaps: uniqueStudents(rows, (r) => r.possibleGap), missingUsernames: studentIds.length - verified, attention: uniqueStudents(rows, (r) => r.needsAttention), lastJob: lastJob ? { status: lastJob.status, at: lastJob.finishedAt ?? lastJob.startedAt, counts: lastJob.counts } : null },
+    verification: { studentsInScope: allEnrolled, verifiedLinks: verified, coveragePct: allEnrolled ? Math.round((verified / allEnrolled) * 1000) / 10 : null, linkStates: countBy([...ids.map((i) => links.get(String(i)) ?? 'UNLINKED')]) },
+    sync: { byStatus: syncCounts, queued: rows.filter((r, i, a) => a.findIndex((x) => x.studentId === r.studentId) === i && r.syncDisplay === 'QUEUED').length, delayed: uniqueStudents(rows, (r) => r.syncDisplay === 'DELAYED'), failed: uniqueStudents(rows, (r) => ['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED', 'ACCOUNT_NOT_FOUND', 'SUBMISSIONS_UNAVAILABLE'].includes(r.syncDisplay)), possibleGaps: uniqueStudents(rows, (r) => r.possibleGap), missingUsernames: allEnrolled - verified, attention: uniqueStudents(rows, (r) => r.needsAttention), lastJob: lastJob ? { status: lastJob.status, at: lastJob.finishedAt ?? lastJob.startedAt, counts: lastJob.counts } : null },
     difficulty: diff,
     batchComparison, courseCompletion,
-    needsSupport: rows.filter((r) => (r.accessible > 0 && (r.completionPct ?? 0) < 25) || (r.linkState !== 'LINKED' && r.linkState !== 'VERIFIED')).sort((a, b) => (a.completionPct ?? 0) - (b.completionPct ?? 0)).slice(0, 25),
+    needsSupport: rows.filter((r) => r.linkState !== 'LINKED' || (r.accessible > 0 && r.completionPct !== null && r.completionPct < 25 && r.syncDisplay === 'SYNC_SUCCESS' && !r.possibleGap)).sort((a, b) => (a.completionPct ?? 0) - (b.completionPct ?? 0)).slice(0, 25),
   };
 }
 

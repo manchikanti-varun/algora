@@ -20,6 +20,7 @@ import { leetcodeRouter } from './modules/leetcode/leetcode.routes';
 import { leaderboardsRouter, settingsRouter } from './modules/progress/progress.routes';
 import { analyticsRouter, reportsRouter } from './modules/analytics/analytics.routes';
 import { auditRouter, collegesRouter, pendingRouter, studentsRouter } from './modules/admin/admin.routes';
+import { manageRequestsRouter } from './modules/student/requests';
 import { studentRouter } from './modules/student/student.routes';
 import { trainerRequestsRouter, trainersRouter } from './modules/trainers/trainers.routes';
 
@@ -51,14 +52,25 @@ export function createApp() {
   // Key by signed-in user when the session cookie is valid (traffic arrives through the Vercel proxy, so many users may share
   // an IP), otherwise by client IP.
   const keyGenerator = (req: express.Request) => { const s = verifySession(req.cookies?.[SESSION_COOKIE]); return s ? `u:${s.uid}` : `ip:${ipKeyGenerator(req.ip ?? '')}`; };
-  const limiter = (windowMs: number, limit: number) =>
-    rateLimit({ windowMs, limit, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator, skip: () => env.NODE_ENV === 'test',
-      handler: (_req, res) => void res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Too many requests. Please slow down.' } }) });
-  api.use(limiter(60_000, 300));
+  const limiter = (windowMs: number, limit: number, key = keyGenerator) =>
+    rateLimit({ windowMs, limit, standardHeaders: 'draft-7', legacyHeaders: false, keyGenerator: key, skip: () => env.NODE_ENV === 'test',
+      handler: (_req, res) => void res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'We’re receiving a lot of requests. Please try again in a moment.' } }) });
+  const addressKey = (req: express.Request) => ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? '');
+  const ordinary = limiter(60_000, 300);
+  const sessionReads = limiter(60_000, 1500);
+  const credentialIP = limiter(60_000, 1000, addressKey);
+  const credentialInstance = limiter(60_000, 3600, () => 'credential-instance');
+  const credentials = (req: express.Request) => req.method === 'POST'
+    && ['/auth/google', '/auth/register/student', '/trainer-requests'].includes(req.path.replace(/\/$/, '').toLowerCase());
+  const publicRead = (req: express.Request) => req.method === 'GET'
+    && ['/auth/me', '/auth/colleges'].includes(req.path.replace(/\/$/, '').toLowerCase());
+  api.use((req, res, next) => credentials(req) ? credentialIP(req, res, (error) => {
+    if (error) return next(error);
+    credentialInstance(req, res, next);
+  }) : (publicRead(req) ? sessionReads : ordinary)(req, res, next));
   api.use(csrfProtection);
-  const authLimiter = limiter(60_000, 20);
-  api.use('/auth', authLimiter, authRouter);
-  api.use('/trainer-requests', (req, res, next) => (req.method === 'POST' ? authLimiter(req, res, next) : next()), trainerRequestsRouter);
+  api.use('/auth', authRouter);
+  api.use('/trainer-requests', trainerRequestsRouter);
   api.use('/trainers', trainersRouter);
   api.use('/courses', coursesRouter);
   api.use('/chapters', chaptersRouter);
@@ -73,6 +85,7 @@ export function createApp() {
   api.use('/analytics', analyticsRouter);
   api.use('/reports', limiter(60_000, 20), reportsRouter);
   api.use('/colleges', collegesRouter);
+  api.use('/student-requests', manageRequestsRouter);
   api.use('/students', studentsRouter);
   api.use('/audit-logs', auditRouter);
   app.use('/api/v1', api);

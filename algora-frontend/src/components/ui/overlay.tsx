@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { CheckCircle2, Info, MoreHorizontal, X, XCircle } from 'lucide-react';
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Button, buttonClass, type Size, type Variant } from './button';
 import { cx } from './format';
 
@@ -12,16 +12,17 @@ export function Modal({ open, onClose, title, description, children, footer, wid
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const descriptionId = useId();
   useEffect(() => { const d = ref.current; if (!d) return; if (open && !d.open) d.showModal(); if (!open && d.open) d.close(); }, [open]);
   return (
-    <dialog ref={ref} onClose={onClose} onCancel={(e) => { e.preventDefault(); onClose(); }} aria-labelledby={titleId}
+    <dialog ref={ref} onClose={onClose} onCancel={(e) => { e.preventDefault(); onClose(); }} aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}
       className={cx('m-auto max-h-[calc(100dvh-2rem)] overflow-hidden rounded-xl border border-line p-0 shadow-pop', wide ? 'w-[min(60rem,calc(100vw-1.5rem))]' : 'w-[min(32rem,calc(100vw-1.5rem))]')}>
       {open && (
         <div className="flex max-h-[calc(100dvh-2rem)] flex-col">
           <div className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">
             <div>
               <h2 id={titleId} className="text-base font-semibold text-fg">{title}</h2>
-              {description && <p className="mt-1 text-sm text-fg-muted">{description}</p>}
+              {description && <p id={descriptionId} className="mt-1 text-sm text-fg-muted">{description}</p>}
             </div>
             <button type="button" onClick={onClose} className="-mr-1 grid h-8 w-8 shrink-0 place-items-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg" aria-label="Close"><X size={16} /></button>
           </div>
@@ -203,11 +204,11 @@ const ToastCtx = createContext<(tone: ToastTone, text: string, action?: ToastAct
 /** `success(text, { action: { label: 'Undo', onClick } })` adds a button to the toast. */
 export const useToast = () => {
   const push = useContext(ToastCtx);
-  return {
+  return useMemo(() => ({
     success: (t: string, o?: { action?: ToastAction }) => push('success', t, o?.action),
     error: (t: string, o?: { action?: ToastAction }) => push('error', t, o?.action),
     info: (t: string, o?: { action?: ToastAction }) => push('info', t, o?.action),
-  };
+  }), [push]);
 };
 export function UIProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastT[]>([]);

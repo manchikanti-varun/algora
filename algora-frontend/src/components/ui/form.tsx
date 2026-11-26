@@ -3,7 +3,7 @@ import { Search, X } from 'lucide-react';
 import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { cx } from './format';
 
-export const controlCls = 'block w-full rounded-md border-0 bg-surface px-3 py-2 text-sm text-fg ring-1 ring-inset ring-line-strong placeholder:text-fg-subtle transition-shadow focus:outline-none focus:ring-2 focus:ring-accent disabled:cursor-not-allowed disabled:bg-subtle disabled:text-fg-muted aria-[invalid=true]:ring-danger';
+export const controlCls = 'block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-fg ring-1 ring-inset ring-line-strong placeholder:text-fg-subtle transition-shadow focus:outline-none focus:ring-2 focus:ring-accent disabled:cursor-not-allowed disabled:bg-subtle disabled:text-fg-muted aria-[invalid=true]:ring-danger';
 
 /** Optional fields say so in their label ('Email (optional)'); required fields are the default, so no asterisks. */
 export function Field({ label, error, hint, children, labelHidden }: { label: string; error?: string; hint?: ReactNode; children: (id: string, describedBy?: string) => ReactNode; labelHidden?: boolean; required?: boolean }) {

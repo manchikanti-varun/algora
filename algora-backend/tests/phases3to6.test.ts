@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Batch, BatchChapterAccess, BatchCourse, Chapter, Enrollment, PendingEnrollment, ProblemProgress, SolveEvidence, User } from '../src/models';
-import { app, studentBody, login, resetDb, startDb, stopDb, tok } from './helpers';
+import { app, collegeId, studentBody, login, resetDb, startDb, stopDb, tok } from './helpers';
 
 beforeAll(startDb);
 afterAll(stopDb);
@@ -79,7 +79,7 @@ describe('Phase 4: batches, trainers, enrollment, CSV', () => {
   it('batch is creatable with zero courses; trainer creator is auto-assigned; others cannot see it', async () => {
     const t1 = await mkTrainer('one');
     const t2 = await mkTrainer('two');
-    const b = (await t1.call('post', '/batches', { name: 'Batch A', college: 'JNTU' })).body;
+    const b = (await t1.call('post', '/batches', { name: 'Batch A', collegeId: collegeId() })).body;
     expect(b.status).toBe('DRAFT');
     expect((await t1.call('get', '/batches')).body.total).toBe(1);
     expect((await t2.call('get', '/batches')).body.total).toBe(0);

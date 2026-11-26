@@ -8,6 +8,7 @@ const S: Record<string, Def> = {
   // records
   ACTIVE: { label: 'Active', tone: 'success' }, DRAFT: { label: 'Draft', tone: 'neutral' }, PUBLISHED: { label: 'Published', tone: 'success' },
   COMPLETED: { label: 'Completed', tone: 'info' }, ARCHIVED: { label: 'Archived', tone: 'neutral' }, INACTIVE: { label: 'Inactive', tone: 'neutral' },
+  MERGED: { label: 'Merged', tone: 'neutral' }, CONSENT_WITHDRAWN: { label: 'Consent withdrawn', tone: 'warning' },
   SUSPENDED: { label: 'Suspended', tone: 'danger' }, REVOKED: { label: 'Revoked', tone: 'danger' },
   // trainer requests and enrollment reservations
   PENDING_APPROVAL: { label: 'Awaiting approval', tone: 'warning' }, APPROVED: { label: 'Approved', tone: 'success' }, REJECTED: { label: 'Rejected', tone: 'danger' },
@@ -45,7 +46,9 @@ const AUDIT: Record<string, string> = {
   'catalog.assign': 'Library problems added to chapter', 'catalog.create': 'Library problem added', 'catalog.import': 'Problem library imported',
   'chapter.bulk': 'Chapter problems updated in bulk', 'chapter.create': 'Chapter created', 'chapter.reorder': 'Chapter order changed', 'chapter.update': 'Chapter updated',
   'chapter.access': 'Chapter access changed', 'chapter.access.bulk': 'Chapter access changed for all chapters',
-  'college.create': 'College added', 'college.update': 'College updated', 'course.create': 'Course created', 'course.update': 'Course updated',
+  'college.create': 'College added', 'college.update': 'College updated', 'college.reconcile': 'Duplicate college merged', 'course.create': 'Course created', 'course.update': 'Course updated',
+  'student.request.submitted': 'Change request submitted', 'student.request.reviewed': 'Change request reviewed', 'student.request.cancelled': 'Change request cancelled',
+  'student.leetcode.consent_withdrawn': 'Stopped sharing LeetCode submissions',
   'enrollment.add': 'Student enrolled', 'enrollment.import': 'Students imported from CSV', 'enrollment.remove': 'Student removed from batch',
   'integration.health_check': 'Integration health check run', 'integration.settings': 'Integration settings changed',
   'pending.cancel': 'Reserved enrollment cancelled', 'pending.regenerate': 'New claim code generated',

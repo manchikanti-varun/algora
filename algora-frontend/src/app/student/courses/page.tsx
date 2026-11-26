@@ -1,28 +1,18 @@
 'use client';
 import Link from 'next/link';
 import { BookOpen, ChevronRight } from 'lucide-react';
-import { Card, EmptyState, ErrorState, PageHeader, PageSkeleton, plural, ProgressBar, Skeleton } from '@/components/ui';
+import { ButtonLink, Card, EmptyState, ErrorState, PageHeader, PageSkeleton, plural, ProgressBar } from '@/components/ui';
 import { useSync } from '@/components/student/SyncProvider';
-import type { Dashboard } from '@/components/student/types';
 import { useApi } from '@/hooks/useApi';
 import { qs } from '@/lib/api';
-interface Item { batchCourseId: string; batchName: string; title: string; description?: string; chapters: { _id: string; title: string }[] }
-function CourseProgress({ batchCourseId }: { batchCourseId: string }) {
-  const { version } = useSync();
-  const d = useApi<Dashboard>(`/student/dashboard${qs({ batchCourseId, v: version })}`);
-  if (d.error) return <p className="text-[13px] text-fg-subtle">Progress is not available right now.</p>;
-  if (!d.data) return <Skeleton className="h-5 w-full" />;
-  const s = d.data.summary;
-  if (!s) return <p className="text-[13px] text-fg-subtle">No problems to verify yet.</p>;
-  return (
-    <div className="space-y-1.5">
-      <ProgressBar value={s.completionPct} label="Course progress" />
-      <p className="text-[13px] text-fg-muted">{s.verifiedSolved} of {s.accessibleProblems} verified</p>
-    </div>
-  );
+interface Item {
+  batchCourseId: string; batchName: string; title: string; description?: string; chapters: { _id: string; title: string }[];
+  progress: { verifiedSolved: number; total: number; completionPct: number | null };
+  nextChapterId: string | null;
 }
 export default function Page() {
-  const c = useApi<{ items: Item[] }>('/student/courses');
+  const { version } = useSync();
+  const c = useApi<{ items: Item[] }>(`/student/courses${qs({ v: version })}`);
   if (c.error) return <ErrorState message={c.error} retry={c.reload} />;
   if (!c.data) return <PageSkeleton />;
   return (
@@ -34,14 +24,25 @@ export default function Page() {
         <ul className="grid gap-4 md:grid-cols-2">
           {c.data.items.map((i) => (
             <li key={i.batchCourseId}>
-              <Link href={`/student/courses/${i.batchCourseId}`} className="flex h-full flex-col gap-3 rounded-lg border border-line bg-surface p-4 transition-colors hover:border-line-strong hover:bg-hover">
-                <div>
-                  <p className="font-semibold text-fg">{i.title}</p>
-                  <p className="mt-0.5 text-[13px] text-fg-muted">{i.batchName} · {plural(i.chapters.length, 'chapter')}</p>
+              <Card className="h-full">
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent-fg"><BookOpen size={19} aria-hidden /></span>
+                    <div className="min-w-0">
+                      <h2 className="text-lg font-semibold tracking-tight"><Link href={`/student/courses/${i.batchCourseId}`} className="hover:text-accent-fg hover:underline">{i.title}</Link></h2>
+                      <p className="text-sm text-fg-muted">{i.batchName} · {plural(i.chapters.length, 'chapter')}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-sm text-fg-muted">{i.progress.verifiedSolved} of {i.progress.total} verified</p>
+                    <ProgressBar value={i.progress.completionPct} label={`${i.title} progress`} />
+                  </div>
+                  <ButtonLink href={i.nextChapterId ? `/student/chapters/${i.nextChapterId}?batchCourseId=${i.batchCourseId}` : `/student/courses/${i.batchCourseId}`}
+                    variant={i.nextChapterId ? 'primary' : 'secondary'} size="sm">
+                    {i.nextChapterId ? 'Continue learning' : 'View course'}<ChevronRight size={15} aria-hidden />
+                  </ButtonLink>
                 </div>
-                <CourseProgress batchCourseId={i.batchCourseId} />
-                <span className="mt-auto inline-flex items-center gap-1 text-[13px] font-medium text-accent-fg">Continue<ChevronRight size={14} aria-hidden /></span>
-              </Link>
+              </Card>
             </li>
           ))}
         </ul>

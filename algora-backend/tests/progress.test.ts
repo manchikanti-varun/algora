@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { BatchCourse, SolveEvidence, User } from '../src/models';
-import { evidenceFor, login, resetDb, startDb, stopDb, tok, verifiedLink } from './helpers';
+import { BatchCourse, Enrollment, SolveEvidence, StudentRequest, User } from '../src/models';
+import { evidenceFor, login, otherCollege, resetDb, startDb, stopDb, tok, verifiedLink } from './helpers';
 
 beforeAll(startDb);
 afterAll(stopDb);
@@ -85,21 +85,80 @@ describe('dashboard and progress calculation', () => {
     const bc2 = String((await BatchCourse.findOne({ batchId: w.bA._id, courseId: c2._id }))!._id);
     const d2 = (await s.api.call('get', `/student/dashboard?batchCourseId=${bc2}`)).body;
     expect(d2.summary).toMatchObject({ accessibleProblems: 1, verifiedSolved: 1, completionPct: 100 });
-    // combined batch leaderboard counts two-sum once across both courses
-    const lb = (await s.api.call('get', `/student/leaderboard?batchCourseId=${bc2}&scope=batch`)).body;
+    expect((await s.api.call('get', `/student/leaderboard?batchCourseId=${bc2}&scope=batch`)).status).toBe(400);
+    const lb = (await s.api.call('get', `/student/leaderboard?batchCourseId=${bc2}`)).body;
     expect(lb.me.points).toBe(10);
   });
 
-  it('username change stops counting old evidence immediately, including after switching back', async () => {
+  it('approved username change stops counting old evidence, including after switching back', async () => {
     const admin = await login(ADMIN); const w = await world(admin); const s = await mkStudent('a', 'old_name');
     await enroll(admin, w.bA, s.user); await w.unlock(w.bA, w.arrays); await solve(s, 'two-sum');
     const dash = async () => (await s.api.call('get', '/student/dashboard')).body.summary.verifiedSolved;
     expect(await dash()).toBe(1);
-    expect((await s.api.call('post', '/student/leetcode/link', { username: 'new_name', consent: true })).status).toBe(201);
+    const first = await s.api.call('post', '/student/leetcode/link', { username: 'new_name', consent: true, reason: 'Test change' });
+    expect(first.status).toBe(202);
+    expect(await dash()).toBe(1);
+    expect((await admin.call('post', `/student-requests/${first.body._id}/review`, { status: 'APPROVED' })).status).toBe(200);
     expect(await dash()).toBe(0);
     expect(await SolveEvidence.countDocuments()).toBe(1);
-    expect((await s.api.call('post', '/student/leetcode/link', { username: 'OLD_NAME', consent: true })).status).toBe(201);
+    const second = await s.api.call('post', '/student/leetcode/link', { username: 'OLD_NAME', consent: true, reason: 'Test change back' });
+    expect(second.status).toBe(202);
+    expect((await admin.call('post', `/student-requests/${second.body._id}/review`, { status: 'APPROVED' })).status).toBe(200);
     expect(await dash()).toBe(0);
+  });
+
+  it('profile and account requests can only be reviewed once by a responsible trainer or admin', async () => {
+    const admin = await login(ADMIN);
+    const w = await world(admin);
+    const s = await mkStudent('a');
+    const other = await mkStudent('b');
+    await enroll(admin, w.bA, s.user);
+    const reviewer = await User.create({ googleSub: 'reviewer', email: 'reviewer@x.com', role: 'TRAINER', fullName: 'Reviewer', trainerId: 'tr_review' });
+    const trainer = await login(tok('reviewer', 'reviewer@x.com', 'Reviewer'));
+    const request = await s.api.call('patch', '/student/profile', { firstName: 'Asha', reason: 'Correct my name' });
+    expect(request.status).toBe(202);
+    const path = `/student-requests/${request.body._id}/review`;
+    expect((await s.api.call('post', path, { status: 'APPROVED' })).status).toBe(403);
+    expect((await other.api.call('post', `/student/requests/${request.body._id}/cancel`)).status).toBe(404);
+    expect((await trainer.call('post', path, { status: 'APPROVED' })).status).toBe(404);
+    expect((await trainer.call('get', '/student-requests')).body.items).toEqual([]);
+    expect((await admin.call('post', `/batches/${w.bA._id}/trainers`, { trainerId: String(reviewer._id) })).status).toBe(201);
+    const outcomes = await Promise.all([trainer.call('post', path, { status: 'APPROVED' }), admin.call('post', path, { status: 'APPROVED' })]);
+    expect(outcomes.map((result) => result.status).sort()).toEqual([200, 409]);
+    expect((await s.api.call('get', '/student/profile')).body.firstName).toBe('Asha');
+
+    const link = await s.api.call('post', '/student/leetcode/link', { username: 'new_username', consent: true, reason: 'New account' });
+    expect(link.status).toBe(202);
+    expect((await trainer.call('post', `/student-requests/${link.body._id}/review`, { status: 'APPROVED' })).status).toBe(200);
+    expect((await s.api.call('get', '/student/leetcode')).body.username).toBe('new_username');
+    const cancelled = await s.api.call('patch', '/student/profile', { mobile: '9876543210', reason: 'Add my number' });
+    expect((await s.api.call('post', `/student/requests/${cancelled.body._id}/cancel`)).body.status).toBe('CANCELLED');
+    const rejected = await s.api.call('patch', '/student/profile', { mobile: '9876543219', reason: 'Wrong number' });
+    expect((await trainer.call('post', `/student-requests/${rejected.body._id}/review`, { status: 'REJECTED', rejectionReason: 'Please confirm the number' })).body.status).toBe('REJECTED');
+    expect((await s.api.call('get', '/student/profile')).body.mobile).toBeUndefined();
+  });
+
+  it('academic change requests apply only after approval and preserve progress', async () => {
+    const admin = await login(ADMIN); const w = await world(admin); const s = await mkStudent('a');
+    await enroll(admin, w.bA, s.user); await w.unlock(w.bA, w.arrays); await solve(s, 'two-sum');
+    const request = await s.api.call('patch', '/student/profile', { rollNumber: 'ZZ12CD34EF', reason: 'Correct my roll number' });
+    expect(request.status).toBe(202);
+    expect((await s.api.call('get', '/student/profile')).body.rollNumber).toBe(s.user.rollNumber); // not applied yet
+    expect((await admin.call('post', `/student-requests/${request.body._id}/review`, { status: 'APPROVED' })).status).toBe(200);
+    expect((await s.api.call('get', '/student/profile')).body.rollNumber).toBe('ZZ12CD34EF');
+    expect(await SolveEvidence.countDocuments({ studentId: s.user._id })).toBe(1); // evidence preserved
+    expect(await Enrollment.countDocuments({ studentId: s.user._id, status: 'ACTIVE' })).toBe(1); // enrollment preserved
+
+    const ou = await otherCollege('Osmania University', 'OU');
+    const college = await s.api.call('patch', '/student/profile', { collegeId: String(ou._id), reason: 'I moved to Osmania' });
+    expect(college.status).toBe(202);
+    expect((await admin.call('post', `/student-requests/${college.body._id}/review`, { status: 'APPROVED' })).status).toBe(200);
+    expect((await s.api.call('get', '/student/profile')).body.college).toBe('Osmania University [OU]');
+
+    await User.create({ googleSub: 'taken', email: 'taken@x.com', role: 'STUDENT', fullName: 'Taken', rollNumber: 'YY12CD34EF' });
+    const conflict = await s.api.call('patch', '/student/profile', { rollNumber: 'YY12CD34EF', reason: 'Try a taken roll number' });
+    expect((await admin.call('post', `/student-requests/${conflict.body._id}/review`, { status: 'APPROVED' })).status).toBe(409);
+    expect((await StudentRequest.findById(conflict.body._id))!.status).toBe('PENDING');
   });
 
   it('legacy attested rows never count', async () => {
@@ -109,16 +168,16 @@ describe('dashboard and progress calculation', () => {
     expect((await s.api.call('get', '/student/dashboard')).body.summary.verifiedSolved).toBe(0);
   });
 
-  it('context isolation: cannot read another batch-course; profile cannot change roll number or role', async () => {
+  it('context isolation: cannot read another batch-course; roll number needs approval; role cannot be changed', async () => {
     const admin = await login(ADMIN); const w = await world(admin); const s = await mkStudent('a'); const o = await mkStudent('b');
     await enroll(admin, w.bA, s.user); await enroll(admin, w.bB, o.user);
     expect((await s.api.call('get', `/student/dashboard?batchCourseId=${await w.bc(w.bB)}`)).status).toBe(404);
     expect((await s.api.call('get', `/student/leaderboard?batchCourseId=${await w.bc(w.bB)}`)).status).toBe(404);
-    expect((await s.api.call('patch', '/student/profile', { rollNumber: 'ZZZZZZZZZZ' })).status).toBe(400);
+    expect((await s.api.call('patch', '/student/profile', { rollNumber: 'ZZZZZZZZZZ', reason: 'Typo in my roll number' })).status).toBe(202);
     expect((await s.api.call('patch', '/student/profile', { leetcodeUsername: 'someone_else' })).status).toBe(400); // must use the ownership flow
     expect((await s.api.call('patch', '/student/profile', { role: 'SUPER_ADMIN' })).status).toBe(400);
     const p = (await s.api.call('get', '/student/profile')).body;
-    expect(p.rollNumber).toBe(s.user.rollNumber);
+    expect(p.rollNumber).toBe(s.user.rollNumber); // unchanged until the request is approved
   });
 });
 
@@ -152,7 +211,8 @@ describe('leaderboards', () => {
     await enroll(admin, w.bA, a.user); await enroll(admin, w.bB, b.user);
     await solve(a, 'valid-anagram');                             // only in A's extra chapter: must not count course-wide
     await solve(a, 'two-sum'); await solve(b, 'two-sum'); await solve(b, 'add-two-numbers');
-    const lb = (await a.api.call('get', `/student/leaderboard?batchCourseId=${await w.bc(w.bA)}&scope=course`)).body;
+    expect((await a.api.call('get', `/student/leaderboard?batchCourseId=${await w.bc(w.bA)}&scope=course`)).status).toBe(400);
+    const lb = (await admin.call('get', `/leaderboards/courses/${w.course._id}`)).body;
     expect(lb.scope).toMatchObject({ type: 'COURSE', problems: 3, batches: 2 });
     expect(lb.items.map((r: any) => r.points)).toEqual([30, 10]); // b first; a's valid-anagram ignored
     const own = (await a.api.call('get', `/student/leaderboard?batchCourseId=${await w.bc(w.bA)}`)).body;
@@ -162,7 +222,8 @@ describe('leaderboards', () => {
   it('course-wide is empty and says so when a participating batch has nothing unlocked', async () => {
     const admin = await login(ADMIN); const w = await world(admin);
     await w.unlock(w.bA, w.arrays); const a = await mkStudent('a'); await enroll(admin, w.bA, a.user);
-    const lb = (await a.api.call('get', `/student/leaderboard?batchCourseId=${await w.bc(w.bA)}&scope=course`)).body;
+    expect((await a.api.call('get', `/student/leaderboard?batchCourseId=${await w.bc(w.bA)}&scope=course`)).status).toBe(400);
+    const lb = (await admin.call('get', `/leaderboards/courses/${w.course._id}`)).body;
     expect(lb.scope.problems).toBe(0);
     expect(lb.items.every((r: any) => r.completionPct === null)).toBe(true);
   });

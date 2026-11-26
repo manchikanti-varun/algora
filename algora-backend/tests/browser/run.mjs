@@ -85,9 +85,9 @@ try {
   });
   await step('CSRF: same-origin POST without token is rejected (403); with token from /auth/me it works', async () => {
     const r = await admin.page.evaluate(async () => {
-      const no = await fetch('/api/v1/colleges', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CSRF Test' }) });
+      const no = await fetch('/api/v1/colleges', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'JNTU Hyderabad', code: 'JNTH' }) });
       const me = await (await fetch('/api/v1/auth/me')).json();
-      const yes = await fetch('/api/v1/colleges', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': me.csrfToken }, body: JSON.stringify({ name: 'CSRF Test' }) });
+      const yes = await fetch('/api/v1/colleges', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': me.csrfToken }, body: JSON.stringify({ name: 'JNTU Hyderabad', code: 'JNTH' }) });
       return [no.status, yes.status];
     });
     assert(r[0] === 403 && r[1] === 201, JSON.stringify(r));
@@ -267,7 +267,7 @@ try {
     const p = admin.page;
     await p.goto(`${FE}/manage/batches/new`);
     await p.getByLabel('Name').fill('JNTU Bootcamp');
-    await p.getByLabel('College (optional)').fill('JNTU Hyderabad');
+    await pickOption(p, 'College (optional)', 'JNTU', /JNTU Hyderabad/);
     await p.getByLabel('Status').selectOption('ACTIVE');
     await p.getByRole('button', { name: 'Create batch' }).click();
     await p.waitForURL(/\/manage\/batches\/[a-f0-9]{24}$/);
@@ -331,7 +331,8 @@ try {
     await p.goto(`${FE}/login`);
     await p.getByRole('button', { name: 'Mock Google sign-in' }).click();
     await p.getByText('Signed in as', { exact: false }).waitFor();
-    for (const [l, v] of [['First name', 'Asha'], ['Last name', 'Rao'], ['Roll number', 'AB12CD34EF'], ['College', 'JNTU Hyderabad'], ['Mobile number', '9876543210'], ['LeetCode username', 'asha_rao']]) await p.getByLabel(l, { exact: true }).fill(v);
+    for (const [l, v] of [['First name', 'Asha'], ['Last name', 'Rao'], ['Roll number', 'AB12CD34EF'], ['Mobile number', '9876543210'], ['LeetCode username', 'asha_rao']]) await p.getByLabel(l, { exact: true }).fill(v);
+    await pickOption(p, 'College', 'JNTU', /JNTU Hyderabad/);
     await p.getByRole('checkbox', { name: /public accepted submissions/ }).check().catch(() => {});
     await p.getByRole('button', { name: 'Create account' }).click();
     await p.getByText('This roll number is reserved').waitFor();
@@ -354,7 +355,9 @@ try {
     const p = student.page;
     // Path 1: Home -> Continue learning
     await p.goto(`${FE}/student/dashboard`);
-    await p.getByRole('link', { name: 'Open chapter' }).click();
+    const next = p.getByRole('link', { name: /Open on LeetCode/ });
+    assert(await next.getAttribute('href') === 'https://leetcode.com/problems/two-sum/', 'next problem action has the wrong URL');
+    await p.getByRole('link', { name: 'Continue learning' }).click();
     await p.getByRole('heading', { name: 'Arrays', level: 1 }).waitFor();
     // Path 2: My Learning -> course -> chapter -> problem
     await p.getByRole('navigation', { name: 'Main' }).first().getByRole('link', { name: 'My Learning' }).click();
@@ -402,7 +405,8 @@ try {
   await step('Profile: roll number immutable and username linked while synchronization is unavailable', async () => {
     const p = student.page;
     await p.goto(`${FE}/student/profile`);
-    assert(await p.getByLabel('Roll number').isDisabled(), 'roll editable');
+    await p.getByText('AB12CD34EF', { exact: true }).waitFor();
+    assert(await p.getByRole('textbox', { name: 'Roll number' }).count() === 0, 'roll editable');
     const accounts = p.locator('#connected-accounts');
     await accounts.getByText('Connected', { exact: true }).waitFor();
     await accounts.getByRole('link', { name: /asha_rao/ }).waitFor();
@@ -437,7 +441,12 @@ try {
     const p = other.page;
     await p.goto(`${FE}/login`);
     await p.getByRole('button', { name: 'Mock Google sign-in' }).click();
-    for (const [l, v] of [['First name', 'Other'], ['Last name', 'Person'], ['Roll number', 'AB12CD34EF'], ['College', 'OU'], ['Mobile number', '9876543211'], ['LeetCode username', 'other_lc']]) await p.getByLabel(l, { exact: true }).fill(v);
+    await admin.page.evaluate(async () => {
+      const csrfToken = (await (await fetch('/api/v1/auth/me')).json()).csrfToken;
+      await fetch('/api/v1/colleges', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken }, body: JSON.stringify({ name: 'Osmania University', code: 'OU' }) });
+    });
+    for (const [l, v] of [['First name', 'Other'], ['Last name', 'Person'], ['Roll number', 'AB12CD34EF'], ['Mobile number', '9876543211'], ['LeetCode username', 'other_lc']]) await p.getByLabel(l, { exact: true }).fill(v);
+    await pickOption(p, 'College', 'Osmania', /Osmania University/);
     await p.getByRole('checkbox', { name: /public accepted submissions/ }).check().catch(() => {});
     await p.getByRole('button', { name: 'Create account' }).click();
     await p.getByText('Roll number already registered').waitFor();
@@ -501,6 +510,103 @@ try {
     await click(t.getByRole('switch', { name: 'Strings visible to students' })); // restore
     await t.getByText('1 of 2 visible').waitFor();
     await noOverflow(t, 'chapter access');
+  });
+  await step('Student requests require one scoped review and update the read-only profile', async () => {
+    const p = student.page;
+    await p.goto(`${FE}/student/profile`);
+    await p.locator('#personal-information').getByRole('button', { name: 'Request changes' }).click();
+    const dialog = p.locator('dialog[open]');
+    await dialog.getByLabel('Mobile number').fill('9876543219');
+    await dialog.getByLabel('Reason for the change').fill('Updated phone number');
+    await dialog.getByRole('button', { name: 'Submit request' }).click();
+    await p.getByRole('table', { name: 'My requests' }).getByText('Pending', { exact: true }).waitFor();
+    await p.locator('#personal-information').getByText('9876543210', { exact: true }).waitFor();
+
+    const t = trainer.page;
+    await t.goto(`${FE}/manage/requests`);
+    await t.getByRole('row', { name: /Asha Rao/ }).getByRole('button', { name: 'Approve' }).click();
+    await confirmDialog(t, 'Approve');
+    await t.getByText('Request approved', { exact: true }).waitFor();
+    await p.reload();
+    await p.locator('#personal-information').getByText('9876543219', { exact: true }).waitFor();
+    await p.getByRole('table', { name: 'My requests' }).getByText('Approved', { exact: true }).waitFor();
+  });
+
+  await step('Production CSS resolves semantic surfaces, focus, borders and primary actions across roles and widths', async () => {
+    const pages = [student.page, trainer.page, admin.page];
+    for (const [index, page] of pages.entries()) {
+      await page.goto(`${FE}/${index === 0 ? 'student' : 'manage'}/dashboard`);
+      const button = page.getByRole('link', { name: index === 0 ? 'Continue learning' : 'New batch', exact: true }).first();
+      await button.waitFor();
+      for (const theme of ['light', 'dark']) {
+        await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+        for (const width of [375, 390, 768, 1024, 1280, 1440, 1920]) {
+          await page.setViewportSize({ width, height: 900 });
+          await noOverflow(page, `dashboard role=${index}, theme=${theme}, width=${width}`);
+          const styles = await button.evaluate((el) => {
+            const body = getComputedStyle(document.body);
+            const action = getComputedStyle(el);
+            const card = document.querySelector('main section');
+            const border = card && getComputedStyle(card);
+            const active = [...document.querySelectorAll('[aria-current="page"]')].find((item) => item.getClientRects().length);
+            return { canvas: body.backgroundColor, action: action.backgroundColor, text: action.color,
+              border: border?.borderTopColor, active: active && getComputedStyle(active).color };
+          });
+          assert(styles.action !== 'rgba(0, 0, 0, 0)' && styles.action !== styles.canvas && styles.action !== styles.text, JSON.stringify(styles));
+          assert(styles.border && styles.border !== 'rgb(0, 0, 0)', JSON.stringify(styles));
+          if (width === 1440) {
+            await page.keyboard.press('Tab');
+            await button.focus();
+            const focus = await button.evaluate((el) => {
+              const styles = getComputedStyle(el);
+              return el.matches(':focus-visible') && styles.outlineStyle !== 'none' && parseFloat(styles.outlineWidth) >= 2;
+            });
+            assert(focus, `Primary action lacks a visible keyboard focus ring in ${theme} theme`);
+          }
+          if (index === 0 || width >= 1024) assert(styles.active, `Active navigation unavailable for role ${index} at ${width}px`);
+          else {
+            await page.getByRole('button', { name: 'Open navigation' }).click();
+            const drawer = page.getByRole('dialog', { name: 'Management navigation' });
+            await drawer.locator('[aria-current="page"]').waitFor();
+            await page.keyboard.press('Escape');
+            await drawer.waitFor({ state: 'hidden' });
+          }
+        }
+      }
+      await page.evaluate(() => { document.documentElement.dataset.theme = 'system'; });
+      await page.setViewportSize({ width: 1360, height: 900 });
+    }
+  });
+  await step('Student and management pages render in both themes on mobile and desktop', async () => {
+    const courses = await student.page.evaluate(async () => (await (await fetch('/api/v1/student/courses')).json()).items);
+    const context = courses[0];
+    const cases = [
+      [student.page, ['/student/courses', `/student/courses/${context.batchCourseId}`, `/student/chapters/${context.chapters[0]._id}?batchCourseId=${context.batchCourseId}`, '/student/progress', '/student/leaderboard', '/student/profile']],
+      [trainer.page, ['/manage/batches', '/manage/courses', '/manage/problem-library', '/manage/students', '/manage/requests', '/manage/analytics', '/manage/leaderboards', '/manage/reports']],
+      [admin.page, ['/manage/trainers', '/manage/colleges', '/manage/settings', '/manage/integration', '/manage/audit', '/manage/batches/new']],
+    ];
+    for (const [page, paths] of cases) {
+      for (const [theme, width] of [['light', 1440], ['dark', 375]]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.evaluate((theme) => localStorage.setItem('algora.theme', theme), theme);
+        for (const path of paths) {
+          await page.goto(`${FE}${path}`);
+          await page.getByRole('heading', { level: 1 }).first().waitFor();
+          await noOverflow(page, `${theme} ${path}`);
+        }
+        if (page === admin.page) {
+          const field = page.getByRole('combobox', { name: 'College (optional)' });
+          await field.fill('JNTU');
+          await page.getByRole('option', { name: /JNTU Hyderabad/ }).first().waitFor();
+          await field.press('ArrowDown');
+          await field.press('ArrowUp');
+          await field.press('Enter');
+          assert(await field.inputValue() === 'JNTU Hyderabad [JNTH]', 'college keyboard selection failed');
+        }
+      }
+      await page.evaluate(() => localStorage.removeItem('algora.theme'));
+      await page.setViewportSize({ width: 1360, height: 900 });
+    }
   });
   await step('Suspending the trainer invalidates their session: next navigation signs them out', async () => {
     const p = admin.page;

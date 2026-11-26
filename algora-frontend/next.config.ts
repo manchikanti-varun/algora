@@ -47,14 +47,6 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  turbopack: {
-    rules: { "*.css": { loaders: ["@tailwindcss/turbopack"], as: "*.css" } },
-  },
-  webpack(config) {
-    // Run the same Tailwind transform for the optional --webpack build.
-    config.module.rules.push({ test: /globals\.css$/, enforce: "pre", use: "@tailwindcss/turbopack" });
-    return config;
-  },
   async rewrites() {
     return [{ source: "/api/v1/:path*", destination: `${BACKEND_URL}/api/v1/:path*` }];
   },

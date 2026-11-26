@@ -25,6 +25,7 @@ const userSchema = new Schema(
     rollNumber: { type: String, unique: true, sparse: true, match: /^[A-Z0-9]{10}$/ },
     collegeId: { type: Types.ObjectId, ref: 'College' },
     mobile: String,
+    consentRevision: Number,
     leetcodeUsername: { type: String, trim: true },
     leetcodeUsernameChangedAt: Date,
     /** LeetCode sync state (per student). Evidence itself lives in solve_evidence. */

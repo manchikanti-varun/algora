@@ -48,15 +48,19 @@ try {
     const assigned = await apiAs(admin.page, 'POST', `/problem-library/chapters/${ch._id}/assign`, { ids: resolved.body.rows.map((row) => row.problem._id) });
     assert(assigned.body.added === 2, 'chapter did not receive the catalog entries');
     await apiAs(admin.page, 'PATCH', `/courses/${c._id}`, { status: 'PUBLISHED' });
-    const b = (await apiAs(admin.page, 'POST', '/batches', { name: 'B', status: 'ACTIVE' })).body;
+    const college = (await apiAs(admin.page, 'POST', '/colleges', { name: 'JNTU', code: 'JNTU' })).body;
+    const b = (await apiAs(admin.page, 'POST', '/batches', { name: 'B', status: 'ACTIVE', collegeId: college._id })).body;
     await apiAs(admin.page, 'POST', `/batches/${b._id}/courses`, { courseId: c._id });
     await apiAs(admin.page, 'POST', `/batches/${b._id}/chapter-access/bulk`, { courseId: c._id, all: true, isVisible: true });
     await apiAs(admin.page, 'POST', `/batches/${b._id}/enrollments`, { rollNumber: 'AB12CD34EF', email: 'asha@x.com' });
-    ids = { c, ch, b };
+    ids = { c, ch, b, college };
   });
   const s = await persona(browser, 'tok|sub-s|asha@x.com|Asha Rao');
   await step('Registration with reserved email claims the seat without a code', async () => {
-    for (const [l, v] of [['First name', 'Asha'], ['Last name', 'Rao'], ['Roll number', 'AB12CD34EF'], ['College', 'JNTU'], ['Mobile number', '9876543210'], ['LeetCode username', 'asha_rao']]) await s.page.getByLabel(l, { exact: true }).fill(v);
+    for (const [l, v] of [['First name', 'Asha'], ['Last name', 'Rao'], ['Roll number', 'AB12CD34EF'], ['Mobile number', '9876543210'], ['LeetCode username', 'asha_rao']]) await s.page.getByLabel(l, { exact: true }).fill(v);
+    const college = s.page.getByRole('combobox', { name: 'College' });
+    await college.click(); await college.fill('JNTU');
+    await s.page.getByRole('option', { name: /JNTU/ }).first().click();
     await s.page.getByRole('checkbox', { name: /public accepted submissions/ }).check();
     await s.page.getByRole('button', { name: 'Create account' }).click();
     await s.page.waitForURL('**/student/dashboard');
@@ -65,6 +69,23 @@ try {
     await s.page.goto(`${FE}/student/profile`);
     await s.page.locator('#connected-accounts').getByText('Connected', { exact: true }).waitFor();
     await mock('/solve', { username: 'asha_rao', slug: 'unrelated-problem' });
+  });
+  await step('Initial student page load reads synchronization status once, without a render loop', async () => {
+    const reads = []; const api = [];
+    const onRequest = (r) => {
+      if (!r.url().includes('/api/v1/')) return;
+      api.push(new URL(r.url()).pathname);
+      if (r.url().includes('/api/v1/leetcode/sync-status')) reads.push(r.url());
+    };
+    s.page.on('request', onRequest);
+    await s.page.goto(`${FE}/student/dashboard`);
+    await s.page.getByText('Batch rank').waitFor();
+    await s.page.waitForTimeout(2_000);
+    s.page.off('request', onRequest);
+    const counts = api.reduce((acc, path) => ({ ...acc, [path]: (acc[path] ?? 0) + 1 }), {});
+    console.log(`INITIAL_API requests=${api.length} duplicates=${api.length - new Set(api).size} syncReads=${reads.length} ${JSON.stringify(counts)}`);
+    assert(reads.length <= 2, `expected at most 2 status reads on initial load, saw ${reads.length}`);
+    assert(api.length <= 10, `expected at most 10 API requests on initial load, saw ${api.length}: ${JSON.stringify(counts)}`);
   });
   await step('Update Progress queues a job, shows queued/updating, then verifies from the backend; dashboard and chapter update; button shows a server-based countdown', async () => {
     await mock('/solve', { username: 'asha_rao', slug: 'two-sum' });
@@ -77,6 +98,19 @@ try {
     await s.page.getByText(/Update queued|Updating progress/).first().waitFor();
     await s.page.getByText('Progress updated. 2 new problems verified.').waitFor(); // two-sum + the unrelated problem from setup (evidence is canonical, not course-bound)
     await s.page.getByText('1 / 2').first().waitFor();
+    const bar = s.page.getByRole('progressbar', { name: 'Arrays progress' }).first();
+    for (const theme of ['light', 'dark']) {
+      await s.page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+      await bar.evaluate((track) => Promise.all(track.firstElementChild.getAnimations().map((animation) => animation.finished)));
+      const style = await bar.evaluate((track) => {
+        const fill = track.firstElementChild;
+        return { width: fill.getBoundingClientRect().width / track.getBoundingClientRect().width,
+          fill: getComputedStyle(fill).backgroundColor, track: getComputedStyle(track).backgroundColor };
+      });
+      assert(Math.abs(style.width - 0.5) < 0.01 && style.fill !== style.track
+        && ![style.fill, style.track].includes('rgba(0, 0, 0, 0)'), JSON.stringify(style));
+    }
+    await s.page.evaluate(() => { document.documentElement.dataset.theme = 'system'; });
     await s.page.getByRole('button', { name: /Next update in \d\d:\d\d/ }).first().waitFor(); // server-based cooldown
     await s.page.getByText('Batch rank').waitFor();
     assert((await mock('/x', {})).calls === 1, 'exactly one provider call expected');
@@ -115,15 +149,15 @@ try {
     const a = await apiAs(admin.page, 'GET', `/analytics/students?batchId=${ids.b._id}`);
     assert(a.body.items[0].points === 30 && a.body.items[0].solved === 2, JSON.stringify(a.body.items[0]));
   });
-  await step('Unlinking stops evidence counting immediately; evidence is kept', async () => {
+  await step('Stopping submission sharing is immediate; evidence stops counting while the association stays for review', async () => {
     await s.page.goto(`${FE}/student/profile`);
-    await s.page.getByRole('button', { name: 'Disconnect', exact: true }).click();
-    await s.page.locator('dialog[open]').getByRole('button', { name: 'Disconnect' }).click();
-    await s.page.getByText('LeetCode account disconnected', { exact: true }).waitFor();
+    await s.page.getByRole('button', { name: 'Stop reading submissions' }).click();
+    await s.page.locator('dialog[open]').getByRole('button', { name: 'Stop reading' }).click();
+    await s.page.getByText('Algora has stopped reading your LeetCode submissions', { exact: true }).waitFor();
     await s.page.goto(`${FE}/student/dashboard`);
     await s.page.getByText('0 / 2').first().waitFor();
     const d = await apiAs(admin.page, 'GET', `/analytics/students?batchId=${ids.b._id}`);
-    assert(d.body.items[0].solved === 0 && d.body.items[0].linkState === 'UNLINKED', JSON.stringify(d.body.items[0]));
+    assert(d.body.items[0].solved === 0 && d.body.items[0].linkState !== 'LINKED', JSON.stringify(d.body.items[0]));
   });
   await step('Integration dashboard: provider shown as serving; pausing shows students a paused state; resume restores', async () => {
     await admin.page.goto(`${FE}/manage/integration`);
@@ -139,10 +173,17 @@ try {
     await admin.page.getByText('No events').or(admin.page.getByText('HEALTH_CHECK')).or(admin.page.getByRole('row').nth(1)).first().waitFor();
     // student view while paused (reconnect first so the paused state, not the connect prompt, is what applies)
     await s.page.goto(`${FE}/student/profile`);
-    await s.page.locator('#connected-accounts').getByLabel('LeetCode username').fill('asha_rao');
-    await s.page.locator('#connected-accounts').getByRole('checkbox').check();
-    await s.page.locator('#connected-accounts').getByRole('button', { name: /^Connect/ }).click();
-    await s.page.getByText('LeetCode account connected').waitFor();
+    await s.page.getByRole('button', { name: 'Request connection' }).click();
+    const dialog = s.page.locator('dialog[open]');
+    await dialog.getByLabel('LeetCode username').fill('asha_rao');
+    await dialog.getByRole('checkbox').check();
+    await dialog.getByLabel('Reason for the change').fill('Share my submissions again');
+    await dialog.getByRole('button', { name: 'Submit request' }).click();
+    await s.page.getByText('LeetCode account change requested').waitFor();
+    const requests = await apiAs(admin.page, 'GET', '/student-requests?status=PENDING');
+    assert(requests.body.items.length === 1, 'pending link request missing');
+    const review = await apiAs(admin.page, 'POST', `/student-requests/${requests.body.items[0]._id}/review`, { status: 'APPROVED' });
+    assert(review.status === 200, JSON.stringify(review.body));
     await s.page.goto(`${FE}/student/dashboard`);
     await s.page.getByText('Progress updates are paused').first().waitFor();
     await admin.page.goto(`${FE}/manage/integration`);

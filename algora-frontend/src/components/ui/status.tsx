@@ -35,14 +35,14 @@ export const StatusBadge = ({ status, label, dot = true }: { status: string; lab
 export const DifficultyBadge = ({ d }: { d: string }) => <Badge tone={statusTone(d)}>{statusLabel(d)}</Badge>;
 
 export function ProgressBar({ value, label, size = 'md', showValue = true, className }: { value: number | null; label?: string; size?: 'sm' | 'md'; showValue?: boolean; className?: string }) {
-  const v = value === null ? 0 : Math.max(0, Math.min(100, value));
+  const v = typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
   return (
     <div className={cx('flex items-center gap-2.5', className)}>
-      <div className={cx('flex-1 overflow-hidden rounded-full bg-subtle', size === 'sm' ? 'h-1.5' : 'h-2')} role="progressbar" aria-valuemin={0} aria-valuemax={100}
-        aria-valuenow={value === null ? undefined : Math.round(v)} aria-valuetext={value === null ? 'Not available' : `${Math.round(v)}%`} aria-label={label ?? 'Progress'}>
-        <div className={cx('h-full rounded-full transition-[width] duration-500', v >= 100 ? 'bg-success' : 'bg-accent')} style={{ width: `${v}%` }} />
+      <div className={cx('min-w-0 flex-1 overflow-hidden rounded-full bg-progress-track', size === 'sm' ? 'h-2' : 'h-2.5')} role="progressbar" aria-valuemin={0} aria-valuemax={100}
+        aria-valuenow={v ?? undefined} aria-valuetext={v === null ? 'Not available' : `${Math.round(v * 10) / 10}%`} aria-label={label ?? 'Progress'}>
+        <div className={cx('h-full rounded-full transition-[width] duration-300', v === 100 ? 'bg-success' : 'bg-progress-fill')} style={{ width: `${v ?? 0}%` }} />
       </div>
-      {showValue && <span className="w-10 shrink-0 text-right text-xs tabular-nums text-fg-muted">{value === null ? '—' : `${Math.round(v)}%`}</span>}
+      {showValue && <span className="w-12 shrink-0 text-right text-xs tabular-nums text-fg-muted">{v === null ? '—' : `${Math.round(v * 10) / 10}%`}</span>}
     </div>
   );
 }
@@ -59,7 +59,8 @@ export function BarList({ items, max, format = (n) => String(n), empty = 'No dat
             <span className="min-w-0 truncate text-fg">{i.label}</span>
             <span className="shrink-0 tabular-nums text-fg-muted">{i.value === null ? '—' : format(i.value)}{i.sub && <span className="text-fg-subtle"> · {i.sub}</span>}</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-subtle" aria-hidden><div className="h-full rounded-full bg-accent" style={{ width: `${((i.value ?? 0) / m) * 100}%` }} /></div>
+          <ProgressBar value={i.value !== null && m > 0 ? i.value / m * 100 : null} size="sm" showValue={false}
+            label={typeof i.label === 'string' ? i.label : undefined} />
         </li>
       ))}
     </ul>

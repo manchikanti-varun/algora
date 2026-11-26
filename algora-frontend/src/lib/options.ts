@@ -15,4 +15,13 @@ export const loadPublishedCourses = async (q: string): Promise<Option[]> =>
   (await api<Paged<{ _id: string; title: string; chapterCount?: number }>>(`/courses${qs({ q, status: 'PUBLISHED', pageSize: 25 })}`)).items
     .map((c) => ({ value: c._id, label: c.title, detail: c.chapterCount !== undefined ? `${c.chapterCount} chapters` : undefined }));
 export const loadColleges = async (q: string): Promise<Option[]> =>
-  (await api<Paged<{ _id: string; name: string }>>(`/colleges${qs({ q, pageSize: 25 })}`)).items.map((c) => ({ value: c._id, label: c.name }));
+  (await api<Paged<{ _id: string; name: string; code?: string | null }>>(`/colleges${qs({ q, pageSize: 25 })}`)).items
+    .map((c) => ({ value: c._id, label: c.code ? `${c.name} [${c.code}]` : c.name }));
+export const loadActiveColleges = async (q: string): Promise<Option[]> =>
+  (await api<Paged<{ _id: string; name: string; code?: string | null }>>(`/colleges${qs({ q, status: 'ACTIVE', pageSize: 25 })}`)).items
+    .map((c) => ({ value: c._id, label: c.code ? `${c.name} [${c.code}]` : c.name }));
+
+/** Canonical colleges from the public registry endpoint, used before a session exists (registration, access requests). */
+export const loadPublicColleges = async (q: string): Promise<Option[]> =>
+  (await api<Paged<{ _id: string; name: string; code?: string }>>(`/auth/colleges${qs({ q })}`)).items
+    .map((c) => ({ value: c._id, label: c.name, detail: c.code }));

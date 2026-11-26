@@ -18,7 +18,8 @@ const LATENCY = Number(process.env.LOAD_PROVIDER_LATENCY_MS ?? 250);
 (async () => {
   const rs = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   Object.assign(process.env, {
-    NODE_ENV: 'test', PORT: '5200', MONGODB_URI: rs.getUri(), GOOGLE_CLIENT_ID: 'load', SUPER_ADMIN_EMAIL: 'admin@example.com',
+    // Keep the real rate limiters enabled for sustained runs: LOAD_NODE_ENV=development.
+    NODE_ENV: process.env.LOAD_NODE_ENV ?? 'test', PORT: '5200', MONGODB_URI: rs.getUri(), GOOGLE_CLIENT_ID: 'load', SUPER_ADMIN_EMAIL: 'admin@example.com',
     SESSION_SECRET: 'z'.repeat(40), FRONTEND_URL: 'http://localhost:3000', LEETCODE_SYNC_ENABLED: 'true',
     LEETCODE_GLOBAL_RATE_PER_MIN: process.env.LOAD_RATE ?? '600', LEETCODE_ALFA_RATE_PER_MIN: process.env.LOAD_RATE ?? '600',
     LEETCODE_STUDENT_COOLDOWN_SEC: process.env.LOAD_COOLDOWN ?? '20', LEETCODE_CONCURRENCY: '3', LEETCODE_PROVIDER_RECOVERY_INTERVAL_SEC: '20',

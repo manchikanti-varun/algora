@@ -9,8 +9,12 @@ dist/
 docs/poc-results/
 .DS_Store
 
-# project documentation (kept locally, not in the repository)
-docs/
+# Keep local project documentation and reference images out of Git.
+/docs/*
+!/docs/PLATFORM_ENHANCEMENT_REPORT.md
 
 # audit screenshots (local only)
 /docs/ss/
+
+# generated load-test output
+/algora-backend/tests/load/results.json

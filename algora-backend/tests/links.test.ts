@@ -7,7 +7,7 @@ import { migrateLeetcodeLinks } from '../src/modules/leetcode/link-migration';
 import { drainOnce } from '../src/modules/leetcode/sync-queue';
 import { MockProvider } from '../src/modules/leetcode/providers/mock.provider';
 import { setProviderForTests } from '../src/modules/leetcode/providers/provider.registry';
-import { app, evidenceFor, login, resetDb, startDb, stopDb, studentBody, tok, verifiedLink } from './helpers';
+import { app, collegeId, evidenceFor, login, otherCollege, resetDb, startDb, stopDb, studentBody, tok, verifiedLink } from './helpers';
 
 beforeAll(startDb);
 afterAll(stopDb);
@@ -17,6 +17,10 @@ afterEach(() => { setProviderForTests(undefined); (env as any).LEETCODE_SYNC_ENA
 const reg = (sub: string, email: string, over: Record<string, unknown> = {}) => request(app).post('/api/v1/auth/register/student').set('Origin', 'http://localhost:3000')
   .send({ idToken: tok(sub, email, 'Some Student'), ...studentBody(over) });
 const st = (sub: string, email: string) => login(tok(sub, email, 'Some Student'));
+const approve = async (id: string) => {
+  const admin = await login(tok('admin-sub', 'admin@example.com', 'Admin'));
+  expect((await admin.call('post', `/student-requests/${id}/review`, { status: 'APPROVED' })).status).toBe(200);
+};
 const uidOf = async (sub: string) => (await User.findOne({ googleSub: sub }))!._id;
 
 describe('simplified LeetCode account linking', () => {
@@ -46,7 +50,7 @@ describe('simplified LeetCode account linking', () => {
     expect(await User.countDocuments({ role: 'STUDENT' })).toBe(1);
     await reg('s2', 'b@x.com', { rollNumber: 'ZZ12CD34EF', leetcodeUsername: 'other_user' });
     const s2 = await st('s2', 'b@x.com');
-    const r = await s2.call('post', '/student/leetcode/link', { username: 'Asha_Rao', consent: true });
+    const r = await s2.call('post', '/student/leetcode/link', { username: 'Asha_Rao', consent: true, reason: 'Test duplicate' });
     expect(r.status).toBe(409); expect(r.body.error.code).toBe('USERNAME_IN_USE');
   });
 
@@ -55,9 +59,10 @@ describe('simplified LeetCode account linking', () => {
     (env as any).LEETCODE_SYNC_ENABLED = false;
     await reg('s1', 'a@x.com');
     const s = await st('s1', 'a@x.com');
-    const changed = await s.call('post', '/student/leetcode/link', { username: 'new_name', consent: true });
-    expect(changed.status).toBe(201);
-    expect(changed.body).toMatchObject({ state: 'LINKED', username: 'new_name' });
+    const changed = await s.call('post', '/student/leetcode/link', { username: 'new_name', consent: true, reason: 'Test change' });
+    expect(changed.status).toBe(202);
+    await approve(changed.body._id);
+    expect((await s.call('get', '/student/leetcode')).body).toMatchObject({ state: 'LINKED', username: 'new_name' });
     expect((await s.call('get', '/leetcode/sync-status')).body).toMatchObject({ syncEnabled: false, link: { state: 'LINKED' } });
   });
 
@@ -92,12 +97,12 @@ describe('simplified LeetCode account linking', () => {
   it('re-linking the same username is rejected; consent is required; invalid usernames are rejected', async () => {
     await reg('s1', 'a@x.com');
     const s = await st('s1', 'a@x.com');
-    expect((await s.call('post', '/student/leetcode/link', { username: 'asha_rao', consent: true })).body.error.code).toBe('ALREADY_LINKED');
+    expect((await s.call('post', '/student/leetcode/link', { username: 'asha_rao', consent: true, reason: 'Same account' })).body.error.code).toBe('ALREADY_LINKED');
     expect((await s.call('post', '/student/leetcode/link', { username: 'other_name' })).status).toBe(400);
-    expect((await s.call('post', '/student/leetcode/link', { username: 'has space', consent: true })).status).toBe(400);
+    expect((await s.call('post', '/student/leetcode/link', { username: 'has space', consent: true, reason: 'Test' })).status).toBe(400);
   });
 
-  it('username change takes effect immediately: old evidence is kept but stops counting and is never transferred', async () => {
+  it('approved username change: old evidence is kept but stops counting and is never transferred', async () => {
     await reg('s1', 'a@x.com');
     const s = await st('s1', 'a@x.com');
     const uid = await uidOf('s1');
@@ -105,16 +110,19 @@ describe('simplified LeetCode account linking', () => {
     await evidenceFor(uid, old, 'two-sum');
     expect(await countableEvidence(uid)).toHaveLength(1);
 
-    const chg = await s.call('post', '/student/leetcode/link', { username: 'New_Name', consent: true });
-    expect(chg.status).toBe(201);
-    expect(chg.body).toMatchObject({ state: 'LINKED', username: 'New_Name' });
+    const chg = await s.call('post', '/student/leetcode/link', { username: 'New_Name', consent: true, reason: 'Test change' });
+    expect(chg.status).toBe(202);
+    expect(await countableEvidence(uid)).toHaveLength(1);
+    await approve(chg.body._id);
+    expect((await s.call('get', '/student/leetcode')).body).toMatchObject({ state: 'LINKED', username: 'New_Name' });
     expect((await LeetcodeLink.findById(old._id))!.status).toBe('SUPERSEDED');
     expect(await countableEvidence(uid)).toHaveLength(0); // new account starts from zero
     expect(await SolveEvidence.countDocuments()).toBe(1); // history is preserved
 
     // Changing back creates a NEW link: the old evidence is not restored.
-    const back = await s.call('post', '/student/leetcode/link', { username: 'asha_rao', consent: true });
-    expect(back.status).toBe(201);
+    const back = await s.call('post', '/student/leetcode/link', { username: 'asha_rao', consent: true, reason: 'Test change back' });
+    expect(back.status).toBe(202);
+    await approve(back.body._id);
     expect(await countableEvidence(uid)).toHaveLength(0);
     expect(await LeetcodeLink.countDocuments({ studentId: uid, usernameNorm: 'asha_rao' })).toBe(2);
     expect((await User.findById(uid))!.sync!.lastSuccessAt).toBeFalsy(); // sync state reset for the new account
@@ -126,7 +134,10 @@ describe('simplified LeetCode account linking', () => {
     const uid = await uidOf('s1');
     const link = (await LeetcodeLink.findOne({ studentId: uid }))!;
     await evidenceFor(uid, link, 'two-sum');
-    expect((await s.call('delete', '/student/leetcode/link')).body.state).toBe('UNLINKED');
+    const unlink = await s.call('delete', '/student/leetcode/link', { reason: 'Test disconnection' });
+    expect(unlink.status).toBe(202);
+    await approve(unlink.body._id);
+    expect((await s.call('get', '/student/leetcode')).body.state).toBe('UNLINKED');
     expect(await countableEvidence(uid)).toHaveLength(0);
     expect(await SolveEvidence.countDocuments()).toBe(1); // kept for audit until consent is withdrawn
 
@@ -134,6 +145,18 @@ describe('simplified LeetCode account linking', () => {
     expect(r.body).toMatchObject({ ok: true, evidence: 1 });
     expect(await SolveEvidence.countDocuments()).toBe(0);
     expect(r.body.link.state).toBe('UNLINKED');
+  });
+
+  it('consent withdrawal is immediate, needs no approval, and cancels pending account changes', async () => {
+    await reg('s1', 'a@x.com');
+    const s = await st('s1', 'a@x.com');
+    const pending = await s.call('post', '/student/leetcode/link', { username: 'another_name', consent: true, reason: 'Try another account' });
+    expect(pending.status).toBe(202);
+    const r = await s.call('delete', '/student/leetcode/consent');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ state: 'CONSENT_WITHDRAWN', current: { username: 'asha_rao' } }); // association kept, sharing stopped
+    const list = (await s.call('get', '/student/requests')).body.items;
+    expect(list.find((x: any) => x._id === pending.body._id).status).toBe('CANCELLED');
   });
 
   it('legacy VERIFIED links are shown as LINKED before the migration runs', async () => {
@@ -147,8 +170,9 @@ describe('simplified LeetCode account linking', () => {
 describe('trainer correction of a linked username', () => {
   async function world() {
     const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
-    const b = (await admin.call('post', '/batches', { name: 'B', status: 'ACTIVE', college: 'JNTU' })).body;
-    const other = (await admin.call('post', '/batches', { name: 'Other', status: 'ACTIVE', college: 'OU' })).body;
+    const ou = await otherCollege('Osmania University', 'OU');
+    const b = (await admin.call('post', '/batches', { name: 'B', status: 'ACTIVE', collegeId: collegeId() })).body;
+    const other = (await admin.call('post', '/batches', { name: 'Other', status: 'ACTIVE', collegeId: String(ou._id) })).body;
     await reg('s1', 'a@x.com');
     await admin.call('post', `/batches/${b._id}/enrollments`, { rollNumber: 'AB12CD34EF' });
     await User.create({ googleSub: 't1', email: 't1@x.com', role: 'TRAINER', fullName: 'Trainer One', trainerId: 'tr_t1' });
@@ -158,26 +182,23 @@ describe('trainer correction of a linked username', () => {
     return { admin, trainer, b, other, uid: await uidOf('s1') };
   }
 
-  it('corrects a username immediately, records an audit entry and keeps evidence isolated', async () => {
+  it('direct corrections are refused so association changes stay in the approval workflow', async () => {
     const w = await world();
     const old = (await LeetcodeLink.findOne({ studentId: w.uid }))!;
     await evidenceFor(w.uid, old, 'two-sum');
     const r = await w.trainer.call('post', `/students/${w.uid}/leetcode/username`, { username: 'corrected_name', reason: 'Typo reported by student' });
-    expect(r.status).toBe(200);
-    expect((await LeetcodeLink.findById(old._id))!.status).toBe('SUPERSEDED');
-    expect((await LeetcodeLink.findOne({ studentId: w.uid, isCurrent: true }))!.username).toBe('corrected_name');
-    expect(await countableEvidence(w.uid)).toHaveLength(0);
-    const a = await AuditLog.findOne({ action: 'student.leetcode.username_corrected' }).lean();
-    expect(a?.metadata).toMatchObject({ from: 'asha_rao', to: 'corrected_name', reason: 'Typo reported by student' });
+    expect(r.status).toBe(409); expect(r.body.error.code).toBe('APPROVAL_REQUIRED');
+    expect((await LeetcodeLink.findById(old._id))!.status).toBe('LINKED'); // nothing changed
+    expect(await countableEvidence(w.uid)).toHaveLength(1); // evidence stays with the approved account
   });
 
-  it('refuses without standing consent, and a trainer cannot touch a student outside their batches', async () => {
+  it('refuses direct correction even without standing consent, and a trainer cannot touch a student outside their batches', async () => {
     const w = await world();
     const u = await User.create({ googleSub: 'noconsent', email: 'nc@x.com', role: 'STUDENT', fullName: 'No Consent', rollNumber: 'NC00000001' });
     await Enrollment.create({ studentId: u._id, batchId: w.b._id });
     await LeetcodeLink.create({ studentId: u._id, username: 'nc_user', usernameNorm: 'nc_user', status: 'LINKED', isActive: true, isCurrent: true, isPending: false, consentedAt: null });
     const refused = await w.trainer.call('post', `/students/${u._id}/leetcode/username`, { username: 'other', reason: 'Correction' });
-    expect(refused.status).toBe(409); expect(refused.body.error.code).toBe('CONSENT_REQUIRED');
+    expect(refused.status).toBe(409); expect(refused.body.error.code).toBe('APPROVAL_REQUIRED');
     const outsider = await User.create({ googleSub: 'outsider', email: 'out@x.com', role: 'STUDENT', fullName: 'Outsider', rollNumber: 'OU00000001' });
     await verifiedLink(outsider._id, 'outsider');
     expect((await w.trainer.call('post', `/students/${outsider._id}/leetcode/username`, { username: 'x', reason: 'Correction' })).status).toBe(404);

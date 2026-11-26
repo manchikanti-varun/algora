@@ -1,14 +1,15 @@
+import { collegeFields, collegeLabel, collegePatch, collegeSearch, registryFields } from '../colleges/registry';
+import { applyCollegeMerge, previewCollegeMerge } from '../colleges/reconcile';
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { conflict, forbidden, notFound, parse } from '../../lib/errors';
-import { nameKey, randomToken, sha256 } from '../../lib/normalize';
+import { randomToken, sha256 } from '../../lib/normalize';
 import { objectId, pagination } from '../../lib/validate';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import { AuditLog, Batch, College, Enrollment, LeetcodeLink, LeetcodeSyncLog, PendingEnrollment, User } from '../../models';
 import { audit } from '../audit/audit';
 import { loadBatchFor, trainerBatchIds } from '../access';
-import { correctUsername, revokeLinks } from '../leetcode/links.service';
 
 export const collegesRouter = Router();
 export const studentsRouter = Router();
@@ -23,7 +24,7 @@ collegesRouter.get('/', async (req, res) => {
   const q = parse(pagination.extend({ q: z.string().trim().max(60).optional(), status: z.enum(['ACTIVE', 'ARCHIVED']).optional() }), req.query);
   const filter: Record<string, unknown> = {};
   if (q.status) filter.status = q.status;
-  if (q.q) filter.name = { $regex: escape(q.q), $options: 'i' };
+  Object.assign(filter, collegeSearch(q.q));
   const [items, total] = await Promise.all([College.find(filter).sort({ name: 1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(), College.countDocuments(filter)]);
   const ids = items.map((c) => c._id);
   const [students, batches] = await Promise.all([
@@ -34,22 +35,34 @@ collegesRouter.get('/', async (req, res) => {
   res.json({ total, page: q.page, pageSize: q.pageSize, items: items.map((c) => ({ ...c, students: n(students, c._id), batches: n(batches, c._id) })) });
 });
 collegesRouter.post('/', superOnly, async (req, res) => {
-  const { name } = parse(z.object({ name: z.string().trim().min(2).max(120) }).strict(), req.body);
-  const key = nameKey(name);
-  if (await College.exists({ nameKey: key })) throw conflict('A college with this name already exists');
-  const c = await College.create({ name, nameKey: key });
+  const c = await College.create(await registryFields(parse(collegeFields, req.body)));
   await audit(req, 'college.create', { type: 'College', id: c._id });
   res.status(201).json(c);
 });
 collegesRouter.patch('/:id', superOnly, async (req, res) => {
   const id = parse(objectId, req.params.id);
-  const b = parse(z.object({ name: z.string().trim().min(2).max(120).optional(), status: z.enum(['ACTIVE', 'ARCHIVED']).optional() }).strict(), req.body);
-  const set: Record<string, unknown> = { ...b };
-  if (b.name) { set.nameKey = nameKey(b.name); if (await College.exists({ nameKey: set.nameKey as string, _id: { $ne: id } })) throw conflict('A college with this name already exists'); }
-  const c = await College.findByIdAndUpdate(id, { $set: set }, { returnDocument: 'after' });
+  const input = parse(collegePatch, req.body);
+  const c = await College.findById(id);
   if (!c) throw notFound('College not found');
-  await audit(req, 'college.update', { type: 'College', id }, b);
-  res.json(c);
+  if (c.mergedInto) throw conflict('This college has been merged. Edit the canonical college instead.');
+  if (input.name !== undefined || input.code !== undefined || input.aliases !== undefined) {
+    c.set(await registryFields({ name: input.name ?? c.name, code: input.code ?? c.code, aliases: input.aliases ?? c.aliases ?? [] }, id));
+  }
+  if (input.status) c.status = input.status;
+  if (input.status === 'ACTIVE' && !c.code) throw conflict('Assign a college code before restoring this college.');
+  // Compare the revision so concurrent edits cannot silently discard aliases.
+  const updated = await College.findOneAndUpdate({ _id: id, updatedAt: c.updatedAt, mergedInto: { $exists: false } },
+    { $set: { name: c.name, ...(c.code ? { code: c.code, searchKeys: c.searchKeys } : {}), aliases: c.aliases, nameKey: c.nameKey, status: c.status } },
+    { returnDocument: 'after' });
+  if (!updated) throw conflict('This college changed. Refresh before editing it again.');
+  await audit(req, 'college.update', { type: 'College', id }, { fields: Object.keys(input) });
+  res.json(updated);
+});
+
+collegesRouter.post('/:id/reconcile', superOnly, async (req, res) => {
+  const id = parse(objectId, req.params.id);
+  const { targetId, dryRun } = parse(z.object({ targetId: objectId, dryRun: z.boolean().default(true) }).strict(), req.body);
+  res.json(dryRun ? await previewCollegeMerge(id, targetId) : await applyCollegeMerge(id, targetId, req.user));
 });
 
 // ---------- Students (management) ----------
@@ -78,14 +91,14 @@ studentsRouter.get('/', async (req, res) => {
   if (q.status) filter.status = q.status;
   if (q.q) filter.$or = [{ fullName: { $regex: escape(q.q), $options: 'i' } }, { rollNumber: { $regex: escape(q.q.toUpperCase()) } }];
   const [items, total] = await Promise.all([
-    User.find(filter, 'fullName rollNumber collegeId status sync.status sync.lastSuccessAt sync.possibleGap sync.lastError sync.statusDetail createdAt').populate('collegeId', 'name').sort({ rollNumber: 1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
+    User.find(filter, 'fullName rollNumber collegeId status sync.status sync.lastSuccessAt sync.possibleGap sync.lastError sync.statusDetail createdAt').populate('collegeId', 'name code').sort({ rollNumber: 1 }).skip((q.page - 1) * q.pageSize).limit(q.pageSize).lean(),
     User.countDocuments(filter),
   ]);
   const links = await LeetcodeLink.find({ studentId: { $in: items.map((i) => i._id) }, isCurrent: true }, 'studentId status username linkedAt').lean();
   const enr = await Enrollment.aggregate([{ $match: { studentId: { $in: items.map((i) => i._id) }, status: 'ACTIVE', ...(batchIds ? { batchId: { $in: batchIds } } : {}) } }, { $group: { _id: '$studentId', n: { $sum: 1 } } }]);
   res.json({ total, page: q.page, pageSize: q.pageSize, items: items.map((i) => {
     const cur = links.find((x) => String(x.studentId) === String(i._id));
-    return { _id: i._id, fullName: i.fullName, rollNumber: i.rollNumber, college: (i.collegeId as any)?.name ?? null, status: i.status,
+    return { _id: i._id, fullName: i.fullName, rollNumber: i.rollNumber, college: collegeLabel(i.collegeId as any), status: i.status,
       syncStatus: i.sync?.status ?? 'IDLE', lastSyncAt: i.sync?.lastSuccessAt ?? null, possibleGap: !!i.sync?.possibleGap, syncError: i.sync?.lastError ?? null, syncDetail: i.sync?.statusDetail ?? null,
       link: cur ? { status: cur.status, username: cur.username, linkedAt: cur.linkedAt ?? null } : null, batches: enr.find((e) => String(e._id) === String(i._id))?.n ?? 0 };
   }) });
@@ -110,21 +123,9 @@ studentsRouter.patch('/:id/status', superOnly, async (req, res) => {
  * Trainer/Super Admin correction of a linked username. Uses the student's standing consent, is limited to the batches the
  * trainer manages, and is audited. It is a correction, not attestation: submissions are still verified automatically.
  */
-studentsRouter.post('/:id/leetcode/username', async (req, res) => {
-  const id = parse(objectId, req.params.id);
-  await assertCanManageStudent(req.user!, id);
-  const { username, reason } = parse(z.object({ username: z.string().trim().regex(/^[A-Za-z0-9_-]{1,40}$/, 'Invalid LeetCode username'), reason: z.string().trim().min(3).max(300) }).strict(), req.body);
-  const before = await LeetcodeLink.findOne({ studentId: id, isCurrent: true }, 'username').lean();
-  await correctUsername(id, username, req.user!._id);
-  await audit(req, 'student.leetcode.username_corrected', { type: 'User', id }, { from: before?.username ?? null, to: username, reason });
-  res.json({ ok: true, username });
-});
-studentsRouter.post('/:id/leetcode/revoke', superOnly, async (req, res) => {
-  const id = parse(objectId, req.params.id);
-  const { reason } = parse(z.object({ reason: z.string().trim().min(3).max(300) }).strict(), req.body);
-  const n = await revokeLinks(id, `ADMIN: ${reason}`, req.user!._id);
-  await audit(req, 'student.leetcode.revoke', { type: 'User', id }, { reason, links: n });
-  res.json({ revoked: n });
+studentsRouter.post(['/:id/leetcode/username', '/:id/leetcode/revoke'], async (req) => {
+  await assertCanManageStudent(req.user!, parse(objectId, req.params.id));
+  throw conflict('Review a student account request to change this association.', 'APPROVAL_REQUIRED');
 });
 
 // ---------- Pending enrollments (mounted under /batches/:id/pending) ----------

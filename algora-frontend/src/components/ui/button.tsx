@@ -8,17 +8,17 @@ export type Size = 'xs' | 'sm' | 'md';
 const variants: Record<Variant, string> = {
   primary: 'bg-accent text-white hover:bg-accent-hover shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]',
   secondary: 'bg-surface text-fg ring-1 ring-inset ring-line-strong hover:bg-hover',
-  danger: 'bg-danger text-white hover:brightness-110',
+  danger: 'bg-danger-action text-white hover:brightness-90',
   ghost: 'text-fg-muted hover:bg-hover hover:text-fg',
   subtle: 'bg-subtle text-fg hover:bg-hover',
 };
 const sizes: Record<Size, string> = {
   xs: 'h-7 px-2 text-xs gap-1',
   sm: 'h-8 px-2.5 text-[13px] gap-1.5',
-  md: 'h-9 px-3.5 text-sm gap-2',
+  md: 'h-10 px-4 text-sm gap-2',
 };
 export const buttonClass = (variant: Variant = 'primary', size: Size = 'md', className?: string) =>
-  cx('inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  cx('inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-lg font-medium active:brightness-95 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50',
     sizes[size], variants[variant], className);
 
 export const Spinner = ({ className }: { className?: string }) => (
@@ -38,10 +38,10 @@ export function Button({ variant = 'primary', size = 'md', loading, icon, classN
 /** Icon-only button. `label` is required: it is the accessible name and the tooltip. */
 export function IconButton({ label, icon, variant = 'ghost', size = 'sm', className, ...p }:
   Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { label: string; icon: ReactNode; variant?: Variant; size?: Size }) {
-  const square = { xs: 'h-7 w-7', sm: 'h-8 w-8', md: 'h-9 w-9' }[size];
+  const square = { xs: 'h-7 w-7', sm: 'h-8 w-8', md: 'h-10 w-10' }[size];
   return (
     <button type="button" aria-label={label} title={label}
-      className={cx(buttonClass(variant, size), 'px-0', square, className)} {...p}>
+      className={cx(buttonClass(variant, size), 'px-0!', square, className)} {...p}>
       {icon}
     </button>
   );

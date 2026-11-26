@@ -45,15 +45,19 @@ check('approved trainer logs in', r.body.user?.role === 'TRAINER');
 check('trainer blocked from /trainers (403)', (await trainer.call('GET', '/trainers')).status === 403);
 check('trainer cannot approve (403)', (await trainer.call('PATCH', `/trainer-requests/${pending[0]._id}/approve`)).status === 403);
 
+const college = await admin.call('POST', '/colleges', { name: 'JNTU Hyderabad', code: 'JNTH' });
+check('admin creates a canonical college', college.status === 201 && college.body.code === 'JNTH', JSON.stringify(college.body));
+const collegeId = college.body._id;
+
 const student = new Client();
-r = await student.call('POST', '/auth/register/student', { idToken: tok('ss', 'asha@x.com', 'Asha'), firstName: 'Asha', lastName: 'Rao', rollNumber: 'ab12cd34ef', college: 'JNTU', mobile: '9876543210', leetcodeUsername: 'asha_rao', role: 'SUPER_ADMIN' });
+r = await student.call('POST', '/auth/register/student', { idToken: tok('ss', 'asha@x.com', 'Asha'), firstName: 'Asha', lastName: 'Rao', rollNumber: 'ab12cd34ef', collegeId, mobile: '9876543210', leetcodeUsername: 'asha_rao', leetcodeConsent: true, role: 'SUPER_ADMIN' });
 check('student registers, roll uppercased, role ignored', r.status === 201 && r.body.user.role === 'STUDENT' && r.body.user.rollNumber === 'AB12CD34EF', JSON.stringify(r.body));
 check('student blocked from /courses (403)', (await student.call('GET', '/courses')).status === 403);
 check('student blocked from /batches (403)', (await student.call('GET', '/batches')).status === 403);
 check('student /student/courses ok', (await student.call('GET', '/student/courses')).status === 200);
 
 const dup = new Client();
-r = await dup.call('POST', '/auth/register/student', { idToken: tok('s2', 'bravo@x.com', 'Bravo Student'), firstName: 'B', lastName: 'B', rollNumber: 'AB12CD34EF', college: 'Other', mobile: '9876543211', leetcodeUsername: 'bb' });
+r = await dup.call('POST', '/auth/register/student', { idToken: tok('s2', 'bravo@x.com', 'Bravo Student'), firstName: 'B', lastName: 'B', rollNumber: 'AB12CD34EF', collegeId, mobile: '9876543211', leetcodeUsername: 'bb', leetcodeConsent: true });
 check('duplicate roll number -> 409', r.status === 409 && r.body.error.code === 'ROLL_NUMBER_TAKEN');
 
 const tid = (await admin.call('GET', '/trainers')).body.items[0]._id;

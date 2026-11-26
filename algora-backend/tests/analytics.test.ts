@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AuditLog, BatchCourse, Enrollment, LeetcodeLink, LeetcodeSyncJob, PendingEnrollment, SolveEvidence, User } from '../src/models';
-import { app, evidenceFor, login, resetDb, startDb, stopDb, studentBody, tok, verifiedLink } from './helpers';
+import { app, collegeId, evidenceFor, login, otherCollege, resetDb, startDb, stopDb, studentBody, tok, verifiedLink } from './helpers';
 
 beforeAll(startDb);
 afterAll(stopDb);
@@ -22,8 +22,9 @@ async function world() {
   const add = (ch: any, slug: string, d: string) => admin.call('post', `/chapters/${ch._id}/problems`, { title: slug, url: `https://leetcode.com/problems/${slug}/`, difficulty: d });
   await add(ch1, 'two-sum', 'EASY'); await add(ch1, 'three-sum', 'MEDIUM'); await add(ch2, 'valid-anagram', 'EASY');
   await admin.call('patch', `/courses/${c._id}`, { status: 'PUBLISHED' });
-  const bA = (await admin.call('post', '/batches', { name: 'A', status: 'ACTIVE', college: 'JNTU' })).body;
-  const bB = (await admin.call('post', '/batches', { name: 'B', status: 'ACTIVE', college: 'OU' })).body;
+  const ou = await otherCollege('Osmania University', 'OU');
+  const bA = (await admin.call('post', '/batches', { name: 'A', status: 'ACTIVE', collegeId: collegeId() })).body;
+  const bB = (await admin.call('post', '/batches', { name: 'B', status: 'ACTIVE', collegeId: String(ou._id) })).body;
   for (const b of [bA, bB]) { await admin.call('post', `/batches/${b._id}/courses`, { courseId: c._id }); await admin.call('post', `/batches/${b._id}/chapter-access/bulk`, { courseId: c._id, all: true, isVisible: true }); }
   const s = [await stu('a', bA.collegeId), await stu('b', bA.collegeId), await stu('c', bB.collegeId)];
   await admin.call('post', `/batches/${bA._id}/enrollments`, { rollNumber: s[0].user.rollNumber });
@@ -47,7 +48,12 @@ describe('analytics', () => {
     expect(o.verification).toMatchObject({ studentsInScope: 3, verifiedLinks: 3, coveragePct: 100 });
     expect(o.difficulty).toEqual({ EASY: { solved: 3, available: 6 }, MEDIUM: { solved: 1, available: 3 }, HARD: { solved: 0, available: 0 } });
     expect(o.batchComparison.map((b: any) => b.name).sort()).toEqual(['A', 'B']);
-    expect(o.needsSupport.map((r: any) => r.name)).toContain('Stu b');
+    expect(o.needsSupport.map((r: any) => r.name)).not.toContain('Stu b'); // no completed verification yet
+    await User.updateOne({ _id: w.s[1].user._id }, { $set: { 'sync.status': 'SYNC_SUCCESS', 'sync.lastSuccessAt': new Date() } });
+    const verified = (await w.admin.call('get', '/analytics/overview')).body;
+    expect(verified.needsSupport.map((r: any) => r.name)).toContain('Stu b');
+    await User.updateOne({ _id: w.s[1].user._id }, { $set: { 'sync.status': 'VERIFICATION_UNAVAILABLE' } });
+    expect((await w.admin.call('get', '/analytics/overview')).body.needsSupport.map((r: any) => r.name)).not.toContain('Stu b');
     const t = (await w.trainer.call('get', '/analytics/overview')).body;
     expect(t.totals).toMatchObject({ batches: 1, enrolledStudents: 2 });
     expect(JSON.stringify(t)).not.toContain('Stu c');
@@ -126,16 +132,16 @@ describe('admin APIs', () => {
     const w = await world();
     const l = (await w.admin.call('get', '/colleges')).body;
     expect(l.items.find((c: any) => c.name === 'JNTU')).toMatchObject({ students: 2, batches: 1 });
-    expect((await w.admin.call('post', '/colleges', { name: 'IIT' })).status).toBe(201);
-    expect((await w.admin.call('post', '/colleges', { name: 'iit' })).status).toBe(409);
+    expect((await w.admin.call('post', '/colleges', { name: 'IIT', code: 'IIT' })).status).toBe(201);
+    expect((await w.admin.call('post', '/colleges', { name: 'iit', code: 'IIT2' })).status).toBe(409);
     const iit = (await w.admin.call('get', '/colleges?q=iit')).body.items[0];
     expect((await w.admin.call('patch', `/colleges/${iit._id}`, { name: 'JNTU' })).status).toBe(409);
     expect((await w.admin.call('patch', `/colleges/${iit._id}`, { status: 'ARCHIVED' })).body.status).toBe('ARCHIVED');
-    expect((await w.trainer.call('post', '/colleges', { name: 'X' })).status).toBe(403);
+    expect((await w.trainer.call('post', '/colleges', { name: 'X', code: 'X' })).status).toBe(403);
     expect((await w.trainer.call('get', '/colleges')).status).toBe(200);
   });
 
-  it('students: scoped list, suspend (session killed), username correction, revoke', async () => {
+  it('students: scoped list, suspend (session killed), direct association edits refused, revoke', async () => {
     const w = await world();
     expect((await w.admin.call('get', '/students')).body.total).toBe(3);
     const tl = (await w.trainer.call('get', '/students')).body;
@@ -146,11 +152,12 @@ describe('admin APIs', () => {
     expect((await w.trainer.call('patch', `/students/${w.s[0].user._id}/status`, { status: 'SUSPENDED' })).status).toBe(403);
     expect((await w.admin.call('patch', `/students/${w.s[0].user._id}/status`, { status: 'SUSPENDED' })).status).toBe(200);
     expect((await sa.call('get', '/auth/me')).status).toBe(401);
-    expect((await w.trainer.call('post', `/students/${w.s[1].user._id}/leetcode/username`, { username: 'b_fixed', reason: 'typo' })).status).toBe(200);
-    expect((await LeetcodeLink.findOne({ studentId: w.s[1].user._id, isCurrent: true }))!.username).toBe('b_fixed');
+    const direct = await w.trainer.call('post', `/students/${w.s[1].user._id}/leetcode/username`, { username: 'b_fixed', reason: 'typo' });
+    expect(direct.status).toBe(409); expect(direct.body.error.code).toBe('APPROVAL_REQUIRED');
+    expect((await LeetcodeLink.findOne({ studentId: w.s[1].user._id, isCurrent: true }))!.username).toBe('b');
     expect((await w.trainer.call('post', `/students/${w.s[2].user._id}/leetcode/username`, { username: 'c_fixed', reason: 'not mine' })).status).toBe(404); // not their student
-    expect((await w.trainer.call('post', `/students/${w.s[2].user._id}/leetcode/revoke`, { reason: 'abuse' })).status).toBe(403);
-    expect((await w.admin.call('post', `/students/${w.s[2].user._id}/leetcode/revoke`, { reason: 'shared account' })).body.revoked).toBe(1);
+    expect((await w.trainer.call('post', `/students/${w.s[2].user._id}/leetcode/revoke`, { reason: 'abuse' })).status).toBe(404);
+    expect((await w.admin.call('post', `/students/${w.s[2].user._id}/leetcode/revoke`, { reason: 'shared account' })).status).toBe(409);
   });
 
   it('pending enrollments: list (no hashes), regenerate (old code stops working), cancel; claim is atomic', async () => {
@@ -190,7 +197,7 @@ describe('admin APIs', () => {
     const c = (await w.admin.call('get', '/courses?q=ds')).body.items[0];
     expect(c).toMatchObject({ chapterCount: 2, problemCount: 3, batchCount: 2 });
     const b = (await w.admin.call('get', '/batches?q=a')).body.items.find((x: any) => x.name === 'A');
-    expect(b).toMatchObject({ studentCount: 2, courseCount: 1, college: 'JNTU' });
+    expect(b).toMatchObject({ studentCount: 2, courseCount: 1, college: 'JNTU [JNTU]' });
   });
 });
 

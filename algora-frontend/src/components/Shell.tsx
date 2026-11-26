@@ -1,14 +1,15 @@
 'use client';
 import Link from 'next/link';
 import {
-  Activity, BookOpen, ChartNoAxesCombined, FileChartColumn, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
+  Activity, ArrowUpRight, BookOpen, Inbox, ChartNoAxesCombined, FileChartColumn, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
   PanelLeftClose, PanelLeftOpen, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth, type Role, type SessionUser } from '@/lib/auth';
 import { cx, EmptyState, Menu, PageSkeleton, type MenuItem } from './ui';
 import { themeMenuItems, useTheme } from './ThemePicker';
+import { BrandMark } from './BrandMark';
 import { CommandPalette } from './manage/CommandPalette';
 
 export interface NavItem { href: string; label: string; icon: LucideIcon; roles?: Role[]; match?: string[] }
@@ -31,10 +32,10 @@ const isActive = (path: string, item: NavItem, home: string) =>
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('') || '?';
 const roleLabel = (u: SessionUser) => (u.role === 'SUPER_ADMIN' ? 'Super Admin' : u.role === 'TRAINER' ? 'Trainer' : 'Student');
 
-const Logo = ({ href, collapsed, dark }: { href: string; collapsed?: boolean; dark?: boolean }) => (
-  <Link href={href} aria-label="Algora home" className={cx('flex items-center gap-2 font-semibold tracking-tight', dark ? 'text-white' : 'text-fg')}>
-    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[13px] font-bold text-white">A</span>
-    <span className={cx('text-[15px]', collapsed && 'lg:sr-only')}>Algora</span>
+const Logo = ({ href, collapsed }: { href: string; collapsed?: boolean }) => (
+  <Link href={href} aria-label="Algora home" className="flex items-center gap-2 font-semibold tracking-tight text-fg">
+    <BrandMark />
+    <span className={cx('text-base', collapsed && 'lg:sr-only')}>Algora</span>
   </Link>
 );
 
@@ -57,9 +58,18 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
   const path = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const drawerRef = useRef<HTMLDialogElement>(null);
+  const openDrawer = () => { drawerRef.current?.showModal(); setOpen(true); };
+  const closeDrawer = () => { if (drawerRef.current?.open) drawerRef.current.close(); setOpen(false); };
   // Read once on the client; the shell renders a skeleton on the server, so there is no hydration difference.
   const [collapsed, setCollapsed] = useState(() => { try { return typeof window !== 'undefined' && localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { return false; } });
   const [search, setSearch] = useState(false);
+  useEffect(() => {
+    const desktop = matchMedia('(min-width: 1024px)');
+    const resize = () => { if (desktop.matches) drawerRef.current?.close(); };
+    desktop.addEventListener('change', resize);
+    return () => desktop.removeEventListener('change', resize);
+  }, []);
   const toggleCollapsed = () => setCollapsed((v) => { try { localStorage.setItem(COLLAPSE_KEY, v ? '0' : '1'); } catch { /* ignore */ } return !v; });
   useEffect(() => {
     if (!ok) return;
@@ -86,8 +96,8 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
   const sidebar = (
     <nav aria-label="Main" className="flex h-full flex-col">
       <div className={cx('mb-5 flex items-center justify-between px-2', narrow && 'lg:justify-center lg:px-0')}>
-        <Logo href={home} collapsed={narrow} dark />
-        {open && <button type="button" onClick={() => setOpen(false)} aria-label="Close navigation" className="grid h-8 w-8 place-items-center rounded-md text-nav-fg hover:bg-nav-hover lg:hidden"><X size={17} /></button>}
+        <Logo href={home} collapsed={narrow} />
+        {open && <button type="button" onClick={closeDrawer} aria-label="Close navigation" className="grid h-8 w-8 place-items-center rounded-md text-nav-fg hover:bg-nav-hover lg:hidden"><X size={17} /></button>}
       </div>
       <div className="-mx-1 flex-1 space-y-5 overflow-y-auto px-1">
         {sections.map((s) => (
@@ -98,9 +108,9 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
                 const on = isActive(path, i, home);
                 return (
                   <li key={i.href}>
-                    <Link href={i.href} onClick={() => setOpen(false)} aria-current={on ? 'page' : undefined} title={narrow ? i.label : undefined}
+                    <Link href={i.href} onClick={closeDrawer} aria-current={on ? 'page' : undefined} title={narrow ? i.label : undefined}
                       className={cx('flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors', narrow && 'lg:justify-center lg:px-0',
-                        on ? 'bg-nav-active font-medium text-white' : 'text-nav-fg hover:bg-nav-hover hover:text-white')}>
+                        on ? 'bg-nav-active font-semibold text-accent-fg' : 'text-nav-fg hover:bg-nav-hover hover:text-fg')}>
                       <i.icon size={16} className="shrink-0" aria-hidden /><span className={cx('truncate', narrow && 'lg:sr-only')}>{i.label}</span>
                     </Link>
                   </li>
@@ -110,13 +120,13 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
           </div>
         ))}
       </div>
-      <div className="mt-4 border-t border-white/10 pt-3">
+      <div className="mt-4 border-t border-line pt-3">
         <div className={cx('mb-2 flex items-center gap-2 px-2', narrow && 'lg:hidden')}>
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-semibold text-white">{initials(user.fullName)}</span>
-          <div className="min-w-0 text-xs"><p className="truncate font-medium text-white">{user.fullName}</p><p className="truncate text-nav-fg-muted">{roleLabel(user)}</p></div>
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-fg">{initials(user.fullName)}</span>
+          <div className="min-w-0 text-xs"><p className="truncate font-medium text-fg">{user.fullName}</p><p className="truncate text-nav-fg-muted">{roleLabel(user)}</p></div>
         </div>
         <button type="button" onClick={toggleCollapsed} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={cx('hidden h-8 w-full items-center gap-2.5 rounded-md px-2 text-[13px] text-nav-fg hover:bg-nav-hover hover:text-white lg:flex', narrow && 'justify-center px-0')}>
+          className={cx('hidden h-8 w-full items-center gap-2.5 rounded-md px-2 text-[13px] text-nav-fg hover:bg-nav-hover hover:text-fg lg:flex', narrow && 'justify-center px-0')}>
           {collapsed ? <PanelLeftOpen size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}<span className={cx(narrow && 'sr-only')}>Collapse</span>
         </button>
       </div>
@@ -125,11 +135,14 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
   return (
     <div className="min-h-screen bg-canvas text-fg">
       <a href="#main" className="sr-only z-[70] rounded-md bg-surface px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to content</a>
-      <aside className={cx('fixed inset-y-0 left-0 z-30 hidden bg-nav px-3 py-4 lg:block', collapsed ? 'w-16' : 'w-60')}>{sidebar}</aside>
-      {open && <div className="fixed inset-0 z-40 lg:hidden"><div className="animate-fade-in absolute inset-0 bg-black/50" onClick={() => setOpen(false)} /><aside className="animate-slide-up absolute inset-y-0 left-0 w-64 bg-nav px-3 py-4">{sidebar}</aside></div>}
+      <aside className={cx('fixed inset-y-0 left-0 z-30 hidden border-r border-line bg-nav px-3 py-4 lg:block', collapsed ? 'w-16' : 'w-60')}>{sidebar}</aside>
+      <dialog ref={drawerRef} onClose={() => setOpen(false)} aria-label="Management navigation"
+        className="fixed inset-y-0 left-0 m-0 h-dvh max-h-none w-64 max-w-[85vw] bg-nav px-3 py-4 lg:hidden">
+        {open && sidebar}
+      </dialog>
       <div className={cx(collapsed ? 'lg:pl-16' : 'lg:pl-60')}>
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-surface/85 px-3 backdrop-blur sm:px-4 lg:px-6">
-          <button type="button" onClick={() => setOpen(true)} aria-expanded={open} className="grid h-8 w-8 place-items-center rounded-md text-fg-muted hover:bg-hover lg:hidden" aria-label="Open navigation"><MenuIcon size={18} /></button>
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-surface px-3 backdrop-blur sm:px-4 lg:px-6">
+          <button type="button" onClick={openDrawer} aria-expanded={open} className="grid h-8 w-8 place-items-center rounded-md text-fg-muted hover:bg-hover lg:hidden" aria-label="Open navigation"><MenuIcon size={18} /></button>
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg-muted">{current?.label ?? ''}</span>
           <button type="button" aria-keyshortcuts="Meta+K Control+K" onClick={() => setSearch(true)}
             className="flex h-8 items-center gap-2 rounded-md border border-line bg-subtle px-2.5 text-[13px] text-fg-muted hover:bg-hover hover:text-fg sm:w-64">
@@ -139,7 +152,7 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
           <AccountMenu user={user} onSignOut={signOut} />
         </header>
         {search && <CommandPalette destinations={[...items.map((i) => ({ href: i.href, label: i.label })), ...actions]} onClose={() => setSearch(false)} />}
-        <main id="main" className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main id="main" className="mx-auto max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Suspense fallback={<PageSkeleton />}>
             {forbidden ? <EmptyState title="This page is not available" body={`${forbidden.label} is managed by the Super Admin.`} action={<Link className="text-sm font-medium text-accent-fg hover:underline" href={home}>Go to Overview</Link>} /> : children}
           </Suspense>
@@ -161,40 +174,40 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
   const { user, logout } = useAuth();
   const path = usePathname();
   const router = useRouter();
-  if (!ok || !user) return <div className="mx-auto max-w-5xl p-8"><PageSkeleton /></div>;
+  if (!ok || !user) return <div className="mx-auto max-w-6xl p-8"><PageSkeleton /></div>;
   const home = '/student/dashboard';
   const signOut = async () => { await logout(); router.replace('/login'); };
   return (
     <div className="min-h-screen bg-canvas text-fg">
       <a href="#main" className="sr-only z-[70] rounded-md bg-surface px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to content</a>
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-2 px-4 sm:gap-6 sm:px-6">
+      <header className="sticky top-0 z-30 border-b border-line bg-surface backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-6 sm:px-6">
           <Logo href={home} />
-          <nav aria-label="Main" className="hidden items-center gap-1 md:flex">
+          <nav aria-label="Main" className="hidden items-center gap-1 lg:flex">
             {STUDENT_NAV.map((n) => {
               const on = isActive(path, n, home);
               return <Link key={n.href} href={n.href} aria-current={on ? 'page' : undefined}
-                className={cx('flex h-8 items-center gap-2 rounded-md px-2.5 text-[13px] transition-colors', on ? 'bg-subtle font-medium text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg')}>
+                className={cx('flex h-9 items-center gap-2 rounded-lg px-2.5 text-[13px] transition-colors', on ? 'bg-accent-soft font-semibold text-accent-fg' : 'text-fg-muted hover:bg-hover hover:text-fg')}>
                 <n.icon size={15} aria-hidden />{n.label}</Link>;
             })}
           </nav>
           <div className="ml-auto flex items-center gap-1.5">
             {aside}
-            <AccountMenu user={user} onSignOut={signOut} extra={[{ label: 'Profile and account', href: '/student/profile', icon: <UserRound size={15} aria-hidden /> }]} />
+            <AccountMenu user={user} onSignOut={signOut} extra={[{ label: 'Profile', href: '/student/profile', icon: <UserRound size={15} aria-hidden /> }, { label: 'My Requests', href: '/student/profile#my-requests', icon: <Inbox size={15} aria-hidden /> }, { label: 'Connected Accounts', href: '/student/profile#connected-accounts', icon: <ArrowUpRight size={15} aria-hidden /> }]} />
           </div>
         </div>
       </header>
-      <main id="main" className="mx-auto max-w-5xl px-4 pb-28 pt-6 sm:px-6 md:pb-10 md:pt-8">
+      <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-10 md:pt-8">
         <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
       </main>
       {/* Phones and small tablets: bottom tab bar, every destination visible without scrolling. */}
-      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         <ul className="grid grid-cols-4">
           {STUDENT_NAV.map((n) => {
             const on = isActive(path, n, home);
             return <li key={n.href}><Link href={n.href} aria-current={on ? 'page' : undefined}
               className={cx('flex h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium', on ? 'text-accent-fg' : 'text-fg-muted')}>
-              <n.icon size={19} aria-hidden />{n.label}</Link></li>;
+              <span className={cx("rounded-lg px-3 py-1", on && "bg-accent-soft")}><n.icon size={18} aria-hidden /></span>{n.label}</Link></li>;
           })}
         </ul>
       </nav>
@@ -212,6 +225,7 @@ export const MANAGE_NAV: NavSection[] = [
   ] },
   { section: 'People', items: [
     { href: '/manage/students', label: 'Students', icon: GraduationCap },
+    { href: '/manage/requests', label: 'Requests', icon: Inbox },
     { href: '/manage/trainers', label: 'Trainers', icon: UserRoundCog, roles: ['SUPER_ADMIN'] },
     { href: '/manage/colleges', label: 'Colleges', icon: School, roles: ['SUPER_ADMIN'] },
   ] },

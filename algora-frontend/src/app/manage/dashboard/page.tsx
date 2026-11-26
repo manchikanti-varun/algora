@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
-import { CheckCircle2, ChevronRight, Hourglass, Link2Off, TrendingDown, UserPlus, ZapOff, type LucideIcon } from 'lucide-react';
-import { BarList, Card, ErrorState, Grid, human, PageHeader, PageSkeleton, plural, pct, ProgressBar, StatCard, StatusBadge, ButtonLink, EmptyState } from '@/components/ui';
+import { CheckCircle2, ChevronRight, CirclePlus, GraduationCap, Hourglass, Inbox, Link2, Link2Off, Target, UserPlus, UsersRound, ZapOff, type LucideIcon } from 'lucide-react';
+import { BarList, Card, DataTable, ErrorState, Grid, human, PageHeader, PageSkeleton, plural, pct, ProgressBar, StatCard, StatusBadge, ButtonLink, EmptyState } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { isAdmin, useAuth } from '@/lib/auth';
 import type { Overview, Paged } from '@/components/manage/types';
@@ -13,13 +13,14 @@ export default function Page() {
   const admin = isAdmin(user);
   const o = useApi<Overview>('/analytics/overview');
   const pending = useApi<Paged<unknown>>(admin ? '/trainer-requests?status=PENDING_APPROVAL&pageSize=1' : null);
+  const studentPending = useApi<Paged<unknown>>('/student-requests?status=PENDING&pageSize=1');
   const health = useApi<{ enabled: boolean; provider: string; breaker: string }>(admin ? '/leetcode/health' : null);
 
   const header = (
     <PageHeader title="Overview" subtitle={`Welcome, ${user?.fullName.split(' ')[0] ?? ''}. ${admin ? 'Platform-wide summary.' : 'Summary of your batches.'}`}
       actions={<>
-        <ButtonLink href="/manage/batches/new" variant={user?.canManageCourses ? 'secondary' : 'primary'}>New batch</ButtonLink>
-        {user?.canManageCourses && <ButtonLink href="/manage/courses/new">New course</ButtonLink>}
+        <ButtonLink href="/manage/batches/new" icon={<CirclePlus size={16} aria-hidden />}>New batch</ButtonLink>
+        {user?.canManageCourses && <ButtonLink href="/manage/courses/new" variant="secondary">New course</ButtonLink>}
       </>} />
   );
   if (o.loading && !o.data) return <div>{header}<PageSkeleton /></div>;
@@ -35,8 +36,8 @@ export default function Page() {
     admin && { key: 'req', icon: UserPlus, text: 'Trainer requests are waiting for approval', count: pending.data?.total ?? 0, href: '/manage/trainers', linkLabel: 'Review' },
     admin && health.data?.enabled === false && { key: 'off', icon: ZapOff, text: 'Progress updates are off, so progress will not change', href: '/manage/integration', linkLabel: 'Integrations' },
     { key: 'pend', icon: Hourglass, text: 'Reserved enrollments have not been claimed yet', count: t.pendingEnrollments, href: '/manage/batches', linkLabel: 'Open batches' },
-    { key: 'low', icon: TrendingDown, text: 'Students are below 25% completion', count: t.lowProgress, href: '/manage/analytics?maxPct=25', linkLabel: 'View students' },
-    { key: 'unl', icon: Link2Off, text: 'Students have not connected a LeetCode account', count: unlinked, href: '/manage/analytics?verification=UNLINKED', linkLabel: 'View students' },
+    { key: 'student-requests', icon: Inbox, text: 'Student requests awaiting review', count: studentPending.data?.total ?? 0, href: '/manage/requests', linkLabel: 'Review' },
+    { key: 'unl', icon: Link2Off, text: 'Students have not connected a LeetCode account', count: unlinked, href: '/manage/students?issue=MISSING_USERNAME', linkLabel: 'View students' },
   ].filter((x): x is Attention => !!x && (x.count === undefined || x.count > 0));
 
   const support = d.needsSupport.slice(0, 6);
@@ -46,24 +47,15 @@ export default function Page() {
     <div className="space-y-6">
       {header}
       <Grid>
-        {admin ? (
-          <>
-            <StatCard label="Enrolled students" value={t.enrolledStudents} />
-            <StatCard label="Active batches" value={activeCount} href="/manage/batches" />
-            <StatCard label="Average completion" value={pct(t.avgCompletionPct)} />
-            <StatCard label="LeetCode connection" value={pct(d.verification.coveragePct)} hint={`${d.verification.verifiedLinks} of ${d.verification.studentsInScope} students connected`} />
-          </>
-        ) : (
-          <>
-            <StatCard label="My batches" value={t.batches} href="/manage/batches" />
-            <StatCard label="Students" value={t.enrolledStudents} />
-            <StatCard label="Average completion" value={pct(t.avgCompletionPct)} />
-            <StatCard label="Reserved enrollments" value={t.pendingEnrollments} hint="Reserved, not yet claimed" />
-          </>
-        )}
+        <StatCard label="Enrolled students" value={t.enrolledStudents} icon={<GraduationCap size={16} />} hint={plural(t.pendingEnrollments, 'reserved seat')} />
+        <StatCard label="Active batches" value={activeCount} icon={<UsersRound size={16} />} href="/manage/batches" />
+        <StatCard label="Average completion" value={pct(t.avgCompletionPct)} icon={<Target size={16} />}
+          hint={<ProgressBar value={t.avgCompletionPct} label="Average completion" size="sm" showValue={false} />} />
+        <StatCard label="LeetCode connection" value={pct(d.verification.coveragePct)} icon={<Link2 size={16} />}
+          hint={`${d.verification.verifiedLinks} of ${d.verification.studentsInScope} students connected`} />
       </Grid>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-5 lg:grid-cols-2">
         <Card title="Needs attention" flush>
           {attention.length ? (
             <ul className="divide-y divide-line">
@@ -85,7 +77,7 @@ export default function Page() {
           )}
         </Card>
 
-        <Card title="Students who may need support" description="Below 25% completion or without a connected LeetCode account" flush>
+        <Card title="Students who may need support" description="Low verified completion after a successful update, or no connected account" flush>
           {support.length ? (
             <ul className="divide-y divide-line">
               {support.map((r) => (
@@ -98,37 +90,30 @@ export default function Page() {
                 </li>
               ))}
             </ul>
-          ) : <EmptyState compact title="Nobody flagged" body="Students who fall behind will appear here." />}
+          ) : <EmptyState compact title="Nobody flagged" body="No students currently match these criteria." />}
         </Card>
       </div>
 
-      <Card title={admin ? 'Active batches' : 'Your batches'} actions={<Link className="text-[13px] text-accent-fg hover:underline" href="/manage/batches">All batches</Link>} flush>
-        {activeBatches.length ? (
-          <ul className="divide-y divide-line">
-            {activeBatches.map((b) => (
-              <li key={b.batchId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
-                <div className="min-w-0 flex-1 basis-48">
-                  <Link href={`/manage/batches/${b.batchId}`} className="block truncate font-medium text-fg hover:text-accent-fg hover:underline">{b.name}</Link>
-                  <span className="text-xs text-fg-subtle">{plural(b.students, 'student')}</span>
-                </div>
-                <ProgressBar value={b.avgCompletionPct} size="sm" label={`${b.name} average completion`} className="w-40 sm:w-52" />
-                <div className="flex gap-3 text-[13px]">
-                  <Link className="text-accent-fg hover:underline" href={`/manage/batches/${b.batchId}/students`}>Students</Link>
-                  <Link className="text-accent-fg hover:underline" href={`/manage/batches/${b.batchId}/visibility`}>Chapter Access</Link>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : <EmptyState compact title={admin ? 'No active batches' : 'No batches yet'} body="Create a batch to enroll students." action={<ButtonLink href="/manage/batches/new" size="sm">New batch</ButtonLink>} />}
+      <Card title="Active batches" actions={<ButtonLink href="/manage/batches" variant="secondary" size="sm">All batches</ButtonLink>} flush>
+        <DataTable caption="Active batches" rows={activeBatches.slice(0, 8)} rowKey={(batch) => batch.batchId}
+          empty={<EmptyState compact title="No active batches" body="Create a batch to enroll students." action={<ButtonLink href="/manage/batches/new" size="sm">New batch</ButtonLink>} />}
+          columns={[
+            { key: 'batch', header: 'Batch', cell: (b) => <div className="max-w-64 whitespace-normal"><Link href={`/manage/batches/${b.batchId}`} className="font-medium text-accent-fg hover:underline">{b.name}</Link>{b.college && <p className="text-xs text-fg-muted">{b.college}</p>}</div> },
+            { key: 'courses', header: 'Courses', cell: (b) => <span className="block max-w-64 whitespace-normal">{b.courses?.length ? b.courses.join(', ') : 'No courses assigned'}</span> },
+            { key: 'students', header: 'Students', cell: (b) => <span className="tabular-nums">{b.students}</span> },
+            { key: 'completion', header: 'Average completion', className: 'min-w-40', cell: (b) => <ProgressBar value={b.avgCompletionPct} size="sm" label={`${b.name} average completion`} /> },
+            { key: 'status', header: 'Status', cell: (b) => <StatusBadge status={b.status} /> },
+            { key: 'actions', header: 'Actions', cell: (b) => <ButtonLink href={`/manage/batches/${b.batchId}/students`} variant="secondary" size="xs">Manage students</ButtonLink> },
+          ]} />
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-5 lg:grid-cols-2">
         <Card title="Performance by difficulty" description="Verified problems out of available problems">
           <div className="space-y-3">
             {(['EASY', 'MEDIUM', 'HARD'] as const).map((k) => (
               <div key={k}>
-                <div className="mb-1 flex justify-between text-sm"><span className="text-fg">{human(k)}</span><span className="tabular-nums text-fg-muted">{diff[k].solved} / {diff[k].available}</span></div>
-                <ProgressBar value={diff[k].available ? (diff[k].solved / diff[k].available) * 100 : null} label={`${human(k)} completion`} />
+                <div className="mb-1 flex justify-between text-sm"><span className="text-fg">{human(k)}</span><span className="tabular-nums text-fg-muted">{diff[k].available ? `${diff[k].solved} / ${diff[k].available}` : 'Not assigned'}</span></div>
+                {diff[k].available > 0 && <ProgressBar value={(diff[k].solved / diff[k].available) * 100} label={`${human(k)} completion`} />}
               </div>
             ))}
           </div>

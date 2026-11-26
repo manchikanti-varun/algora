@@ -31,7 +31,7 @@ describe('production hardening', () => {
     (env as any).SESSION_SECRET_PREVIOUS = old;
     try {
       expect((await a.call('get', '/auth/me')).status).toBe(200);
-      expect((await a.call('post', '/colleges', { name: 'Rotation College' })).status).toBe(201); // old CSRF token accepted
+      expect((await a.call('post', '/colleges', { name: 'Rotation College', code: 'ROTATE' })).status).toBe(201); // old CSRF token accepted
       (env as any).SESSION_SECRET_PREVIOUS = undefined;
       expect((await a.call('get', '/auth/me')).status).toBe(401);
     } finally { (env as any).SESSION_SECRET = old; (env as any).SESSION_SECRET_PREVIOUS = undefined; }

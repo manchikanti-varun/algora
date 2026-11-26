@@ -18,15 +18,30 @@ describe('security hardening', () => {
     expect((await request(app).get('/api/v1/auth/me').set('Cookie', a.cookie!)).status).toBe(401);
   });
 
-  it('rate limits: auth 20/min per client, keyed by user when signed in; JSON 429 body', async () => {
+  it('rate limits: invalid credentials are bounded per IP while signed-in reads stay available; JSON 429 body', async () => {
     (env as any).NODE_ENV = 'development';
     try {
       let last = 0;
       for (let i = 0; i < 22; i++) last = (await request(app).post('/api/v1/auth/google').set('Origin', 'http://localhost:3000').send({ idToken: 'garbage-garbage-garbage-1' })).status;
-      expect(last).toBe(429);
-      const r = await request(app).post('/api/v1/trainer-requests').set('Origin', 'http://localhost:3000').send({ idToken: 'x'.repeat(25), fullName: 'X' });
-      expect(r.status).toBe(429); // same anonymous client, shared auth limiter
+      expect(last).toBe(429); // invalid-token budget, not a blanket IP ban
+      const r = await request(app).post('/api/v1/auth/google').set('Origin', 'http://localhost:3000').send({ idToken: 'garbage-garbage-garbage-1' });
+      expect(r.status).toBe(429);
       expect(r.body.error.code).toBe('RATE_LIMITED');
+      expect((await request(app).get('/api/v1/auth/me')).status).toBe(401); // session reads are not part of the credential budget
+      const a = await login(ADMIN);
+      expect((await a.call('get', '/auth/me')).status).toBe(200);
+    } finally { (env as any).NODE_ENV = 'test'; }
+  });
+
+  it.each([50, 100, 200, 300])('accepts %i simultaneous sign-ins from one shared campus IP', async (size) => {
+    (env as any).NODE_ENV = 'development';
+    try {
+      const attempt = (i: number) => request(app).post('/api/v1/auth/google').set('Origin', 'http://localhost:3000')
+        .send({ idToken: tok(`campus-${i}`, `campus-${i}@x.com`) });
+      const results = await Promise.all(Array.from({ length: size }, (_, i) => attempt(i)));
+      const statuses = results.map((r) => r.status);
+      expect(statuses.filter((s) => s !== 200)).toEqual([]);
+      expect(results.every((r) => r.body.status === 'REGISTRATION_REQUIRED')).toBe(true);
     } finally { (env as any).NODE_ENV = 'test'; }
   });
 

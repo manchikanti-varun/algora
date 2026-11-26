@@ -1,32 +1,41 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, errorMessage } from '@/lib/api';
+import { api, cachedApiValue, errorMessage } from '@/lib/api';
 
-/** Fetch `path` (null = skip). Re-fetches when the path changes. Never shows stale data from a previous path. */
+interface Result<T> { path: string; data: T | null; error: string | null; loading: boolean }
+
+/** Keep cached content during a same-route refresh and isolate results by URL. */
 export function useApi<T>(path: string | null) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(!!path);
-  const seq = useRef(0);
-  const load = useCallback(async () => {
+  const [result, setResult] = useState<Result<T> | null>(null);
+  const sequence = useRef(0);
+  // Verify current chapter access and account state on every fresh visit.
+  const cache = !!path && !path.startsWith('/student/');
+  const reload = useCallback(async () => {
     if (!path) return;
-    const id = ++seq.current;
-    setLoading(true); setError(null);
+    const id = ++sequence.current;
+    setResult((previous) => ({
+      path, data: previous?.path === path ? previous.data : (cache ? cachedApiValue<T>(path) ?? null : null), error: null, loading: true,
+    }));
     try {
-      const d = await api<T>(path);
-      if (id === seq.current) setData(d);
-    } catch (e) {
-      if (id === seq.current) { setError(errorMessage(e)); setData(null); }
-    } finally {
-      if (id === seq.current) setLoading(false);
+      const data = await api<T>(path, { cache });
+      if (id === sequence.current) setResult({ path, data, error: null, loading: false });
+    } catch (error) {
+      if (id === sequence.current) setResult({ path, data: null, error: errorMessage(error), loading: false });
     }
-  }, [path]);
+  }, [path, cache]);
+  const invalidate = useCallback(() => { sequence.current++; }, []);
   useEffect(() => {
-    // Fetch on mount and whenever the path changes; state updates happen after the awaited request.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
-  return { data, error, loading, reload: load, setData };
+    void reload();
+    return invalidate;
+  }, [reload, invalidate]);
+
+  const setData = useCallback((data: T | null | ((old: T | null) => T | null)) => {
+    if (!path) return;
+    setResult((old) => ({ path, data: typeof data === 'function' ? (data as (old: T | null) => T | null)(old?.path === path ? old.data : null) : data, error: null, loading: false }));
+  }, [path]);
+  const current = result && result.path === path ? result : null;
+  return { data: current ? current.data : (path && cache ? cachedApiValue<T>(path) ?? null : null), error: current?.error ?? null, loading: current?.loading ?? !!path, reload, setData };
 }
 
 /** Debounced value for search inputs. */

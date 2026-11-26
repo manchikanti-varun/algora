@@ -8,7 +8,7 @@ import { useSync } from '@/components/student/SyncProvider';
 import { useApi } from '@/hooks/useApi';
 import { useUrlState } from '@/hooks/useUrlState';
 import { qs } from '@/lib/api';
-interface P { _id: string; title: string; url: string; slug: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; problemNumber: number | null; topics: string[]; verified: boolean; evidence: { firstVerifiedAt: string | null; latestObservedSolvedAt: string | null } | null }
+interface P { _id: string; title: string; url: string; slug: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; problemNumber: number | null; points: number; topics: string[]; verified: boolean; evidence: { firstVerifiedAt: string | null; latestObservedSolvedAt: string | null } | null }
 interface R { chapter: { _id: string; title: string; description?: string }; course: { _id: string; title: string }; batchName: string; problems: P[]; prev: { _id: string; title: string } | null; next: { _id: string; title: string } | null }
 interface Course { batchCourseId: string; chapters: { _id: string }[] }
 const shortDate = (d: string) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -78,17 +78,18 @@ function Inner() {
                 const meta = [p.problemNumber !== null ? `#${p.problemNumber}` : null, p.topics.length ? p.topics.join(', ') : null,
                   p.verified && p.evidence?.firstVerifiedAt ? `Verified ${shortDate(p.evidence.firstVerifiedAt)}` : null].filter(Boolean);
                 return (
-                  <li key={p._id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-                    <span className={`inline-flex w-44 shrink-0 items-center gap-1.5 text-[13px] ${p.verified ? 'text-success-fg' : 'text-fg-muted'}`}>
+                  <li key={p._id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto_auto_minmax(155px,auto)_auto]">
+                    <span className={`order-3 inline-flex sm:order-none sm:col-start-4 sm:row-start-1 items-center gap-1.5 text-[13px] ${p.verified ? 'text-success-fg' : 'text-fg-muted'}`}>
                       {p.verified ? <CheckCircle2 size={16} aria-hidden /> : <Circle size={16} aria-hidden />}
                       {p.verified ? 'Verified' : 'Awaiting verification'}
                     </span>
-                    <div className="min-w-0 flex-1 basis-56">
+                    <div className="min-w-0 sm:col-start-1 sm:row-start-1">
                       <p className="font-medium text-fg">{p.title}</p>
                       {meta.length > 0 && <p className="mt-0.5 text-xs text-fg-subtle">{meta.join(' · ')}</p>}
                     </div>
-                    <DifficultyBadge d={p.difficulty} />
-                    <ButtonLink external href={p.url} variant="secondary" size="xs" icon={<ExternalLink size={13} aria-hidden />}>Open<span className="sr-only"> {p.title} on LeetCode (opens in a new tab)</span></ButtonLink>
+                    <span className="justify-self-end sm:col-start-2 sm:row-start-1"><DifficultyBadge d={p.difficulty} /></span>
+                    <span className="order-4 text-xs tabular-nums text-fg-muted sm:order-none sm:col-start-3 sm:row-start-1">{p.points} pts</span>
+                    <ButtonLink external href={p.url} variant="secondary" size="sm" className="order-5 w-fit sm:order-none sm:col-start-5 sm:row-start-1" icon={<ExternalLink size={13} aria-hidden />}>Solve<span className="sr-only"> {p.title} on LeetCode (opens in a new tab)</span></ButtonLink>
                   </li>
                 );
               })}
