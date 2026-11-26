@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { env } from '../src/config/env';
+import { env, leetcodeConfigIssues } from '../src/config/env';
 import { AuditLog, Batch, Enrollment, LeetcodeLink, SolveEvidence, User } from '../src/models';
 import { countableEvidence } from '../src/modules/leetcode/evidence.repository';
 import { migrateLeetcodeLinks } from '../src/modules/leetcode/link-migration';
@@ -61,21 +61,18 @@ describe('simplified LeetCode account linking', () => {
     expect((await s.call('get', '/leetcode/sync-status')).body).toMatchObject({ syncEnabled: false, link: { state: 'LINKED' } });
   });
 
-  it('internal risk leaves sync inactive while linking and core routes stay available during a provider failure', async () => {
+  it('OWN_RISK is rejected (not upstream authorization): sync stays inactive while linking and core routes keep working', async () => {
     const { LEETCODE_ACCESS_BASIS: basis, LEETCODE_DIRECT_ENABLED: direct } = env;
     env.LEETCODE_SYNC_ENABLED = true;
     env.LEETCODE_DIRECT_ENABLED = true;
-    env.LEETCODE_ACCESS_BASIS = 'OWN_RISK';
+    (leetcodeConfigIssues as any).LEETCODE_ACCESS_BASIS = 'OWN_RISK is not accepted: internal risk acceptance is not upstream authorization';
     try {
       expect((await reg('s1', 'a@x.com')).status).toBe(201);
       const s = await st('s1', 'a@x.com');
       const a = await login(tok('admin-sub', 'admin@example.com', 'Admin'));
       const view = (await a.call('get', '/leetcode/integration')).body;
-      expect(view.authorization.status).toBe('NOT_AUTHORIZED');
-      expect(view.providers.find((p: { id: string }) => p.id === 'direct')).toMatchObject({
-        requested: true, activation: 'INACTIVE', technicalHealth: 'UNTESTED',
-        activationReason: 'Internal risk acceptance does not grant provider access',
-      });
+      expect(view.activation).toMatchObject({ activated: false, reason: expect.stringContaining('internal risk acceptance is not upstream authorization') });
+      expect(view.providers.find((p: { id: string }) => p.id === 'direct')).toMatchObject({ requested: true, activation: 'INACTIVE', state: 'AWAITING_ACTIVATION' });
       expect((await s.call('post', '/leetcode/request-sync', {})).body.outcome.status).toBe('VERIFICATION_UNAVAILABLE');
 
       const mock = new MockProvider();
@@ -89,6 +86,7 @@ describe('simplified LeetCode account linking', () => {
       expect((await a.call('post', '/courses', { title: 'Core service still works' })).status).toBe(201);
     } finally {
       env.LEETCODE_ACCESS_BASIS = basis;
+      delete (leetcodeConfigIssues as any).LEETCODE_ACCESS_BASIS;
       env.LEETCODE_DIRECT_ENABLED = direct;
     }
   });

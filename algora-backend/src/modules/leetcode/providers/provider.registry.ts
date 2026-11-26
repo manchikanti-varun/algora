@@ -28,7 +28,7 @@ export function providerConfigurationReason(id: string): string | null {
   const groups = ['DIRECT', 'ALFA', 'QUERY', 'MOCK'];
   const group = { direct: 'DIRECT', alfa: 'ALFA', 'leetcode-query': 'QUERY', mock: 'MOCK' }[id];
   const invalid = Object.entries(leetcodeConfigIssues).filter(([key]) =>
-    !['LEETCODE_HEALTHCHECK_USERNAME', 'LEETCODE_SCHEDULER_ENABLED', 'LEETCODE_ACCESS_BASIS', 'LEETCODE_ACCESS_REF', 'LEETCODE_PERMISSION_REF', 'LEETCODE_ALFA_PERMISSION_REF'].includes(key) &&
+    !['LEETCODE_HEALTHCHECK_USERNAME', 'LEETCODE_SCHEDULER_ENABLED', 'LEETCODE_ACCESS_BASIS'].includes(key) &&
     (!groups.some((name) => key.startsWith(`LEETCODE_${name}_`)) || key.startsWith(`LEETCODE_${group}_`)));
   if (invalid.length) return invalid.map(([key, reason]) => `${key}: ${reason}`).join('; ');
   if (id === 'mock' && env.isProd) return 'Mock provider is disabled in production';
@@ -40,36 +40,21 @@ export function envEnabled(id: string): boolean {
   return env.LEETCODE_SYNC_ENABLED && providerRequested(id) && !providerConfigurationReason(id);
 }
 
+/** The single activation safeguard: an upstream authorization basis other than NONE. */
 function externalAccess(): Authorization {
   const basis = env.LEETCODE_ACCESS_BASIS;
-  for (const key of ['LEETCODE_ACCESS_BASIS', 'LEETCODE_ACCESS_REF'] as const) {
-    if (leetcodeConfigIssues[key]) return { authorized: false, reason: `${key}: ${leetcodeConfigIssues[key]}`, basis };
-  }
-  if (basis === 'NONE') return { authorized: false, reason: 'No external access basis configured (LEETCODE_ACCESS_BASIS)', basis };
-  if (basis === 'OWN_RISK') return { authorized: false, reason: 'Internal risk acceptance does not grant provider access', basis };
-  if (!env.LEETCODE_ACCESS_REF) return { authorized: false, reason: `LEETCODE_ACCESS_BASIS=${basis} requires LEETCODE_ACCESS_REF`, basis };
+  if (leetcodeConfigIssues.LEETCODE_ACCESS_BASIS) return { authorized: false, reason: `LEETCODE_ACCESS_BASIS: ${leetcodeConfigIssues.LEETCODE_ACCESS_BASIS}`, basis: 'NONE' };
+  if (basis === 'NONE') return { authorized: false, reason: 'Awaiting activation: LEETCODE_ACCESS_BASIS is NONE (no upstream authorization recorded)', basis };
   return { authorized: true, basis };
 }
-
 export function accessSummary() {
   const access = externalAccess();
-  return {
-    basis: env.LEETCODE_ACCESS_BASIS,
-    establishedExternally: access.authorized,
-    internalRiskAcceptance: env.LEETCODE_ACCESS_BASIS === 'OWN_RISK',
-    reason: access.reason ?? null,
-  };
+  return { basis: access.basis ?? 'NONE', activated: access.authorized, reason: access.reason ?? null };
 }
-
 export function authorizationFor(id: string): Authorization {
-  if (id === 'mock') return env.isProd ? { authorized: false, reason: 'Mock provider is disabled in production', basis: 'NONE' } : { authorized: true, basis: 'OWN_RISK' };
-  const access = externalAccess();
-  if (access.authorized && id === 'alfa' && !env.LEETCODE_ALFA_PERMISSION_REF) {
-    return { ...access, authorized: false, reason: leetcodeConfigIssues.LEETCODE_ALFA_PERMISSION_REF ? `LEETCODE_ALFA_PERMISSION_REF: ${leetcodeConfigIssues.LEETCODE_ALFA_PERMISSION_REF}` : 'Alfa requires a separate LEETCODE_ALFA_PERMISSION_REF for the relay deployment' };
-  }
-  return access;
+  if (id === 'mock') return env.isProd ? { authorized: false, reason: 'Mock provider is disabled in production' } : { authorized: true };
+  return externalAccess();
 }
-
 /** Refuses every request. Used for unauthorised providers so a coding mistake cannot reach the network. */
 const deniedTransport = (id: string): HttpTransport => ({ kind: 'network', send: async () => { throw new ProviderError('CONFIG_ERROR', `${id} is not authorised`); } });
 

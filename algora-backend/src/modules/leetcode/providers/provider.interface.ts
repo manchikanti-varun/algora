@@ -41,7 +41,7 @@ export interface AccountProbeResult { exists: boolean; calendarTotal: number | n
  * Whether Algora may use this data source, and on what basis. `basis` describes OUR arrangement; it is never a claim that
  * LeetCode itself issued a credential or key.
  */
-export interface Authorization { authorized: boolean; reason?: string; basis?: AccessBasis; reference?: string | null }
+export interface Authorization { authorized: boolean; reason?: string; basis?: AccessBasis }
 
 /**
  * Every provider implements this. Nothing outside src/modules/leetcode depends on a concrete provider.

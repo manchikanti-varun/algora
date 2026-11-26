@@ -22,6 +22,8 @@ const schema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
 });
 
+/** Upstream authorizations that activate real providers. */
+export const EXTERNAL_BASES = ['TERMS', 'WRITTEN_PERMISSION', 'LICENSED_THIRD_PARTY', 'INSTITUTIONAL', 'COMMERCIAL'] as const;
 const integrationSchema = z.object({
   LEETCODE_SYNC_ENABLED: bool,
   /** Run the background scheduler in this process. Set false on API replicas when a separate worker service runs it. */
@@ -29,14 +31,13 @@ const integrationSchema = z.object({
   /** Automatic synchronization interval in bootcamp hours, measured from each student's last SUCCESSFUL sync. */
   LEETCODE_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(5).default(30),
   /**
-   * The basis on which Algora accesses LeetCode data. This is a statement about OUR access arrangement, not a LeetCode key.
-   * Without a basis (NONE) no provider that reaches LeetCode is authorised.
+   * THE production activation safeguard (the only one). The owner's statement of which upstream authorization covers
+   * Algora's automated access to LeetCode. It is not a LeetCode credential: the GraphQL endpoint needs none.
+   * NONE (default) keeps every real provider inactive. Internal risk acceptance is not upstream authorization and is not a value.
    */
-  LEETCODE_ACCESS_BASIS: z.enum(['NONE', 'TERMS', 'WRITTEN_PERMISSION', 'LICENSED_THIRD_PARTY', 'INSTITUTIONAL', 'COMMERCIAL', 'OWN_RISK']).optional(),
-  /** Reference to the document behind the access basis (written permission, contract, licence). */
-  LEETCODE_ACCESS_REF: z.string().trim().max(200).optional(),
-  /** @deprecated Fallback for LEETCODE_ACCESS_REF only when WRITTEN_PERMISSION is explicitly configured. Kept for existing deployments. */
-  LEETCODE_PERMISSION_REF: z.string().trim().max(200).optional(),
+  LEETCODE_ACCESS_BASIS: z.string().trim().toUpperCase().pipe(z.enum(['NONE', ...EXTERNAL_BASES], {
+    error: (i) => i.input === 'OWN_RISK' ? 'OWN_RISK is not accepted: internal risk acceptance is not upstream authorization' : `must be one of NONE, ${EXTERNAL_BASES.join(', ')}`,
+  })).optional(),
   /** Comma-separated provider ids in preferred order. Admins may reorder at runtime; unknown ids fail validation. */
   LEETCODE_PROVIDER_PRIORITY: z.string().trim().default('direct,leetcode-query')
     .transform((v) => v.split(',').map((x) => x.trim()).filter(Boolean))
@@ -52,8 +53,6 @@ const integrationSchema = z.object({
       return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
     } catch { return false; }
   }, 'Must be an HTTPS URL without credentials, query, or fragment').optional().or(z.literal('').transform(() => undefined)),
-  /** Access reference for the Alfa deployment used ("self-hosted" for our own instance). */
-  LEETCODE_ALFA_PERMISSION_REF: z.string().trim().max(200).optional(),
   LEETCODE_ALFA_CACHE_SEC: z.coerce.number().int().min(0).max(3600).default(300),
   LEETCODE_QUERY_MODE: z.enum(['accepted', 'all-status']).default('accepted'),
   /** Ceilings. Shared LeetCode upstream budget (all providers together) and per-provider budgets. Admin settings can only lower them. */
@@ -102,7 +101,7 @@ if (!parsed.success) {
   throw new Error('Invalid environment configuration');
 }
 
-export type AccessBasis = 'NONE' | 'TERMS' | 'WRITTEN_PERMISSION' | 'LICENSED_THIRD_PARTY' | 'INSTITUTIONAL' | 'COMMERCIAL' | 'OWN_RISK';
+export type AccessBasis = 'NONE' | (typeof EXTERNAL_BASES)[number];
 
 type IntegrationKey = keyof typeof integrationSchema.shape;
 const integrationInput = Object.fromEntries(Object.keys(integrationSchema.shape).flatMap((key) => {
@@ -127,14 +126,11 @@ if (integration.LEETCODE_BOOTCAMP_START && integration.LEETCODE_BOOTCAMP_END &&
 }
 export const leetcodeConfigIssues = issues;
 
-const { LEETCODE_PERMISSION_REF, ...leetcode } = integration;
+const leetcode = integration;
 export const env = {
   ...parsed.data,
   ...leetcode,
   FRONTEND_ORIGIN: new URL(parsed.data.FRONTEND_URL).origin,
   isProd: parsed.data.NODE_ENV === 'production',
-  LEETCODE_ACCESS_BASIS: leetcode.LEETCODE_ACCESS_BASIS ?? 'NONE' as AccessBasis,
-  // Legacy reference is accepted only with an explicit written-permission basis.
-  LEETCODE_ACCESS_REF: leetcode.LEETCODE_ACCESS_REF ??
-    (leetcode.LEETCODE_ACCESS_BASIS === 'WRITTEN_PERMISSION' ? LEETCODE_PERMISSION_REF : undefined),
+  LEETCODE_ACCESS_BASIS: (leetcode.LEETCODE_ACCESS_BASIS ?? 'NONE') as AccessBasis,
 };

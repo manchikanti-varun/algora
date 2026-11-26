@@ -2,7 +2,7 @@ import { availableTokens, refundToken, takeToken } from '../../lib/ratelimit';
 import { env } from '../../config/env';
 import { AccountProbe } from '../../models';
 import type { BreakerConfig } from './circuit-breaker';
-import { loadSettings, rawSettings, type Effective } from './integration-settings';
+import { loadSettings, type Effective } from './integration-settings';
 import { ProviderError, scopeOf } from './leetcode.types';
 import {
   blockUpstream, claimProbe, event, getStates, healthOf, noteUpstreamNetworkFailure, noteUpstreamSuccess, pKey,
@@ -24,15 +24,18 @@ export type ManagerResult<T> =
   | { ok: true; value: T; provider: SubmissionProvider; attempts: Attempt[]; failedOver: boolean }
   | { ok: false; reason: 'PAUSED' | 'NO_ELIGIBLE_PROVIDER' | 'PROVIDERS_UNAVAILABLE' | 'GLOBAL_RATE_LIMITED' | 'UPSTREAM_BLOCKED' | 'NOT_FOUND' | 'ALL_FAILED'; error?: ProviderError; retryAfterSec?: number; attempts: Attempt[] };
 
+/**
+ * What the Super Admin sees for a provider, in precedence order. Configuration and activation come first, then pause and
+ * upstream restriction, then observed health. A provider that has never answered is UNTESTED, never HEALTHY.
+ */
+export type ProviderState = 'DISABLED' | 'AWAITING_ACTIVATION' | 'PAUSED' | 'UPSTREAM_RESTRICTED' | 'RATE_LIMITED' | 'UNAVAILABLE' | 'UNTESTED' | 'DEGRADED' | 'HEALTHY';
 export interface ProviderView {
   id: string; displayName: string; capabilities: SubmissionProvider['capabilities']; priority: number;
   requested: boolean; configurationReason: string | null; envEnabled: boolean; adminEnabled: boolean; authorized: boolean; authorizationReason?: string; transportKind: string;
   /** Combined status used for provider selection (kept for compatibility). */
   status: HealthStatus; breaker: string; nextEligibleAt: Date | null;
-  /** Three independent dimensions for display. */
-  authorizationStatus: 'AUTHORIZED' | 'AUTHORIZATION_PENDING' | 'NOT_AUTHORIZED';
-  /** The access basis this provider is authorised under (never a secret). */
-  accessBasis: string | null;
+  /** One display state with its exact reason (see providerState). */
+  state: ProviderState; stateReason: string | null;
   activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null;
   technicalHealth: TechnicalHealth;
   totalRequests: number; successes: number; failures: number; rateLimited: number; consecutiveFailures: number; successRate: number | null;
@@ -46,7 +49,6 @@ const isEnabled = (p: SubmissionProvider, s: Effective) => providerEnvEnabled(p.
 
 export async function providerViews(): Promise<{ settings: Effective; views: ProviderView[]; states: Map<string, StateDoc> }> {
   const s = await loadSettings();
-  const requestedAt = (await rawSettings()).permissionRequestedAt ?? null;
   const states = await getStates();
   const views: ProviderView[] = [];
   for (const p of orderByPriority(registry(), s)) {
@@ -61,9 +63,8 @@ export async function providerViews(): Promise<{ settings: Effective; views: Pro
       id: p.id, displayName: p.displayName, capabilities: p.capabilities, priority: s.priority.indexOf(p.id),
       requested: isTestOverride() || providerRequested(p.id), configurationReason, envEnabled: providerEnvEnabled(p.id), adminEnabled: !s.disabled.has(p.id), authorized: auth.authorized, authorizationReason: auth.reason, transportKind: p.transportKind,
       status: h.status, breaker: h.breaker, nextEligibleAt: h.nextEligibleAt,
-      authorizationStatus: auth.authorized ? 'AUTHORIZED' : requestedAt && p.id !== 'mock' ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED',
-      accessBasis: auth.basis ?? null,
       ...activationOf(p, s, auth, configurationReason),
+      ...providerState(p, s, auth, configurationReason, technicalHealthOf(d, { upstreamBlocked: blocked, cfg: breakerCfg(s), timeoutMs: s.timeoutMs }), upstreamBlock(states, p.capabilities.upstream)),
       technicalHealth: technicalHealthOf(d, { upstreamBlocked: blocked, cfg: breakerCfg(s), timeoutMs: s.timeoutMs }),
       totalRequests: total, successes: d?.successes ?? 0, failures: d?.failures ?? 0, rateLimited: d?.rateLimited ?? 0, consecutiveFailures: d?.consecutiveFailures ?? 0,
       successRate: total ? Math.round(((d?.successes ?? 0) / total) * 1000) / 10 : null, avgLatencyMs: d?.latencyEwmaMs != null ? Math.round(d.latencyEwmaMs) : null,
@@ -85,6 +86,21 @@ function activationOf(p: SubmissionProvider, s: Effective, auth: ReturnType<Subm
   return { activation: 'ACTIVE', activationReason: null };
 }
 
+function providerState(p: SubmissionProvider, s: Effective, auth: ReturnType<SubmissionProvider['authorization']>, configurationReason: string | null, health: TechnicalHealth, block: { reason: string; until: Date } | null): { state: ProviderState; stateReason: string | null } {
+  if (configurationReason) return { state: 'DISABLED', stateReason: configurationReason };
+  if (!env.LEETCODE_SYNC_ENABLED) return { state: 'DISABLED', stateReason: 'LEETCODE_SYNC_ENABLED is false' };
+  if (!providerEnvEnabled(p.id)) return { state: 'DISABLED', stateReason: `Not enabled in the server environment${p.id === 'direct' ? ' (LEETCODE_DIRECT_ENABLED=false)' : p.id === 'leetcode-query' ? ' (LEETCODE_QUERY_ENABLED=false)' : ''}` };
+  if (s.disabled.has(p.id)) return { state: 'DISABLED', stateReason: 'Disabled by the Super Admin' };
+  if (!auth.authorized) return { state: 'AWAITING_ACTIVATION', stateReason: auth.reason ?? 'Awaiting activation' };
+  if (s.paused) return { state: 'PAUSED', stateReason: 'Synchronization paused by the Super Admin' };
+  if (block) return block.reason === 'UPSTREAM_RATE_LIMITED'
+    ? { state: 'RATE_LIMITED', stateReason: `LeetCode rate limited requests; paused until ${block.until.toISOString()}` }
+    : { state: block.reason === 'UPSTREAM_ACCESS_DENIED' ? 'UPSTREAM_RESTRICTED' : 'UNAVAILABLE', stateReason: `${block.reason === 'UPSTREAM_ACCESS_DENIED' ? 'LeetCode is restricting access (HTTP 403 or challenge)' : 'LeetCode is unavailable'}; paused until ${block.until.toISOString()}` };
+  if (health === 'RATE_LIMITED') return { state: 'RATE_LIMITED', stateReason: 'Provider rate limited; waiting for Retry-After' };
+  if (health === 'CIRCUIT_OPEN' || health === 'UNAVAILABLE') return { state: 'UNAVAILABLE', stateReason: health === 'CIRCUIT_OPEN' ? 'Circuit open after repeated failures; a single probe will test recovery' : 'Recent requests failed' };
+  if (health === 'UNTESTED') return { state: 'UNTESTED', stateReason: 'Active, but no request has been made yet. Run a health check.' };
+  return { state: health === 'DEGRADED' ? 'DEGRADED' : 'HEALTHY', stateReason: null };
+}
 function orderByPriority(list: SubmissionProvider[], s: Effective) {
   const idx = (id: string) => { const i = s.priority.indexOf(id); return i < 0 ? 999 : i; };
   return [...list].sort((a, b) => idx(a.id) - idx(b.id));

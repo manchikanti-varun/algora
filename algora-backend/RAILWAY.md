@@ -63,31 +63,30 @@ LEETCODE_BOOTCAMP_START=2026-12-07
 LEETCODE_BOOTCAMP_END=2026-12-11
 ```
 
-Remove if present: `LEETCODE_PERMISSION_REF`, `LEETCODE_ALFA_PERMISSION_REF`, `LEETCODE_ALFA_BASE_URL`, `LEETCODE_ALFA_CACHE_SEC`, `LEETCODE_ALFA_RATE_PER_MIN`.
+Remove if present (no longer read): `LEETCODE_ACCESS_REF`, `LEETCODE_PERMISSION_REF`, `LEETCODE_ALFA_PERMISSION_REF`. Also unnecessary while Alfa is off: `LEETCODE_ALFA_BASE_URL`, `LEETCODE_ALFA_CACHE_SEC`, `LEETCODE_ALFA_RATE_PER_MIN`.
 
 Vercel needs `BACKEND_URL=https://<railway-domain>` (read at build time) and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`.
 
 ## Access and activation
 
-The LeetCode GraphQL endpoint needs no API key. `LEETCODE_ACCESS_BASIS` and `LEETCODE_ACCESS_REF` are Algora's own record of why it may make requests; Algora checks they are complete, not that the rights exist.
+`LEETCODE_ACCESS_BASIS` is the single production activation safeguard. It is not a LeetCode credential (the GraphQL endpoint needs none); it is the owner's record of which upstream authorization covers Algora's automated access. No reference document variable is required.
 
-| `LEETCODE_ACCESS_BASIS` | Also required | Real providers |
-| --- | --- | --- |
-| `NONE` | none | Inactive |
-| `OWN_RISK` | none | Inactive (internal risk acceptance is not upstream permission) |
-| `TERMS`, `WRITTEN_PERMISSION`, `LICENSED_THIRD_PARTY`, `INSTITUTIONAL`, `COMMERCIAL` | `LEETCODE_ACCESS_REF` (up to 200 characters, a document identifier, not a secret) | Authorised |
+| `LEETCODE_ACCESS_BASIS` | Real providers |
+| --- | --- |
+| `NONE` (default) | Inactive: "Awaiting activation" |
+| `TERMS`, `WRITTEN_PERMISSION`, `LICENSED_THIRD_PARTY`, `INSTITUTIONAL`, `COMMERCIAL` | Active |
+| `OWN_RISK` or anything else | Rejected as invalid; providers stay inactive. Internal risk acceptance is not upstream authorization. |
 
-A provider runs only when all of these hold: `LEETCODE_SYNC_ENABLED=true`, its `LEETCODE_*_ENABLED=true`, an authorised basis, MongoDB transactions available (Atlas), and not paused or disabled by the Super Admin. Authorisation is read at startup. When any condition fails, the rest of Algora keeps working and students see "Verification unavailable".
+A provider runs only when `LEETCODE_SYNC_ENABLED=true`, its `LEETCODE_*_ENABLED=true`, the basis is set, MongoDB supports transactions (Atlas does) and the Super Admin has not paused or disabled it. The basis is read at startup. The backend always starts; when any condition fails, the Super Admin page shows the exact reason and students see "Verification unavailable".
 
-Activation, once a real access arrangement exists and the owner approves it:
+Activation (only when the basis is true):
 
 ```dotenv
-LEETCODE_ACCESS_BASIS=<the basis that is true>
-LEETCODE_ACCESS_REF=<identifier of the supporting document>
+LEETCODE_ACCESS_BASIS=<the basis that actually applies>
 LEETCODE_DIRECT_ENABLED=true
 ```
 
-Then in Super Admin → LeetCode integration: **Resume synchronization** if paused, and **Run health check** once. `OK` or `EMPTY_WINDOW` means Railway can reach LeetCode. `UPSTREAM_ACCESS_DENIED` or `UPSTREAM_RATE_LIMITED` means LeetCode or Cloudflare is refusing the requests; synchronization pauses itself and must not be forced.
+Then in Super Admin → LeetCode integration: **Run health check** once. `OK` or `EMPTY_WINDOW` means Railway can reach LeetCode. `UPSTREAM_ACCESS_DENIED` or `UPSTREAM_RATE_LIMITED` means LeetCode or Cloudflare is refusing the requests; synchronization pauses itself and must not be forced.
 
 ## Synchronization behaviour
 

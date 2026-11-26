@@ -52,11 +52,12 @@ it('production starts without any LeetCode environment variables', async () => {
 });
 
 it.each([
-  [{}, 'No external access basis configured'],
-  [{ LEETCODE_ACCESS_BASIS: 'NONE', LEETCODE_PERMISSION_REF: 'old-reference' }, 'No external access basis configured'],
-  [{ LEETCODE_ACCESS_BASIS: 'OWN_RISK' }, 'Internal risk acceptance does not grant provider access'],
-  [{ LEETCODE_ACCESS_BASIS: 'TERMS', LEETCODE_ACCESS_REF: 'REPLACE_WITH_REFERENCE' }, 'LEETCODE_ACCESS_REF'],
-  [{ LEETCODE_ACCESS_BASIS: 'TERMS', LEETCODE_ACCESS_REF: 'test-fixture' }, 'MongoDB transactions are unavailable'],
+  [{}, 'LEETCODE_ACCESS_BASIS is NONE'],
+  [{ LEETCODE_ACCESS_BASIS: 'NONE', LEETCODE_PERMISSION_REF: 'old-reference', LEETCODE_ACCESS_REF: 'ignored' }, 'LEETCODE_ACCESS_BASIS is NONE'],
+  [{ LEETCODE_ACCESS_BASIS: 'OWN_RISK' }, 'internal risk acceptance is not upstream authorization'],
+  [{ LEETCODE_ACCESS_BASIS: 'REPLACE_WITH_BASIS' }, 'LEETCODE_ACCESS_BASIS'],
+  [{ LEETCODE_ACCESS_BASIS: 'bogus' }, 'must be one of NONE'],
+  [{ LEETCODE_ACCESS_BASIS: 'WRITTEN_PERMISSION' }, 'MongoDB transactions are unavailable'],
 ] as const)('production starts with an inactive external provider (%j)', async (settings, reason) => {
   await boot({ LEETCODE_SYNC_ENABLED: 'true', LEETCODE_DIRECT_ENABLED: 'true', ...settings }, (output) => {
     expect(output).toContain(reason);

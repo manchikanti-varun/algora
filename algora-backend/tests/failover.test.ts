@@ -435,9 +435,9 @@ describe('Super Admin integration controls', () => {
     const { d, a } = trio(); d.solve('hc_user', 'x'); a.solve('hc_user', 'x');
     const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
     const o = (await admin.call('get', '/leetcode/integration')).body;
-    expect(o).toMatchObject({ overall: 'HEALTHY', selectedProvider: 'direct', priority: ['direct', 'alfa', 'leetcode-query'] });
+    expect(o).toMatchObject({ overall: 'UNTESTED', selectedProvider: 'direct', priority: ['direct', 'alfa', 'leetcode-query'] }); // no request yet: never shown as healthy
     expect(o.providers).toHaveLength(3);
-    expect(JSON.stringify(o)).not.toMatch(/PERMISSION_REF|https:\/\//);
+    expect(JSON.stringify(o)).not.toMatch(/PERMISSION_REF|ACCESS_REF|https:\/\//);
     // cannot exceed ceilings, cannot name unknown providers
     expect((await admin.call('put', '/leetcode/integration/settings', { ratePerMin: env.LEETCODE_GLOBAL_RATE_PER_MIN + 1 })).status).toBe(400);
     expect((await admin.call('put', '/leetcode/integration/settings', { disabled: ['nope'] })).status).toBe(400);
@@ -475,8 +475,8 @@ describe('Super Admin integration controls', () => {
     const o = (await admin.call('get', '/leetcode/integration')).body;
     const alfa = o.providers.find((p: any) => p.id === 'alfa');
     expect(alfa.envEnabled).toBe(false);
-    expect(['DISABLED', 'ACCESS_NOT_AUTHORIZED']).toContain(alfa.status);
-    expect(o.providers.find((p: any) => p.id === 'direct').status).toBe('ACCESS_NOT_AUTHORIZED'); // no LEETCODE_PERMISSION_REF in tests
+    expect(alfa.state).toBe('DISABLED');
+    expect(o.providers.find((p: any) => p.id === 'direct').state).toBe('DISABLED'); // LEETCODE_DIRECT_ENABLED is not set in tests
   });
 });
 
@@ -520,29 +520,40 @@ describe('shared budget accounting', () => {
   });
 });
 
-describe('authorization, activation and technical health are reported separately', () => {
-  it('without LEETCODE_PERMISSION_REF: NOT_AUTHORIZED -> AUTHORIZATION_PENDING once a request is recorded; never Revoked, never active, health UNTESTED', async () => {
-    setProvidersForTests(undefined); // real registry: no permission reference in tests
-    const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
-    let o = (await admin.call('get', '/leetcode/integration')).body;
-    const real = o.providers.filter((p: any) => p.id !== 'mock');
-    expect(real.map((p: any) => p.authorizationStatus)).toEqual(['NOT_AUTHORIZED', 'NOT_AUTHORIZED', 'NOT_AUTHORIZED']);
-    expect(real.every((p: any) => p.activation === 'INACTIVE' && p.technicalHealth === 'UNTESTED')).toBe(true);
-    expect(o.authorization).toMatchObject({ status: 'NOT_AUTHORIZED', requestedAt: null });
-    const at = new Date('2026-11-26T10:00:00Z').toISOString();
-    expect((await admin.call('put', '/leetcode/integration/settings', { permissionRequestedAt: at })).status).toBe(200);
-    o = (await admin.call('get', '/leetcode/integration')).body;
-    expect(o.providers.filter((p: any) => p.id !== 'mock').every((p: any) => p.authorizationStatus === 'AUTHORIZATION_PENDING' && p.activation === 'INACTIVE')).toBe(true);
-    expect(o.authorization).toMatchObject({ status: 'AUTHORIZATION_PENDING', requestedAt: at });
-    expect(JSON.stringify(o)).not.toMatch(/REVOKED/);
+describe('provider state and the single activation safeguard', () => {
+  const real = async () => (await (await login(tok('sub-admin', 'admin@example.com', 'Admin'))).call('get', '/leetcode/integration')).body;
+  const saved = { basis: env.LEETCODE_ACCESS_BASIS, direct: env.LEETCODE_DIRECT_ENABLED };
+  afterEach(() => { (env as any).LEETCODE_ACCESS_BASIS = saved.basis; (env as any).LEETCODE_DIRECT_ENABLED = saved.direct; });
+  it('disabled -> enabled awaiting activation -> active and untested, each with its exact reason; no request is ever made', async () => {
+    setProvidersForTests(undefined); // real registry, real (denied) network transport
+    let o = await real();
+    expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'DISABLED', stateReason: expect.stringContaining('LEETCODE_DIRECT_ENABLED=false') });
+    expect(o.overall).toBe('DISABLED');
+    (env as any).LEETCODE_DIRECT_ENABLED = true;
+    o = await real();
+    expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'AWAITING_ACTIVATION', activation: 'INACTIVE' });
+    expect(o).toMatchObject({ overall: 'AWAITING_ACTIVATION', overallReason: expect.stringContaining('LEETCODE_ACCESS_BASIS is NONE'), activation: { basis: 'NONE', activated: false } });
+    (env as any).LEETCODE_ACCESS_BASIS = 'WRITTEN_PERMISSION';
+    o = await real();
+    expect(o.providers.find((p: any) => p.id === 'direct')).toMatchObject({ state: 'UNTESTED', activation: 'ACTIVE' });
+    expect(o).toMatchObject({ overall: 'UNTESTED', activation: { basis: 'WRITTEN_PERMISSION', activated: true } });
+    expect(JSON.stringify(o)).not.toMatch(/OWN_RISK|internalRiskAcceptance|AUTHORIZATION_PENDING/);
   });
-  it('technical health is measured from real requests, independent of authorization', async () => {
+  it('healthy only after a real answer; paused, rate limited and restricted are distinct', async () => {
     const { d } = trio(); d.solve('asha', 'x');
+    expect((await real()).providers.find((p: any) => p.id === 'direct').state).toBe('UNTESTED');
     await fetchAccepted('asha', 20);
-    const admin = await login(tok('sub-admin', 'admin@example.com', 'Admin'));
-    const v = (await admin.call('get', '/leetcode/integration')).body.providers.find((p: any) => p.id === 'direct');
-    expect(v).toMatchObject({ authorizationStatus: 'AUTHORIZED', activation: 'ACTIVE', technicalHealth: 'HEALTHY' });
-    const alfa = (await admin.call('get', '/leetcode/integration')).body.providers.find((p: any) => p.id === 'alfa');
-    expect(alfa.technicalHealth).toBe('UNTESTED');
+    expect((await real()).providers.find((p: any) => p.id === 'direct').state).toBe('HEALTHY');
+    await saveSettings({ paused: true, disabled: [], providerRatePerMin: {} }, null);
+    expect((await real())).toMatchObject({ overall: 'PAUSED', overallReason: expect.stringContaining('paused') });
+    await saveSettings({ paused: false, disabled: [], providerRatePerMin: {} }, null);
+    d.failWith = 'UPSTREAM_RATE_LIMITED'; d.retryAfterSec = 120;
+    await fetchAccepted('asha', 20);
+    expect((await real())).toMatchObject({ overall: 'RATE_LIMITED' });
+    await ProviderState.deleteMany({}); d.failWith = 'UPSTREAM_ACCESS_DENIED';
+    await fetchAccepted('asha', 20);
+    const o = await real();
+    expect(o).toMatchObject({ overall: 'UPSTREAM_RESTRICTED', overallReason: expect.stringContaining('restricting access') });
+    expect(o.providers.find((p: any) => p.id === 'direct').state).toBe('UPSTREAM_RESTRICTED');
   });
 });

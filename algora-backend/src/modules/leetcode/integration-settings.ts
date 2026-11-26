@@ -22,7 +22,7 @@ export const settingsSchema = z.object({
   studentCooldownSec: z.number().int().min(10).max(3600).optional(),
   /** Worker concurrency. Can only lower LEETCODE_CONCURRENCY. */
   concurrency: z.number().int().min(1).max(10).optional(),
-  /** Record-keeping only: when the written-permission request to LeetCode was sent. Never authorises anything. */
+  /** @deprecated No longer shown or used. Accepted so stored settings from older versions still load. */
   permissionRequestedAt: z.string().datetime().optional().nullable(),
 });
 export type IntegrationSettings = z.infer<typeof settingsSchema>;
