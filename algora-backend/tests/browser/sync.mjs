@@ -1,6 +1,6 @@
 /**
  * Browser test of the verification experience with the MOCK provider (what becomes live once LeetCode access is authorised):
- * ownership verification, manual sync, cooldown countdown, verified checkmarks, tab-return sync, and evidence after unlink.
+ * queued manual updates, server-based cooldown countdown, no sync on reload or tab switch, verified checkmarks and evidence after unlink.
  */
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
@@ -66,39 +66,43 @@ try {
     await s.page.getByText('Linked account:', { exact: false }).waitFor();
     await mock('/solve', { username: 'asha_rao', slug: 'unrelated-problem' });
   });
-  await step('Manual sync verifies a newly accepted problem; dashboard and chapter update; button shows a countdown', async () => {
+  await step('Update Progress queues a job, shows queued/updating, then verifies from the backend; dashboard and chapter update; button shows a server-based countdown', async () => {
     await mock('/solve', { username: 'asha_rao', slug: 'two-sum' });
     await s.page.goto(`${FE}/student/dashboard`);
     await s.page.getByText('0 / 2').first().waitFor();
-    await s.page.getByRole('button', { name: 'Sync progress' }).first().click();
-    await s.page.getByText('2 new accepted problems verified').waitFor(); // two-sum + the unrelated problem from setup (evidence is canonical, not course-bound)
+    assert((await mock('/x', {})).calls === 0, 'page load called the provider');
+    await s.page.getByRole('button', { name: 'Update Progress' }).first().click();
+    await s.page.getByText(/Update queued|Updating progress/).first().waitFor();
+    await s.page.getByText(/Progress updated successfully\. 2 new problems verified/).waitFor(); // two-sum + the unrelated problem from setup (evidence is canonical, not course-bound)
     await s.page.getByText('1 / 2').first().waitFor();
-    await s.page.getByRole('button', { name: /Sync (again )?in \d+s/ }).first().waitFor();
+    await s.page.getByRole('button', { name: /Update available in \d\d:\d\d/ }).first().waitFor();
     await s.page.getByText('Batch rank').waitFor();
+    assert((await mock('/x', {})).calls === 1, 'exactly one provider call expected');
     await s.page.getByRole('link', { name: 'Arrays' }).click();
     await s.page.getByLabel('Verified', { exact: true }).waitFor();
     await s.page.getByText(/Verified .* last accepted/).waitFor();
     await s.page.getByText('#1', { exact: true }).waitFor();
     await s.page.screenshot({ path: '../docs/screenshots/11-verified-chapter.png', fullPage: true });
   });
-  await step('Returning to the tab after being away re-syncs once the cooldown has passed', async () => {
+  await step('Reloading, navigating and switching tabs never contact LeetCode', async () => {
     await mock('/solve', { username: 'asha_rao', slug: '3sum' });
-    await s.page.waitForTimeout(11_000); // cooldown is 10 s in this harness
     const before = (await mock('/x', {})).calls;
+    await s.page.reload(); await s.page.goto(`${FE}/student/progress`); await s.page.goto(`${FE}/student/dashboard`);
     await s.page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
     await s.page.waitForTimeout(16_000);
     await s.page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
-    await s.page.getByText('1 new accepted problem verified').waitFor();
-    const after = (await mock('/x', {})).calls;
-    assert(after === before + 1, `provider calls ${before} -> ${after}`);
-    await s.page.getByText('2 of 2 verified').waitFor();
+    await s.page.waitForTimeout(2_000);
+    assert((await mock('/x', {})).calls === before, 'provider called without a request');
   });
-  await step('A short tab switch (< 15 s) does not call the provider', async () => {
-    await s.page.waitForTimeout(11_000);
+  await step('After the cooldown a second request is accepted once (double click makes one job) and picks up the new solve', async () => {
+    await s.page.waitForTimeout(2_000); // cooldown is 10 s in this harness
+    const btn = s.page.getByRole('button', { name: 'Update Progress' }).first();
+    await btn.waitFor();
     const before = (await mock('/x', {})).calls;
-    await s.page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' }); document.dispatchEvent(new Event('visibilitychange')); });
-    await s.page.waitForTimeout(1500);
-    assert((await mock('/x', {})).calls === before, 'provider called on a short switch');
+    await btn.dblclick({ delay: 10 }).catch(() => {});
+    await s.page.getByText(/Progress updated successfully\. 1 new problem verified/).waitFor();
+    assert((await mock('/x', {})).calls === before + 1, 'double click must make exactly one provider call');
+    await s.page.getByText('2 / 2').first().waitFor(); // dashboard refetched from the backend after the job finished
   });
   await step('Leaderboard ranks the student with verified points; management analytics agree', async () => {
     await s.page.goto(`${FE}/student/leaderboard`);

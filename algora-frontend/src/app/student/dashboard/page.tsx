@@ -32,7 +32,7 @@ export default function Page() {
         <p className="font-medium text-slate-900">{nextChapter.title}</p>
         <p className="mt-1 text-sm text-slate-500">{nextChapter.solved} of {nextChapter.total} problems verified</p>
       </Card>}
-      <SyncPanel />
+      <SyncPanel verified={s ? { solved: s.verifiedSolved, total: s.accessibleProblems } : null} />
       {view && view.link.state !== 'LINKED' && (
         <Card><p className="text-sm text-slate-700">Link your LeetCode username to track accepted submissions. <Link className="font-medium text-indigo-600 hover:underline" href="/student/profile">Go to profile</Link></p></Card>
       )}

@@ -68,7 +68,7 @@ await Promise.all(students.map(async (s) => {
     if (bc && ch) await call(s, 'GET /student/chapters/:id', 'GET', `/student/chapters/${ch}?batchCourseId=${bc}`);
     if (bc && Math.random() < 0.5) await call(s, 'GET /student/leaderboard', 'GET', `/student/leaderboard?batchCourseId=${bc}`);
     const ts = performance.now();
-    const r = await call(s, 'POST /leetcode/request-sync', 'POST', '/leetcode/request-sync', { reason: 'TAB_RETURN' });
+    const r = await call(s, 'POST /leetcode/request-sync', 'POST', '/leetcode/request-sync', {});
     const o = r.status === 429 ? 'COOLDOWN(429)' : r.j?.outcome?.status ?? `HTTP ${r.status}`;
     outcomes[o] = (outcomes[o] ?? 0) + 1;
     const ph = !outageAt ? 'before' : !restoredAt ? 'outage' : 'after';

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import mongoose, { type ClientSession } from 'mongoose';
 import { JobLease } from '../models';
+import { dbNow } from './clock';
 
 /**
  * MongoDB-backed distributed lease with fencing. Time comparisons use the DATABASE clock ($$NOW), so instance clock skew
@@ -19,7 +20,7 @@ export class LeaseLostError extends Error {
   constructor() { super('Lease lost'); }
 }
 
-const nowExpr = (now?: Date) => (now ? now : '$$NOW');
+const nowExpr = (now?: Date) => (now ? now : dbNow());
 
 /** Atomically take the lease if absent or expired. Returns null when another owner holds a valid lease. */
 export async function acquireLease(key: string, ttlMs: number, now?: Date): Promise<Lease | null> {

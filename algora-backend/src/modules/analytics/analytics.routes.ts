@@ -19,9 +19,10 @@ export const filterSchema = z.object({
   difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(), q: z.string().trim().max(60).optional(),
   verification: z.enum(['LINKED', 'UNLINKED', 'VERIFIED', 'PENDING_VERIFICATION', 'REVALIDATION_REQUIRED']).optional(),
   minPct: z.coerce.number().min(0).max(100).optional(), maxPct: z.coerce.number().min(0).max(100).optional(),
+  syncFilter: z.enum(['QUEUED', 'DELAYED', 'FAILED', 'GAP', 'ATTENTION']).optional(),
   from: date.optional(), to: date.optional(), dateBasis: z.enum(['verified', 'submitted']).default('verified'),
 });
-const sortable = ['points', 'solved', 'completionPct', 'name', 'rollNumber', 'lastVerifiedAt'] as const;
+const sortable = ['points', 'solved', 'completionPct', 'name', 'rollNumber', 'lastVerifiedAt', 'lastSyncAt'] as const;
 
 analyticsRouter.get('/overview', async (req, res) => res.json(await overview(req.user!, parse(filterSchema, req.query) as Filters)));
 

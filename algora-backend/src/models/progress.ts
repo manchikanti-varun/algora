@@ -1,4 +1,4 @@
-import { Schema, model, Types } from 'mongoose';
+import { Schema, model, Types, type Model } from 'mongoose';
 
 const oid = (ref: string, required = true) => ({ type: Types.ObjectId, ref, required });
 
@@ -34,7 +34,7 @@ const syncLogSchema = new Schema({
   fence: Number, // fencing token of the lease this run held
   counts: { type: Map, of: Number },
   error: String,
-  trigger: { type: String, enum: ['SCHEDULE', 'MANUAL'] },
+  trigger: { type: String, enum: ['SCHEDULE', 'MANUAL', 'RECONCILIATION'] },
   provider: String,
 });
 syncLogSchema.index({ studentId: 1, startedAt: -1 });
@@ -281,3 +281,56 @@ const conflictSchema = new Schema({
 conflictSchema.index({ studentId: 1, at: -1 });
 conflictSchema.index({ at: -1 });
 export const EvidenceConflict = model('EvidenceConflict', conflictSchema, 'evidence_conflicts');
+
+/**
+ * Persistent synchronization queue. At most ONE active (QUEUED or RUNNING) job exists per student: the partial unique index
+ * below is what makes duplicate requests from several tabs, devices and backend instances collapse into one job.
+ * `fence` increases on every claim, so a worker that lost its lease cannot complete or retry a job somebody else now owns.
+ */
+export const SYNC_JOB_STATUSES = ['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'] as const;
+export const SYNC_JOB_TRIGGERS = ['SCHEDULE', 'MANUAL', 'RECONCILIATION'] as const;
+export const ACTIVE_JOB_STATUSES = ['QUEUED', 'RUNNING'] as const;
+const syncJobSchema = new Schema({
+  studentId: oid('User'),
+  /** The link this job was created for. A job whose link is no longer current never writes evidence. */
+  linkId: oid('LeetcodeLink', false),
+  trigger: { type: String, enum: SYNC_JOB_TRIGGERS, required: true },
+  status: { type: String, enum: SYNC_JOB_STATUSES, required: true, default: 'QUEUED' },
+  /** Earliest time a worker may claim the job (spacing, retry backoff, upstream Retry-After). */
+  runAfter: { type: Date, required: true },
+  /** When the job first became due. Used for fair, oldest-first ordering and for delay measurement. */
+  dueAt: { type: Date, required: true },
+  enqueuedAt: { type: Date, required: true },
+  startedAt: Date,
+  finishedAt: Date,
+  attempts: { type: Number, default: 0 },
+  maxAttempts: { type: Number, default: 4 },
+  fence: { type: Number, default: 0 },
+  leaseExpiresAt: Date,
+  requestedBy: oid('User', false),
+  /** Sanitised outcome. Never contains provider details beyond a state and an error kind. */
+  result: { status: String, newlyVerified: Number, possibleGap: Boolean, error: String, message: String },
+  cancelReason: String,
+});
+syncJobSchema.index({ studentId: 1 }, { unique: true, partialFilterExpression: { status: { $in: ['QUEUED', 'RUNNING'] } }, name: 'one_active_job_per_student' });
+// Claim: filter status + runAfter, order by dueAt (oldest first). Manual-first step filters trigger as well.
+syncJobSchema.index({ status: 1, dueAt: 1, runAfter: 1 });
+syncJobSchema.index({ status: 1, trigger: 1, dueAt: 1 });
+syncJobSchema.index({ status: 1, leaseExpiresAt: 1 });
+syncJobSchema.index({ studentId: 1, enqueuedAt: -1 });
+syncJobSchema.index({ status: 1, finishedAt: -1 });
+syncJobSchema.index({ finishedAt: 1 }, { expireAfterSeconds: 14 * 24 * 3600, name: 'finished_job_retention' });
+export const LeetcodeSyncJob = model('LeetcodeSyncJob', syncJobSchema, 'leetcode_sync_jobs') as unknown as Model<any>;
+/** Per-minute upstream request counters (all providers share the upstream, so they share these counters). */
+const reqStatSchema = new Schema({
+  _id: String, // UTC minute, e.g. 202612070400
+  at: { type: Date, required: true },
+  requests: { type: Number, default: 0 },
+  ok: { type: Number, default: 0 },
+  rateLimited: { type: Number, default: 0 },
+  accessDenied: { type: Number, default: 0 },
+  failed: { type: Number, default: 0 },
+  latencyMs: { type: Number, default: 0 },
+});
+reqStatSchema.index({ at: 1 }, { expireAfterSeconds: 8 * 24 * 3600 });
+export const LeetcodeRequestStat = model('LeetcodeRequestStat', reqStatSchema, 'leetcode_request_stats');

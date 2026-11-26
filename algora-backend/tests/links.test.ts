@@ -4,6 +4,7 @@ import { env } from '../src/config/env';
 import { AuditLog, Batch, Enrollment, LeetcodeLink, SolveEvidence, User } from '../src/models';
 import { countableEvidence } from '../src/modules/leetcode/evidence.repository';
 import { migrateLeetcodeLinks } from '../src/modules/leetcode/link-migration';
+import { drainOnce } from '../src/modules/leetcode/sync-queue';
 import { MockProvider } from '../src/modules/leetcode/providers/mock.provider';
 import { setProviderForTests } from '../src/modules/leetcode/providers/provider.registry';
 import { app, evidenceFor, login, resetDb, startDb, stopDb, studentBody, tok, verifiedLink } from './helpers';
@@ -58,6 +59,38 @@ describe('simplified LeetCode account linking', () => {
     expect(changed.status).toBe(201);
     expect(changed.body).toMatchObject({ state: 'LINKED', username: 'new_name' });
     expect((await s.call('get', '/leetcode/sync-status')).body).toMatchObject({ syncEnabled: false, link: { state: 'LINKED' } });
+  });
+
+  it('internal risk leaves sync inactive while linking and core routes stay available during a provider failure', async () => {
+    const { LEETCODE_ACCESS_BASIS: basis, LEETCODE_DIRECT_ENABLED: direct } = env;
+    env.LEETCODE_SYNC_ENABLED = true;
+    env.LEETCODE_DIRECT_ENABLED = true;
+    env.LEETCODE_ACCESS_BASIS = 'OWN_RISK';
+    try {
+      expect((await reg('s1', 'a@x.com')).status).toBe(201);
+      const s = await st('s1', 'a@x.com');
+      const a = await login(tok('admin-sub', 'admin@example.com', 'Admin'));
+      const view = (await a.call('get', '/leetcode/integration')).body;
+      expect(view.authorization.status).toBe('NOT_AUTHORIZED');
+      expect(view.providers.find((p: { id: string }) => p.id === 'direct')).toMatchObject({
+        requested: true, activation: 'INACTIVE', technicalHealth: 'UNTESTED',
+        activationReason: 'Internal risk acceptance does not grant provider access',
+      });
+      expect((await s.call('post', '/leetcode/request-sync', {})).body.outcome.status).toBe('VERIFICATION_UNAVAILABLE');
+
+      const mock = new MockProvider();
+      mock.failWith = 'PROVIDER_UNAVAILABLE';
+      setProviderForTests(mock);
+      expect((await s.call('post', '/leetcode/request-sync', {})).status).toBe(202); // queued, not executed inline
+      await drainOnce();
+      expect((await s.call('get', '/leetcode/sync-status')).body.status).toBe('PROVIDER_UNAVAILABLE');
+      expect(mock.calls).toBe(1);
+      expect((await s.call('get', '/student/courses')).status).toBe(200);
+      expect((await a.call('post', '/courses', { title: 'Core service still works' })).status).toBe(201);
+    } finally {
+      env.LEETCODE_ACCESS_BASIS = basis;
+      env.LEETCODE_DIRECT_ENABLED = direct;
+    }
   });
 
   it('re-linking the same username is rejected; consent is required; invalid usernames are rejected', async () => {

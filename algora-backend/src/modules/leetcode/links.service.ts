@@ -3,6 +3,7 @@ import { badRequest, conflict } from '../../lib/errors';
 import { maybeTransaction } from '../../lib/lease';
 import { LeetcodeLink, linkFlags, User, type LinkStatus } from '../../models';
 import { clearBoardCache } from '../progress/progress.service';
+import { cancelJobsForStudent } from './sync-jobs';
 
 type Id = Types.ObjectId | string;
 export const USERNAME = /^[A-Za-z0-9_-]{1,40}$/;
@@ -20,7 +21,7 @@ async function resetSyncState(studentId: Id, username: string | null, session?: 
       $set: { 'sync.status': 'IDLE', 'sync.consecutiveFailures': 0, 'sync.possibleGap': false, ...(username ? { leetcodeUsername: username } : {}) },
       $unset: {
         'sync.lastAttemptAt': 1, 'sync.nextEligibleAt': 1, 'sync.lastSuccessAt': 1, 'sync.lastError': 1,
-        'sync.statusDetail': 1, 'sync.coverage': 1, 'sync.lastProvider': 1, ...(username ? {} : { leetcodeUsername: 1 }),
+        'sync.statusDetail': 1, 'sync.coverage': 1, 'sync.lastProvider': 1, 'sync.nextAutoSyncAt': 1, 'sync.lastGapAt': 1, ...(username ? {} : { leetcodeUsername: 1 }),
       },
     },
     { session },
@@ -87,6 +88,7 @@ export async function linkAccount(studentId: Id, rawUsername: string, opts: Link
         { session },
       );
       await resetSyncState(studentId, username, session);
+      await cancelJobsForStudent(studentId, 'LINK_CHANGED', session);
       return link;
     });
     clearBoardCache();
@@ -104,6 +106,7 @@ export async function revokeLinks(studentId: Id, reason: string, by?: Id) {
       $set: { status: 'REVOKED', ...linkFlags('REVOKED'), endedAt: new Date(), endedReason: reason, ...(by ? { endedBy: by } : {}) },
     }, { session });
     await resetSyncState(studentId, null, session);
+    await cancelJobsForStudent(studentId, 'LINK_REVOKED', session);
     return revoked.modifiedCount;
   });
   clearBoardCache();

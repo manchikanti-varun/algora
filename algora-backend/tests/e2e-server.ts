@@ -32,4 +32,11 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
     }).listen(5199, '127.0.0.1');
   }
   await import('../src/server.js');
+  if (process.env.E2E_MOCK === '1') {
+    // TEST ONLY: drain the persistent sync queue in-process. The automatic scheduler stays off so mock call counts are deterministic.
+    const { workerStep } = await import('../src/modules/leetcode/sync-queue.js');
+    const inFlight = new Set<Promise<unknown>>();
+    let busy = false;
+    setInterval(async () => { if (busy) return; busy = true; try { await workerStep(inFlight); } catch { /* next tick */ } finally { busy = false; } }, 500);
+  }
 })();

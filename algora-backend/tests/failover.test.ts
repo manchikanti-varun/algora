@@ -4,7 +4,9 @@ import { env } from '../src/config/env';
 import { EvidenceConflict, ProviderEvent, ProviderState, RateBucket, SolveEvidence, User } from '../src/models';
 import { countableEvidence } from '../src/modules/leetcode/evidence.repository';
 import { invalidateSettings, saveSettings } from '../src/modules/leetcode/integration-settings';
-import { requestSync, syncStudent } from '../src/modules/leetcode/leetcode-sync.service';
+import { syncStudent } from '../src/modules/leetcode/leetcode-sync.service';
+import { burstOf } from '../src/modules/leetcode/provider-manager';
+import { drainOnce, requestManualSync } from '../src/modules/leetcode/sync-queue';
 import { fetchAccepted, runHealthChecks } from '../src/modules/leetcode/provider-manager';
 import { AlfaProvider } from '../src/modules/leetcode/providers/alfa.provider';
 import { DirectProvider } from '../src/modules/leetcode/providers/direct.provider';
@@ -178,7 +180,7 @@ describe('failover scenarios (mock providers sharing one upstream)', () => {
     expect(d.calls).toBe(0);
     // one shared token consumed (by alfa), the one taken for direct was refunded
     const after = (await RateBucket.findById('upstream:leetcode-graphql').lean())!.tokens!;
-    expect(after).toBeGreaterThanOrEqual(Math.max(5, env.LEETCODE_GLOBAL_RATE_PER_MIN) - 1 - 0.01);
+    expect(after).toBeGreaterThanOrEqual(burstOf(env.LEETCODE_GLOBAL_RATE_PER_MIN) - 1 - 0.01);
   });
 
   it('12. shared LeetCode rate limit: no failover, every provider respects it, Retry-After honoured', async () => {
@@ -223,12 +225,22 @@ describe('failover scenarios (mock providers sharing one upstream)', () => {
     expect(a.calls).toBe(0);
   });
 
+  it('default failover limit of 1: at most two providers are tried per request', async () => {
+    const { d, a, q } = trio(); solveAll([d, a, q], 'asha', 'x');
+    d.failWith = 'BAD_RESPONSE'; a.failWith = 'BAD_RESPONSE';
+    const prev = env.LEETCODE_MAX_FAILOVER; (env as any).LEETCODE_MAX_FAILOVER = 1;
+    try { await saveSettings({ paused: false, disabled: [], providerRatePerMin: {}, priority: ['direct', 'alfa', 'leetcode-query'] }, null); invalidateSettings();
+      const r: any = await fetchAccepted('asha', 20);
+      expect(r.ok).toBe(false); expect(q.calls).toBe(0); expect(d.calls + a.calls).toBe(2);
+    } finally { (env as any).LEETCODE_MAX_FAILOVER = prev; invalidateSettings(); }
+  });
   it('15. concurrent syncs for one student, even during failover, make one provider round', async () => {
     const { d, a } = trio(); const s = await student(); d.solve('asha', 'x'); a.solve('asha', 'x'); d.failWith = 'PROVIDER_UNAVAILABLE'; a.latencyMs = 40;
     await Promise.all(Array.from({ length: 6 }, () => syncStudent(s.id, 'MANUAL')));
     expect([d.calls, a.calls]).toEqual([1, 1]);
-    const rs = await Promise.all(Array.from({ length: 8 }, () => requestSync(s.id, 'MANUAL', new Date(Date.now() + 10 * 60_000))));
-    expect(rs.filter((r) => r.accepted).length).toBe(1);
+    const rs = await Promise.all(Array.from({ length: 8 }, () => requestManualSync(s.id, new Date(Date.now() + 10 * 60_000))));
+    expect(rs.filter((r) => r.kind === 'QUEUED').length).toBe(1);
+    expect(new Set(rs.map((r) => (r as any).job?.id)).size).toBe(1); // everyone sees the same job
   });
 
   it('16. provider health is shared: a circuit opened by one instance is honoured by another (state lives in MongoDB)', async () => {
@@ -290,8 +302,11 @@ describe('failover scenarios (mock providers sharing one upstream)', () => {
     const { d, a } = trio(); await student(); d.solve('asha', 'x'); a.solve('asha', 'x'); d.failWith = 'PROVIDER_UNAVAILABLE';
     const c = await login(tok(`s${seq}`, `s${seq}@x.com`));
     const r = await c.call('post', '/leetcode/request-sync', {});
-    expect(r.body.outcome.status).toBe('SYNC_SUCCESS');
-    expect(JSON.stringify(r.body)).not.toMatch(/alfa|direct|failedOver|leetcode-query/);
+    expect(r.status).toBe(202);
+    await drainOnce();
+    const st = await c.call('get', '/leetcode/sync-status');
+    expect(st.body.status).toBe('SYNC_SUCCESS');
+    expect(JSON.stringify([r.body, st.body])).not.toMatch(/alfa|direct|failedOver|leetcode-query/);
   });
 });
 
@@ -434,8 +449,8 @@ describe('Super Admin integration controls', () => {
     // pause: students get SYNC_PAUSED and no calls
     await admin.call('put', '/leetcode/integration/settings', { paused: true });
     const s = await student();
-    const r = await requestSync(s.id, 'MANUAL');
-    expect(r).toMatchObject({ accepted: true, outcome: { status: 'SYNC_PAUSED' } });
+    const r = await requestManualSync(s.id);
+    expect(r).toMatchObject({ kind: 'UNAVAILABLE', reason: 'PAUSED' });
     expect((await admin.call('get', '/leetcode/integration')).body.settings.disabled).toEqual(['leetcode-query']); // pause did not reset other settings
     const sv = (await (await login(tok(`s${seq}`, `s${seq}@x.com`))).call('get', '/leetcode/sync-status')).body;
     expect(sv).toMatchObject({ syncEnabled: true, paused: true }); // students see 'paused', not 'unavailable'

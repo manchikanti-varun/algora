@@ -1,72 +1,88 @@
 import { describe, expect, it } from 'vitest';
-import { backoffSec, cooldownRemainingSec, defaultPolicy, dueAt, inBootcampHours, selectDue } from '../src/modules/leetcode/sync.policy';
-import { breakerState, pauseMs, shouldOpen } from '../src/modules/leetcode/circuit-breaker';
-
-const cfg = defaultPolicy(); // IST, 09:00-18:00, Mon-Sat
-// IST = UTC+5:30. 2025-01-06 is a Monday.
-const ist = (d: string, hhmm: string) => new Date(`${d}T${hhmm}:00+05:30`);
-const MON_10 = ist('2025-01-06', '10:00'), MON_20 = ist('2025-01-06', '20:00'), SUN_11 = ist('2025-01-05', '11:00');
-const mAgo = (now: Date, m: number) => new Date(now.getTime() - m * 60_000);
-
-describe('bootcamp hours', () => {
-  it('inside / outside / weekday', () => {
-    expect(inBootcampHours(MON_10, cfg)).toBe(true);
-    expect(inBootcampHours(MON_20, cfg)).toBe(false);
-    expect(inBootcampHours(SUN_11, cfg)).toBe(false);
-    expect(inBootcampHours(ist('2025-01-06', '18:00'), cfg)).toBe(false);
-    expect(inBootcampHours(ist('2025-01-06', '09:00'), cfg)).toBe(true);
+import { autoAllowedNow, backoffSec, defaultPolicy, inBootcampHours, jitterFraction, manualEligibility, minSpacingSec, nextAutoSyncAt, nextWindowStart, parseHours, reconciliationDue, termEndInstant } from '../src/modules/leetcode/sync.policy';
+const c = defaultPolicy({ term: { start: new Date('2026-12-07'), end: new Date('2026-12-11') } }); // IST 09:30-16:30 Mon-Fri, interval 30
+const ist = (s: string) => new Date(`${s}+05:30`);
+describe('calendar', () => {
+  it('parses hours and treats date-only term bounds as whole local days', () => {
+    expect(parseHours('09:30-16:30')).toEqual({ startMin: 570, endMin: 990 });
+    expect(termEndInstant(c)!.toISOString()).toBe(ist('2026-12-12T00:00:00').toISOString());
+  });
+  it('is active only Mon-Fri 09:30-16:30 IST inside the term', () => {
+    expect(inBootcampHours(ist('2026-12-07T09:29:00'), c)).toBe(false);
+    expect(inBootcampHours(ist('2026-12-07T09:30:00'), c)).toBe(true);
+    expect(inBootcampHours(ist('2026-12-11T16:29:00'), c)).toBe(true);
+    expect(inBootcampHours(ist('2026-12-11T16:30:00'), c)).toBe(false);
+    expect(inBootcampHours(ist('2026-12-06T11:00:00'), c)).toBe(false); // before term (Sunday)
+    expect(inBootcampHours(ist('2026-12-14T11:00:00'), c)).toBe(false); // after term
+  });
+  it('nothing is hardcoded to December 2026: another term and weekday set work', () => {
+    const other = defaultPolicy({ days: [6], hours: { startMin: 600, endMin: 660 }, term: { start: new Date('2027-03-01'), end: new Date('2027-03-31') } });
+    expect(inBootcampHours(ist('2027-03-06T10:30:00'), other)).toBe(true);
+    expect(inBootcampHours(ist('2026-12-07T10:30:00'), other)).toBe(false);
+  });
+  it('next window start skips nights and weekends', () => {
+    expect(nextWindowStart(ist('2026-12-07T18:00:00'), c)!.toISOString()).toBe(ist('2026-12-08T09:30:00').toISOString());
+    expect(nextWindowStart(ist('2026-12-11T18:00:00'), c)).toBeNull(); // term over
   });
 });
-
-describe('dueAt / selectDue', () => {
-  it('active students every 15 min, idle hourly, in hours', () => {
-    const active = { id: 'a', lastActiveAt: mAgo(MON_10, 5), lastAttemptAt: mAgo(MON_10, 14) };
-    const idle = { id: 'i', lastActiveAt: mAgo(MON_10, 300), lastAttemptAt: mAgo(MON_10, 14) };
-    expect(selectDue([active, idle], MON_10, cfg, 10)).toEqual([]);
-    expect(selectDue([{ ...active, lastAttemptAt: mAgo(MON_10, 16) }, { ...idle, lastAttemptAt: mAgo(MON_10, 16) }], MON_10, cfg, 10).map((s) => s.id)).toEqual(['a']);
-    expect(selectDue([{ ...idle, lastAttemptAt: mAgo(MON_10, 61) }], MON_10, cfg, 10).map((s) => s.id)).toEqual(['i']);
+describe('hybrid automatic schedule', () => {
+  it('after a success the next automatic sync is 30 minutes later', () => {
+    const t = ist('2026-12-07T09:30:00');
+    expect(nextAutoSyncAt('s1', t, t, c)!.toISOString()).toBe(ist('2026-12-07T10:00:00').toISOString());
   });
-  it('reduced frequency outside hours, and nobody who has been quiet for 24h', () => {
-    const recent = { id: 'r', lastActiveAt: mAgo(MON_20, 120), lastAttemptAt: mAgo(MON_20, 100) };
-    const quiet = { id: 'q', lastActiveAt: mAgo(MON_20, 3000), lastAttemptAt: mAgo(MON_20, 3000) };
-    expect(selectDue([recent, quiet], MON_20, cfg, 10)).toEqual([]);
-    expect(selectDue([{ ...recent, lastAttemptAt: mAgo(MON_20, 241) }, quiet], MON_20, cfg, 10).map((s) => s.id)).toEqual(['r']);
-    expect(dueAt(quiet, MON_20, cfg)).toBeNull();
+  it('spec example: a manual success at 09:40 moves the next automatic sync from 10:00 to 10:10, and a second one at 09:50 to 10:20', () => {
+    expect(nextAutoSyncAt('s1', ist('2026-12-07T09:40:00'), ist('2026-12-07T09:40:00'), c)!.toISOString()).toBe(ist('2026-12-07T10:10:00').toISOString());
+    expect(nextAutoSyncAt('s1', ist('2026-12-07T09:50:00'), ist('2026-12-07T09:50:00'), c)!.toISOString()).toBe(ist('2026-12-07T10:20:00').toISOString());
   });
-  it('possible-gap students are prioritised and resynced after 5 min; priority order and cap', () => {
-    const gap = { id: 'g', possibleGap: true, lastAttemptAt: mAgo(MON_10, 6), lastSuccessAt: mAgo(MON_10, 6) };
-    const act = { id: 'a', lastActiveAt: mAgo(MON_10, 1), lastAttemptAt: mAgo(MON_10, 30), lastSuccessAt: mAgo(MON_10, 30) };
-    const old = { id: 'o', lastAttemptAt: mAgo(MON_10, 600), lastSuccessAt: mAgo(MON_10, 600) };
-    expect(selectDue([old, act, gap], MON_10, cfg, 10).map((s) => s.id)).toEqual(['g', 'a', 'o']);
-    expect(selectDue([old, act, gap], MON_10, cfg, 2).map((s) => s.id)).toEqual(['g', 'a']);
+  it('a success near closing time schedules the next window open plus a per-student offset, never a burst', () => {
+    const t = ist('2026-12-07T16:20:00');
+    const a = nextAutoSyncAt('student-a', t, t, c)!, b = nextAutoSyncAt('student-b', t, t, c)!;
+    const open = ist('2026-12-08T09:30:00').getTime();
+    for (const x of [a, b]) { expect(x.getTime()).toBeGreaterThanOrEqual(open); expect(x.getTime()).toBeLessThan(open + 30 * 60_000); }
+    expect(a.getTime()).not.toBe(b.getTime());
   });
-  it('never-synced students are due; backoff window is respected', () => {
-    expect(selectDue([{ id: 'n' }], MON_10, cfg, 5)).toHaveLength(1);
-    const blocked = { id: 'b', lastAttemptAt: mAgo(MON_10, 600), nextEligibleAt: new Date(MON_10.getTime() + 60_000) };
-    expect(selectDue([blocked], MON_10, cfg, 5)).toEqual([]);
+  it('the last day ends the schedule (final reconciliation covers the rest)', () => {
+    const t = ist('2026-12-11T16:20:00');
+    expect(nextAutoSyncAt('s', t, t, c)).toBeNull();
+  });
+  it('never-synced students are spread across the first interval, deterministically', () => {
+    const now = ist('2026-12-07T09:30:00');
+    const times = Array.from({ length: 200 }, (_, i) => nextAutoSyncAt(`id-${i}`, null, now, c)!.getTime());
+    const spread = times.map((x) => Math.floor((x - now.getTime()) / 60_000));
+    for (let m = 0; m < 30; m += 5) expect(spread.filter((x) => x >= m && x < m + 5).length).toBeGreaterThan(10); // every 5-minute slice is used
+    expect(nextAutoSyncAt('id-1', null, now, c)!.getTime()).toBe(times[1]); // restart-safe
+    expect(jitterFraction('x')).toBeGreaterThanOrEqual(0);
+  });
+  it('off-hours: disabled by default, or a reduced interval when configured', () => {
+    expect(autoAllowedNow(ist('2026-12-07T20:00:00'), c)).toBe(false);
+    const reduced = defaultPolicy({ ...c, offHoursIntervalMin: 120 });
+    expect(autoAllowedNow(ist('2026-12-07T20:00:00'), reduced)).toBe(true);
+    const t = ist('2026-12-07T16:00:00');
+    expect(nextAutoSyncAt('s', t, t, reduced)!.toISOString()).toBe(ist('2026-12-07T18:00:00').toISOString());
   });
 });
-
-describe('cooldown, backoff, breaker', () => {
-  it('cooldown', () => {
-    expect(cooldownRemainingSec(null, MON_10, cfg)).toBe(0);
-    expect(cooldownRemainingSec(mAgo(MON_10, 2), MON_10, cfg)).toBe(180);
-    expect(cooldownRemainingSec(mAgo(MON_10, 6), MON_10, cfg)).toBe(0);
+describe('manual cooldown', () => {
+  it('is 10 minutes from the last manual REQUEST', () => {
+    const t = ist('2026-12-07T09:40:00');
+    expect(manualEligibility(null, t, c)).toMatchObject({ eligible: true, remainingSec: 0 });
+    expect(manualEligibility(t, ist('2026-12-07T09:45:00'), c)).toMatchObject({ eligible: false, remainingSec: 300 });
+    expect(manualEligibility(t, ist('2026-12-07T09:50:00'), c).eligible).toBe(true);
+    expect(manualEligibility(t, ist('2026-12-07T09:41:18'), c).remainingSec).toBe(522);
   });
-  it('exponential backoff, capped, jittered within +-25%', () => {
-    expect([1, 2, 3, 4].map((n) => backoffSec(n, 0.5))).toEqual([60, 120, 240, 480]);
-    expect(backoffSec(20, 0.5)).toBe(1800);
-    expect(backoffSec(1, 0)).toBe(45); expect(backoffSec(1, 1)).toBe(75);
+  it('shared spacing between any two attempts is half the cooldown', () => { expect(minSpacingSec(c)).toBe(300); });
+});
+describe('final reconciliation', () => {
+  it('is due once after the term ends, for a bounded grace period', () => {
+    expect(reconciliationDue(ist('2026-12-11T20:00:00'), c, null)).toBeNull(); // term still running until midnight
+    const end = termEndInstant(c)!;
+    expect(reconciliationDue(new Date(end.getTime() + 60_000), c, null)!.getTime()).toBe(end.getTime());
+    expect(reconciliationDue(new Date(end.getTime() + 60_000), c, end)).toBeNull(); // done
+    expect(reconciliationDue(new Date(end.getTime() + 10 * 86_400_000), c, null)).toBeNull(); // grace over
   });
-  it('circuit breaker (pure): opens at threshold, half-opens after the pause, a failed probe re-opens with a longer pause', () => {
-    const c = { threshold: 5, baseOpenMs: 1000, maxOpenMs: 8000 };
-    expect(shouldOpen({ consecutiveFailures: 3, openCount: 0 }, c)).toBe(false);
-    expect(shouldOpen({ consecutiveFailures: 4, openCount: 0 }, c)).toBe(true);
-    const open1 = { consecutiveFailures: 5, openedAt: new Date(0), openCount: 1 };
-    expect(breakerState(open1, c, 500)).toBe('OPEN'); expect(breakerState(open1, c, 1000)).toBe('HALF_OPEN');
-    expect(shouldOpen(open1, c, 1000)).toBe(true); // failed probe
-    expect(pauseMs({ ...open1, openCount: 2 }, c)).toBe(2000); expect(pauseMs({ ...open1, openCount: 9 }, c)).toBe(8000);
-    expect(breakerState({ consecutiveFailures: 0, openCount: 0 }, c)).toBe('CLOSED');
+});
+describe('backoff', () => {
+  it('grows exponentially with jitter and is capped', () => {
+    expect(backoffSec(1, 0.5)).toBe(60); expect(backoffSec(3, 0.5)).toBe(240); expect(backoffSec(20, 0.5)).toBe(1800);
+    expect(backoffSec(2, 0)).toBeLessThan(backoffSec(2, 1));
   });
-
 });

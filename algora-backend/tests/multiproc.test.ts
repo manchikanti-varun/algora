@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import mongoose from 'mongoose';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Batch, Enrollment, SolveEvidence, User } from '../src/models';
+import { Batch, Enrollment, LeetcodeSyncJob, SolveEvidence, User } from '../src/models';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { syncAllIndexes } from '../src/models';
 import { verifiedLink } from './helpers';
@@ -36,7 +36,8 @@ describe('3 backend processes, one replica set', () => {
       await verifiedLink(u._id, `user${i}`);
       await Enrollment.create({ studentId: u._id, batchId: batch._id });
     }
-    const RATE = 30; // per minute -> burst 30
+    const RATE = 120; // per minute -> burst 24 (a fifth of a minute's budget)
+    const BURST = Math.ceil(RATE / 5);
     const SECONDS = 8;
     const t0 = Date.now();
     const results = await Promise.all([1, 2, 3].map(() => runWorker(SECONDS, { LEETCODE_GLOBAL_RATE_PER_MIN: String(RATE) })));
@@ -60,15 +61,12 @@ describe('3 backend processes, one replica set', () => {
       const s = list.sort((a, b) => a.start - b.start);
       for (let i = 1; i < s.length; i++) expect(s[i].start, `overlap for ${u}: ${JSON.stringify([s[i - 1], s[i]])}`).toBeGreaterThanOrEqual(s[i - 1].end);
     }
-    // 2. at most one scheduler pass at a time
-    const passes = (await mongoose.connection.collection('probe_passes').find().toArray()).sort((a, b) => a.start - b.start);
-    expect(passes.length).toBeGreaterThan(1);
-    for (let i = 1; i < passes.length; i++) {
-      expect(passes[i].start, 'two passes overlapped').toBeGreaterThanOrEqual(passes[i - 1].end);
-      expect(passes[i].fence).toBeGreaterThan(passes[i - 1].fence); // fence order matches time order
-    }
+    // 2. the queue never holds two active jobs for one student, and every finished job ended exactly once
+    const active = await LeetcodeSyncJob.aggregate([{ $match: { status: { $in: ['QUEUED', 'RUNNING'] } } }, { $group: { _id: '$studentId', n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }]);
+    expect(active).toHaveLength(0);
+    expect(await LeetcodeSyncJob.countDocuments({ status: 'SUCCEEDED' })).toBeGreaterThan(0);
     // 3. global rate: burst + refill over the run, across all processes
-    const allowed = RATE + (RATE * (elapsed + 2)) / 60;
+    const allowed = BURST + (RATE * (elapsed + 2)) / 60;
     expect(calls.length).toBeLessThanOrEqual(Math.ceil(allowed));
     // 4. evidence: exactly 5 slugs per student, no duplicates
     expect(await SolveEvidence.countDocuments()).toBe(20 * 5 > 0 ? (await SolveEvidence.distinct('studentId')).length * 5 : 0);

@@ -1,16 +1,18 @@
 import { RateBucket } from '../models';
+import { dbNow } from './clock';
 
 /**
  * Global token bucket stored in MongoDB so the limit holds across every backend instance.
  * One atomic pipeline update refills by elapsed DB time, then takes a token only if one is available.
  */
 export async function takeToken(key: string, perMin: number, burst: number): Promise<boolean> {
+  const n = dbNow();
   const doc = await RateBucket.findOneAndUpdate(
     { _id: key },
     [
-      { $set: { tokens: { $ifNull: ['$tokens', burst] }, ts: { $ifNull: ['$ts', '$$NOW'] } } },
-      { $set: { refilled: { $min: [burst, { $add: ['$tokens', { $multiply: [{ $divide: [{ $subtract: ['$$NOW', '$ts'] }, 60_000] }, perMin] }] }] } } },
-      { $set: { granted: { $gte: ['$refilled', 1] }, tokens: { $cond: [{ $gte: ['$refilled', 1] }, { $subtract: ['$refilled', 1] }, '$refilled'] }, ts: '$$NOW' } },
+      { $set: { tokens: { $ifNull: ['$tokens', burst] }, ts: { $ifNull: ['$ts', n] } } },
+      { $set: { refilled: { $min: [burst, { $add: ['$tokens', { $multiply: [{ $divide: [{ $subtract: [n, '$ts'] }, 60_000] }, perMin] }] }] } } },
+      { $set: { granted: { $gte: ['$refilled', 1] }, tokens: { $cond: [{ $gte: ['$refilled', 1] }, { $subtract: ['$refilled', 1] }, '$refilled'] }, ts: n } },
       { $unset: 'refilled' },
     ],
     { upsert: true, returnDocument: 'after', updatePipeline: true },

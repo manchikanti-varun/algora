@@ -1,20 +1,25 @@
 import { Types } from 'mongoose';
-import { Batch, BatchCourse, College, Course, Enrollment, LeetcodeLink, LeetcodeSyncLog, PendingEnrollment, User, type UserDoc } from '../../models';
+import { Batch, BatchCourse, College, Course, Enrollment, LeetcodeLink, LeetcodeSyncJob, LeetcodeSyncLog, PendingEnrollment, User, type UserDoc } from '../../models';
 import { trainerBatchIds } from '../access';
 import { scopeProblems, scoreStudents, visibleContent, type ChapterInfo } from '../progress/progress.service';
 import { getScoring } from '../progress/scoring';
+import { displayStatus } from '../leetcode/sync-metrics';
 
 export interface Filters {
   collegeId?: string; batchId?: string; courseId?: string; chapterId?: string; difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
   /** LINKED/UNLINKED are current; the legacy values are accepted so old links keep working. */
   q?: string; verification?: 'LINKED' | 'UNLINKED' | 'VERIFIED' | 'PENDING_VERIFICATION' | 'REVALIDATION_REQUIRED'; minPct?: number; maxPct?: number;
   from?: Date; to?: Date; dateBasis?: 'verified' | 'submitted';
+  /** Synchronization health filter. ATTENTION = failed, delayed, possible gap or not linked. */
+  syncFilter?: 'QUEUED' | 'DELAYED' | 'FAILED' | 'GAP' | 'ATTENTION';
 }
 
 export interface PerfRow {
   studentId: string; rollNumber: string; name: string; college: string | null; batchId: string; batch: string; courseId: string; course: string; batchCourseId: string;
   easy: number; medium: number; hard: number; solved: number; accessible: number; completionPct: number | null; points: number; rank: number;
   lastVerifiedAt: Date | null; linkState: string; syncStatus: string; lastSyncAt: Date | null;
+  /** Live job state (QUEUED, DELAYED, UPDATING) or the last stored outcome. */
+  syncDisplay: string; nextAutoSyncAt: Date | null; possibleGap: boolean; needsAttention: boolean;
 }
 
 /** Batches the user may report on. Trainers: assigned batches only. Archived batches are excluded from analytics. */
@@ -69,6 +74,7 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
         easy: s.easy, medium: s.medium, hard: s.hard, solved: s.solved.size, accessible: scope.size,
         completionPct: scope.size ? Math.round((s.solved.size / scope.size) * 1000) / 10 : null, points: s.points, rank,
         lastVerifiedAt: s.lastVerifiedAt, linkState: 'UNLINKED', syncStatus: 'IDLE', lastSyncAt: null,
+        syncDisplay: 'IDLE', nextAutoSyncAt: null, possibleGap: false, needsAttention: false,
       });
     });
   }
@@ -77,12 +83,16 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
   const colleges = new Map((await College.find({ _id: { $in: [...users.values()].map((x) => x.collegeId).filter(Boolean) } }, 'name').lean()).map((c) => [String(c._id), c.name]));
   const links = await linkStates(ids);
   const q = f.q?.trim().toLowerCase();
+  const now = new Date();
+  const jobs = new Map<string, any>((await LeetcodeSyncJob.find({ studentId: { $in: ids }, status: { $in: ['QUEUED', 'RUNNING'] } }, 'studentId status runAfter dueAt attempts').lean()).map((j: any) => [String(j.studentId), j]));
+  const FAILED = new Set(['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED', 'ACCOUNT_NOT_FOUND', 'SUBMISSIONS_UNAVAILABLE']);
   const out = rows
     .filter((r) => users.has(r.studentId))
     .map((r) => {
       const x = users.get(r.studentId)!;
-      return { ...r, name: x.fullName, rollNumber: x.rollNumber ?? '', college: x.collegeId ? colleges.get(String(x.collegeId)) ?? null : null, linkState: links.get(r.studentId) ?? 'UNLINKED', syncStatus: x.sync?.status ?? 'IDLE', lastSyncAt: x.sync?.lastSuccessAt ?? null };
+      return { ...r, name: x.fullName, rollNumber: x.rollNumber ?? '', college: x.collegeId ? colleges.get(String(x.collegeId)) ?? null : null, linkState: links.get(r.studentId) ?? 'UNLINKED', syncStatus: x.sync?.status ?? 'IDLE', lastSyncAt: x.sync?.lastSuccessAt ?? null, ...syncFlags(x.sync, jobs.get(r.studentId), links.get(r.studentId) ?? 'UNLINKED', now, FAILED) };
     })
+    .filter((r) => !f.syncFilter || (f.syncFilter === 'QUEUED' ? r.syncDisplay === 'QUEUED' : f.syncFilter === 'DELAYED' ? r.syncDisplay === 'DELAYED' : f.syncFilter === 'FAILED' ? FAILED.has(r.syncDisplay) : f.syncFilter === 'GAP' ? r.possibleGap : r.needsAttention))
     .filter((r) => !q || r.name.toLowerCase().includes(q) || r.rollNumber.toLowerCase().includes(q))
     .filter((r) => !f.verification || r.linkState === f.verification)
     .filter((r) => f.minPct === undefined || (r.completionPct ?? 0) >= f.minPct)
@@ -91,6 +101,11 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
   return { rows: out, contexts };
 }
 
+function syncFlags(sync: any, job: any, linkState: string, now: Date, failed: Set<string>) {
+  const syncDisplay = displayStatus(job, sync?.status, now);
+  const possibleGap = !!sync?.possibleGap;
+  return { syncDisplay, nextAutoSyncAt: sync?.nextAutoSyncAt ?? null, possibleGap, needsAttention: syncDisplay === 'DELAYED' || failed.has(syncDisplay) || possibleGap || linkState !== 'LINKED' };
+}
 const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
 
 export async function overview(u: UserDoc, f: Filters) {
@@ -140,13 +155,14 @@ export async function overview(u: UserDoc, f: Filters) {
       lowProgress: withWork.filter((r) => (r.completionPct ?? 0) < 25).length,
     },
     verification: { studentsInScope: studentIds.length, verifiedLinks: verified, coveragePct: studentIds.length ? Math.round((verified / studentIds.length) * 1000) / 10 : null, linkStates: countBy([...ids.map((i) => links.get(String(i)) ?? 'UNLINKED')]) },
-    sync: { byStatus: syncCounts, lastJob: lastJob ? { status: lastJob.status, at: lastJob.finishedAt ?? lastJob.startedAt, counts: lastJob.counts } : null },
+    sync: { byStatus: syncCounts, queued: rows.filter((r, i, a) => a.findIndex((x) => x.studentId === r.studentId) === i && r.syncDisplay === 'QUEUED').length, delayed: uniqueStudents(rows, (r) => r.syncDisplay === 'DELAYED'), failed: uniqueStudents(rows, (r) => ['SYNC_FAILED', 'PROVIDER_UNAVAILABLE', 'RATE_LIMITED', 'ACCOUNT_NOT_FOUND', 'SUBMISSIONS_UNAVAILABLE'].includes(r.syncDisplay)), possibleGaps: uniqueStudents(rows, (r) => r.possibleGap), missingUsernames: studentIds.length - verified, attention: uniqueStudents(rows, (r) => r.needsAttention), lastJob: lastJob ? { status: lastJob.status, at: lastJob.finishedAt ?? lastJob.startedAt, counts: lastJob.counts } : null },
     difficulty: diff,
     batchComparison, courseCompletion,
     needsSupport: rows.filter((r) => (r.accessible > 0 && (r.completionPct ?? 0) < 25) || (r.linkState !== 'LINKED' && r.linkState !== 'VERIFIED')).sort((a, b) => (a.completionPct ?? 0) - (b.completionPct ?? 0)).slice(0, 25),
   };
 }
 
+const uniqueStudents = (rows: PerfRow[], pred: (r: PerfRow) => boolean) => new Set(rows.filter(pred).map((r) => r.studentId)).size;
 const countBy = (xs: string[]) => xs.reduce<Record<string, number>>((a, x) => ((a[x] = (a[x] ?? 0) + 1), a), {});
 
 /** Per chapter of each batch-course: problems, students who completed it, average completion. */

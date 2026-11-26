@@ -1,4 +1,4 @@
-import { env } from '../../../config/env';
+import { env, leetcodeConfigIssues } from '../../../config/env';
 import { AlfaProvider } from './alfa.provider';
 import { DirectProvider } from './direct.provider';
 import { LeetCodeQueryProvider, realLeetCodeQueryClient } from './leetcode-query.provider';
@@ -9,49 +9,65 @@ import { ProviderError } from '../leetcode.types';
 
 export const KNOWN_PROVIDERS = ['direct', 'alfa', 'leetcode-query', 'mock'] as const;
 
-/** Is the provider switched on in the environment? (Admin settings can only switch it OFF, never on.) */
-export function envEnabled(id: string): boolean {
-  if (!env.LEETCODE_SYNC_ENABLED) return false;
-  return ({ direct: env.LEETCODE_DIRECT_ENABLED, alfa: env.LEETCODE_ALFA_ENABLED, 'leetcode-query': env.LEETCODE_QUERY_ENABLED, mock: env.LEETCODE_MOCK_ENABLED && !env.isProd } as Record<string, boolean>)[id] ?? false;
+const providerFlags = {
+  direct: 'LEETCODE_DIRECT_ENABLED',
+  alfa: 'LEETCODE_ALFA_ENABLED',
+  'leetcode-query': 'LEETCODE_QUERY_ENABLED',
+  mock: 'LEETCODE_MOCK_ENABLED',
+} as const;
+
+export function providerRequested(id: string) {
+  const flag = providerFlags[id as keyof typeof providerFlags];
+  return !!flag && env[flag];
 }
 
-/**
- * Bases that represent an arrangement established outside Algora: terms, written permission, a licence, or a contract.
- * OWN_RISK is deliberately excluded: it is an internal risk decision, NOT permission from LeetCode.
- */
-export const EXTERNAL_ACCESS_BASES = ['TERMS', 'WRITTEN_PERMISSION', 'LICENSED_THIRD_PARTY', 'INSTITUTIONAL', 'COMMERCIAL'] as const;
+let runtimeBlock: string | null = null;
+export function blockIntegration(reason: string) { runtimeBlock = reason; }
 
-/** Human-readable access-basis summary for the admin UI. Never contains a secret. */
-export function accessSummary() {
+export function providerConfigurationReason(id: string): string | null {
+  const groups = ['DIRECT', 'ALFA', 'QUERY', 'MOCK'];
+  const group = { direct: 'DIRECT', alfa: 'ALFA', 'leetcode-query': 'QUERY', mock: 'MOCK' }[id];
+  const invalid = Object.entries(leetcodeConfigIssues).filter(([key]) =>
+    !['LEETCODE_HEALTHCHECK_USERNAME', 'LEETCODE_SCHEDULER_ENABLED', 'LEETCODE_ACCESS_BASIS', 'LEETCODE_ACCESS_REF', 'LEETCODE_PERMISSION_REF', 'LEETCODE_ALFA_PERMISSION_REF'].includes(key) &&
+    (!groups.some((name) => key.startsWith(`LEETCODE_${name}_`)) || key.startsWith(`LEETCODE_${group}_`)));
+  if (invalid.length) return invalid.map(([key, reason]) => `${key}: ${reason}`).join('; ');
+  if (id === 'mock' && env.isProd) return 'Mock provider is disabled in production';
+  if (id === 'alfa' && !env.LEETCODE_ALFA_BASE_URL) return 'LEETCODE_ALFA_BASE_URL is required for Alfa';
+  return runtimeBlock;
+}
+
+export function envEnabled(id: string): boolean {
+  return env.LEETCODE_SYNC_ENABLED && providerRequested(id) && !providerConfigurationReason(id);
+}
+
+function externalAccess(): Authorization {
   const basis = env.LEETCODE_ACCESS_BASIS;
+  for (const key of ['LEETCODE_ACCESS_BASIS', 'LEETCODE_ACCESS_REF'] as const) {
+    if (leetcodeConfigIssues[key]) return { authorized: false, reason: `${key}: ${leetcodeConfigIssues[key]}`, basis };
+  }
+  if (basis === 'NONE') return { authorized: false, reason: 'No external access basis configured (LEETCODE_ACCESS_BASIS)', basis };
+  if (basis === 'OWN_RISK') return { authorized: false, reason: 'Internal risk acceptance does not grant provider access', basis };
+  if (!env.LEETCODE_ACCESS_REF) return { authorized: false, reason: `LEETCODE_ACCESS_BASIS=${basis} requires LEETCODE_ACCESS_REF`, basis };
+  return { authorized: true, basis };
+}
+
+export function accessSummary() {
+  const access = externalAccess();
   return {
-    basis,
-    reference: env.LEETCODE_ACCESS_REF ?? null,
-    /** True only when the basis is an arrangement established with/under LeetCode, not our own risk acceptance. */
-    establishedExternally: (EXTERNAL_ACCESS_BASES as readonly string[]).includes(basis),
-    internalRiskAcceptance: basis === 'OWN_RISK',
+    basis: env.LEETCODE_ACCESS_BASIS,
+    establishedExternally: access.authorized,
+    internalRiskAcceptance: env.LEETCODE_ACCESS_BASIS === 'OWN_RISK',
+    reason: access.reason ?? null,
   };
 }
 
-/**
- * Authorisation of the DATA SOURCE, expressed as an access basis. A basis is required for every real provider; how it was
- * established (LeetCode permission, public API terms, a licence, an institution, a contract, or an internal risk decision)
- * is reported verbatim and never relabelled as permission from LeetCode.
- */
 export function authorizationFor(id: string): Authorization {
-  if (id === 'mock') return env.isProd ? { authorized: false, reason: 'Mock provider is never authorised in production', basis: 'NONE' } : { authorized: true, basis: 'OWN_RISK' };
-  const basis = env.LEETCODE_ACCESS_BASIS;
-  const reference = env.LEETCODE_ACCESS_REF ?? null;
-  if (basis === 'NONE') return { authorized: false, reason: 'No LeetCode access basis configured (LEETCODE_ACCESS_BASIS)', basis };
-  if (basis === 'OWN_RISK') return { authorized: false, reason: 'Internal risk acceptance does not grant provider access', basis };
-  if (!reference) {
-    return { authorized: false, reason: `LEETCODE_ACCESS_BASIS=${basis} has no LEETCODE_ACCESS_REF`, basis };
+  if (id === 'mock') return env.isProd ? { authorized: false, reason: 'Mock provider is disabled in production', basis: 'NONE' } : { authorized: true, basis: 'OWN_RISK' };
+  const access = externalAccess();
+  if (access.authorized && id === 'alfa' && !env.LEETCODE_ALFA_PERMISSION_REF) {
+    return { ...access, authorized: false, reason: leetcodeConfigIssues.LEETCODE_ALFA_PERMISSION_REF ? `LEETCODE_ALFA_PERMISSION_REF: ${leetcodeConfigIssues.LEETCODE_ALFA_PERMISSION_REF}` : 'Alfa requires a separate LEETCODE_ALFA_PERMISSION_REF for the relay deployment' };
   }
-  if (id === 'alfa') {
-    if (!env.LEETCODE_ALFA_BASE_URL) return { authorized: false, reason: 'LEETCODE_ALFA_BASE_URL not configured', basis, reference };
-    if (!env.LEETCODE_ALFA_PERMISSION_REF && !reference) return { authorized: false, reason: 'No access reference for the Alfa deployment (LEETCODE_ALFA_PERMISSION_REF)', basis, reference };
-  }
-  return { authorized: true, basis, reference };
+  return access;
 }
 
 /** Refuses every request. Used for unauthorised providers so a coding mistake cannot reach the network. */
@@ -59,7 +75,11 @@ const deniedTransport = (id: string): HttpTransport => ({ kind: 'network', send:
 
 function build(): SubmissionProvider[] {
   const ua = userAgent(env.LEETCODE_CONTACT);
-  const t = (id: string) => (authorizationFor(id).authorized && envEnabled(id) ? networkTransport() : deniedTransport(id));
+  const network = networkTransport();
+  const t = (id: string): HttpTransport => ({
+    kind: 'network',
+    send: (request) => (authorizationFor(id).authorized && envEnabled(id) ? network : deniedTransport(id)).send(request),
+  });
   const list: SubmissionProvider[] = [
     new DirectProvider(t('direct'), () => authorizationFor('direct'), ua),
     new AlfaProvider(t('alfa'), env.LEETCODE_ALFA_BASE_URL ?? '', () => authorizationFor('alfa'), ua, env.LEETCODE_ALFA_CACHE_SEC),

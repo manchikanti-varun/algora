@@ -45,6 +45,14 @@ const userSchema = new Schema(
       nextEligibleAt: Date,
       lastActiveAt: Date,
       possibleGap: { type: Boolean, default: false },
+      /** When a possible evidence gap was last observed. Not cleared by later syncs: lost evidence stays lost. */
+      lastGapAt: Date,
+      /** Last time THIS student asked for a manual update. Separate from lastAttemptAt (automatic attempts do not use the cooldown). */
+      lastManualRequestAt: Date,
+      /** Next automatic synchronization, 30 minutes (configurable) after the last SUCCESSFUL one. Set only by a success. */
+      nextAutoSyncAt: Date,
+      /** Final reconciliation done for the term that ended at this instant. */
+      reconciledForTermEnd: Date,
     },
     deletedAt: Date,
   },
@@ -58,6 +66,7 @@ userSchema.index(
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ collegeId: 1 });
 userSchema.index({ leetcodeUsername: 1 });
+userSchema.index({ role: 1, 'sync.possibleGap': 1 });
 
 export type UserDoc = InferSchemaType<typeof userSchema> & { _id: Types.ObjectId };
 export const User = model('User', userSchema, 'users');

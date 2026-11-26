@@ -8,12 +8,14 @@ import {
   blockUpstream, claimProbe, event, getStates, healthOf, noteUpstreamNetworkFailure, noteUpstreamSuccess, pKey,
   recordAnswered, recordFailure, recordProviderRateLimited, recordSuccess, technicalHealthOf, upstreamBlock, type HealthStatus, type StateDoc, type TechnicalHealth,
 } from './provider-health.service';
-import { providerEnvEnabled, registry } from './providers/provider.registry';
+import { recordUpstreamRequest } from './request-stats';
+import { isTestOverride, providerConfigurationReason, providerEnvEnabled, providerRequested, registry } from './providers/provider.registry';
 import type { AccountProbeResult, FetchResult, SubmissionProvider } from './providers/provider.interface';
 
 export const upstreamBucket = (u: string) => `upstream:${u}`;
 export const providerBucket = (id: string) => `provider:${id}`;
-const burstOf = (perMin: number) => Math.max(5, perMin);
+/** Largest burst the shared budget allows: one fifth of a minute's budget (at least 2), so traffic is paced, not bunched. */
+export const burstOf = (perMin: number) => Math.max(2, Math.ceil(perMin / 5));
 const breakerCfg = (s: Effective): BreakerConfig => ({ threshold: s.failureThreshold, baseOpenMs: s.recoveryMs, maxOpenMs: Math.max(s.recoveryMs, 15 * 60_000) });
 
 export interface Attempt { provider: string; outcome: 'OK' | 'FAILED' | 'SKIPPED'; kind?: string; reason?: string; latencyMs?: number }
@@ -24,7 +26,7 @@ export type ManagerResult<T> =
 
 export interface ProviderView {
   id: string; displayName: string; capabilities: SubmissionProvider['capabilities']; priority: number;
-  envEnabled: boolean; adminEnabled: boolean; authorized: boolean; authorizationReason?: string; transportKind: string;
+  requested: boolean; configurationReason: string | null; envEnabled: boolean; adminEnabled: boolean; authorized: boolean; authorizationReason?: string; transportKind: string;
   /** Combined status used for provider selection (kept for compatibility). */
   status: HealthStatus; breaker: string; nextEligibleAt: Date | null;
   /** Three independent dimensions for display. */
@@ -50,17 +52,18 @@ export async function providerViews(): Promise<{ settings: Effective; views: Pro
   for (const p of orderByPriority(registry(), s)) {
     const d = states.get(pKey(p.id));
     const auth = p.authorization();
+    const configurationReason = isTestOverride() ? null : providerConfigurationReason(p.id);
     const blocked = !!upstreamBlock(states, p.capabilities.upstream);
     const h = healthOf(d, { enabled: isEnabled(p, s), authorized: auth.authorized, upstreamBlocked: blocked, cfg: breakerCfg(s), timeoutMs: s.timeoutMs });
     const rate = s.providerRatePerMin(p.id);
     const total = d?.totalRequests ?? 0;
     views.push({
       id: p.id, displayName: p.displayName, capabilities: p.capabilities, priority: s.priority.indexOf(p.id),
-      envEnabled: providerEnvEnabled(p.id), adminEnabled: !s.disabled.has(p.id), authorized: auth.authorized, authorizationReason: auth.reason, transportKind: p.transportKind,
+      requested: isTestOverride() || providerRequested(p.id), configurationReason, envEnabled: providerEnvEnabled(p.id), adminEnabled: !s.disabled.has(p.id), authorized: auth.authorized, authorizationReason: auth.reason, transportKind: p.transportKind,
       status: h.status, breaker: h.breaker, nextEligibleAt: h.nextEligibleAt,
       authorizationStatus: auth.authorized ? 'AUTHORIZED' : requestedAt && p.id !== 'mock' ? 'AUTHORIZATION_PENDING' : 'NOT_AUTHORIZED',
       accessBasis: auth.basis ?? null,
-      ...activationOf(p, s, auth.authorized),
+      ...activationOf(p, s, auth, configurationReason),
       technicalHealth: technicalHealthOf(d, { upstreamBlocked: blocked, cfg: breakerCfg(s), timeoutMs: s.timeoutMs }),
       totalRequests: total, successes: d?.successes ?? 0, failures: d?.failures ?? 0, rateLimited: d?.rateLimited ?? 0, consecutiveFailures: d?.consecutiveFailures ?? 0,
       successRate: total ? Math.round(((d?.successes ?? 0) / total) * 1000) / 10 : null, avgLatencyMs: d?.latencyEwmaMs != null ? Math.round(d.latencyEwmaMs) : null,
@@ -72,11 +75,12 @@ export async function providerViews(): Promise<{ settings: Effective; views: Pro
   return { settings: s, views, states };
 }
 
-function activationOf(p: SubmissionProvider, s: Effective, authorized: boolean): { activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null } {
+function activationOf(p: SubmissionProvider, s: Effective, auth: ReturnType<SubmissionProvider['authorization']>, configurationReason: string | null): { activation: 'ACTIVE' | 'INACTIVE'; activationReason: string | null } {
+  if (configurationReason) return { activation: 'INACTIVE', activationReason: configurationReason };
   if (!env.LEETCODE_SYNC_ENABLED) return { activation: 'INACTIVE', activationReason: 'LEETCODE_SYNC_ENABLED is false' };
   if (!providerEnvEnabled(p.id)) return { activation: 'INACTIVE', activationReason: 'Not enabled in the server environment' };
   if (s.disabled.has(p.id)) return { activation: 'INACTIVE', activationReason: 'Disabled by the Super Admin' };
-  if (!authorized) return { activation: 'INACTIVE', activationReason: 'Not authorised' };
+  if (!auth.authorized) return { activation: 'INACTIVE', activationReason: auth.reason ?? 'External access is unavailable' };
   if (s.paused) return { activation: 'INACTIVE', activationReason: 'Synchronization paused' };
   return { activation: 'ACTIVE', activationReason: null };
 }
@@ -176,6 +180,7 @@ export async function runWithFailover<T>(
       ctx.signal?.throwIfAborted();
       const ms = Date.now() - t0;
       await recordSuccess(p.id, ms, ctx.retrievedAccepted?.(value));
+      await recordUpstreamRequest('ok', ms);
       if (p.capabilities.reachesUpstreamDirectly) await noteUpstreamSuccess(upstream);
       attempts.push({ provider: p.id, outcome: 'OK', latencyMs: ms });
       const failedOver = attempts.some((a) => a.outcome === 'FAILED');
@@ -188,6 +193,7 @@ export async function runWithFailover<T>(
       lastErr = e;
       attempts.push({ provider: p.id, outcome: 'FAILED', kind: e.kind, latencyMs: ms });
       const scope = scopeOf(e.kind);
+      if (!(e.notSent || e.kind === 'CONFIG_ERROR')) await recordUpstreamRequest(e.kind === 'UPSTREAM_RATE_LIMITED' ? 'rateLimited' : e.kind === 'UPSTREAM_ACCESS_DENIED' ? 'accessDenied' : scope === 'USER' ? 'ok' : 'failed', ms);
       if (scope === 'USER') { await recordAnswered(p.id, ms); return { ok: false, reason: 'NOT_FOUND', error: e, attempts }; }
       if (scope === 'UPSTREAM') {
         await blockUpstream(upstream, e, s.recoveryMs, p.id);
@@ -274,10 +280,12 @@ export async function runHealthChecks(username = env.LEETCODE_HEALTHCHECK_USERNA
       const retrieved = r.submissions.length;
       const diagnostics = { reachable: true, structureValid: true, submissionsRetrieved: retrieved, rawRows: r.rawCount, acceptedOnly: r.acceptedOnly, accountExistence: 'UNKNOWN' as const, calendarActivity: null as number | null };
       await recordSuccess(p.id, Date.now() - t0, retrieved > 0);
+      await recordUpstreamRequest('ok', Date.now() - t0);
       out.push({ provider: p.id, result: retrieved > 0 ? 'OK' : 'EMPTY_WINDOW', latencyMs: Date.now() - t0, diagnostics });
     } catch (raw) {
       clearTimeout(timer);
       const e = raw instanceof ProviderError ? raw : new ProviderError('CLIENT_ERROR', String(raw));
+      if (!(e.notSent || e.kind === 'CONFIG_ERROR')) await recordUpstreamRequest(e.kind === 'UPSTREAM_RATE_LIMITED' ? 'rateLimited' : e.kind === 'UPSTREAM_ACCESS_DENIED' ? 'accessDenied' : 'failed', Date.now() - t0);
       if (scopeOf(e.kind) === 'UPSTREAM') await blockUpstream(p.capabilities.upstream, e, s.recoveryMs, p.id);
       else if (e.kind === 'PROVIDER_RATE_LIMITED') await recordProviderRateLimited(p.id, e.retryAfterSec, s.recoveryMs);
       else if (scopeOf(e.kind) === 'PROVIDER') await recordFailure(p.id, e, breakerCfg(s));

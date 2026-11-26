@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { AuditLog, BatchCourse, Enrollment, LeetcodeLink, PendingEnrollment, SolveEvidence, User } from '../src/models';
+import { AuditLog, BatchCourse, Enrollment, LeetcodeLink, LeetcodeSyncJob, PendingEnrollment, SolveEvidence, User } from '../src/models';
 import { app, evidenceFor, login, resetDb, startDb, stopDb, studentBody, tok, verifiedLink } from './helpers';
 
 beforeAll(startDb);
@@ -206,6 +206,24 @@ describe('student chapter API', () => {
     await w.admin.call('put', `/batches/${w.bA._id}/courses/${w.c._id}/chapters/${w.ch2._id}/access`, { isVisible: false });
     expect((await sa.call('get', `/student/chapters/${w.ch1._id}?batchCourseId=${bc}`)).body.next).toBeNull();
     expect((await sa.call('get', `/student/chapters/${w.ch2._id}?batchCourseId=${bc}`)).status).toBe(404);
+  });
+});
+describe('trainer synchronization visibility', () => {
+  it('shows live queue, delayed, failed and gap state for the trainer\'s own students only, with a filter', async () => {
+    const w = await world();
+    const now = new Date();
+    await LeetcodeSyncJob.create({ studentId: w.s[0].user._id, linkId: w.s[0].link._id, trigger: 'MANUAL', status: 'QUEUED', runAfter: now, dueAt: now, enqueuedAt: now });
+    await LeetcodeSyncJob.create({ studentId: w.s[2].user._id, linkId: w.s[2].link._id, trigger: 'MANUAL', status: 'QUEUED', runAfter: now, dueAt: now, enqueuedAt: now }); // other batch
+    await User.updateOne({ _id: w.s[1].user._id }, { $set: { 'sync.status': 'PROVIDER_UNAVAILABLE', 'sync.possibleGap': true } });
+    const t = (await w.trainer.call('get', '/analytics/students')).body;
+    expect(t.items.map((r: any) => r.name).sort()).toEqual(['Stu a', 'Stu b']);
+    expect(t.items.find((r: any) => r.name === 'Stu a')).toMatchObject({ syncDisplay: 'QUEUED', needsAttention: false });
+    expect(t.items.find((r: any) => r.name === 'Stu b')).toMatchObject({ syncDisplay: 'PROVIDER_UNAVAILABLE', possibleGap: true, needsAttention: true });
+    expect((await w.trainer.call('get', '/analytics/students?syncFilter=GAP')).body.items.map((r: any) => r.name)).toEqual(['Stu b']);
+    expect((await w.trainer.call('get', '/analytics/students?syncFilter=QUEUED')).body.items.map((r: any) => r.name)).toEqual(['Stu a']);
+    const o = (await w.trainer.call('get', '/analytics/overview')).body.sync;
+    expect(o).toMatchObject({ queued: 1, failed: 1, possibleGaps: 1, attention: 1 });
+    expect((await w.trainer.call('get', '/analytics/students?syncFilter=bogus')).status).toBe(400);
   });
 });
 export { mongoose };

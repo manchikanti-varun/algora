@@ -8,7 +8,8 @@ import mongoose from 'mongoose';
 async function main() {
   const { MockProvider } = await import('../../src/modules/leetcode/providers/mock.provider.js');
   const { setProviderForTests } = await import('../../src/modules/leetcode/providers/provider.registry.js');
-  const { syncStudent, runScheduledPass } = await import('../../src/modules/leetcode/leetcode-sync.service.js');
+  const { syncStudent } = await import('../../src/modules/leetcode/leetcode-sync.service.js');
+  const { schedulerTick, workerStep } = await import('../../src/modules/leetcode/sync-queue.js');
   const { env } = await import('../../src/config/env.js');
   const { User } = await import('../../src/models/index.js');
   await mongoose.connect(process.env.MONGODB_URI!);
@@ -35,16 +36,14 @@ async function main() {
 
   const until = Date.now() + Number(process.env.WORKER_SECONDS ?? 8) * 1000;
   const MON_10 = new Date('2025-01-06T10:00:00+05:30');
-  const passes: { start: number; end: number; fence: number }[] = [];
-  let cur: { start: number; fence: number } | null = null;
-  const inside = async (phase: 'start' | 'end', fence: number) => { if (phase === 'start') cur = { start: Date.now(), fence }; else if (cur) { passes.push({ ...cur, end: Date.now() }); cur = null; } };
   const tasks: Promise<unknown>[] = [];
-  // Scheduled passes, repeatedly.
-  tasks.push((async () => { while (Date.now() < until) { await runScheduledPass(MON_10, [mock, alfa], { inside }); await new Promise((r2) => setTimeout(r2, 200)); } })());
+  // Scheduler ticks and queue workers, repeatedly, in every process (the queue and the lease are the only coordination).
+  const inFlight = new Set<Promise<unknown>>();
+  tasks.push((async () => { while (Date.now() < until) { await schedulerTick(MON_10); await new Promise((r2) => setTimeout(r2, 300)); } })());
+  tasks.push((async () => { while (Date.now() < until) { await workerStep(inFlight, () => MON_10); await new Promise((r2) => setTimeout(r2, 100)); } await Promise.all([...inFlight]); })());
   // Manual / scheduled syncs on random students, as fast as possible.
   for (let w = 0; w < 4; w++) tasks.push((async () => { while (Date.now() < until) { const s = students[Math.floor(Math.random() * students.length)]; await syncStudent(String(s._id), Math.random() < 0.5 ? 'MANUAL' : 'SCHEDULE', [mock, alfa]); } })());
   await Promise.all(tasks);
-  if (passes.length) await mongoose.connection.collection('probe_passes').insertMany(passes.map((p) => ({ pid, ...p })));
   await mongoose.disconnect();
 }
 main().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
