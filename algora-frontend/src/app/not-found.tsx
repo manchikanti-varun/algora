@@ -1,12 +1,15 @@
-import Link from 'next/link';
+import { ButtonLink } from '@/components/ui';
+
+import { PageTitle } from '@/components/PageTitle';
 export default function NotFound() {
   return (
-    <main className="grid min-h-screen place-items-center p-6">
-      <div className="text-center">
-        <p className="text-sm font-semibold text-indigo-600">404</p>
-        <h1 className="mt-1 text-xl font-semibold text-slate-900">Page not found</h1>
-        <p className="mt-2 text-sm text-slate-600">This page does not exist or you do not have access to it.</p>
-        <Link href="/" className="mt-5 inline-block rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700">Go home</Link>
+    <main className="grid min-h-screen place-items-center bg-canvas p-6">
+      <PageTitle title="Page not found" />
+      <div className="max-w-sm text-center">
+        <p className="text-sm font-semibold text-accent-fg">404</p>
+        <h1 className="mt-1 text-xl font-semibold text-fg">Page not found</h1>
+        <p className="mt-2 text-sm text-fg-muted">This page does not exist, or you do not have access to it.</p>
+        <div className="mt-5"><ButtonLink href="/">Go home</ButtonLink></div>
       </div>
     </main>
   );

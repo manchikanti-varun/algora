@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/lib/api';
 import { homeFor, useAuth, type SessionUser } from '@/lib/auth';
 import { GoogleSignIn } from './GoogleSignIn';
-import { Button, Input, Notice, Textarea } from './ui';
+import { ThemePicker } from './ThemePicker';
+import { Button, Checkbox, Input, Notice, Spinner, Textarea, usePageTitle } from './ui';
 
 type Step =
   | { kind: 'signin' }
@@ -17,11 +18,39 @@ interface AuthResponse { status: string; user?: SessionUser; csrfToken?: string;
 
 export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expired?: boolean }) {
   const router = useRouter();
+  usePageTitle(mode === 'student' ? 'Student sign in' : 'Trainer and admin sign in');
   const { user, loading, setSession } = useAuth();
   const [step, setStep] = useState<Step>({ kind: 'signin' });
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [hasClaim, setHasClaim] = useState(false);
   useEffect(() => { if (user) router.replace(homeFor(user.role)); }, [user, router]);
+  const MESSAGES: Record<string, string> = {
+    rollNumber: 'Enter exactly 10 letters or digits.',
+    mobile: 'Enter 10 to 15 digits, with an optional + at the start.',
+    leetcodeUsername: 'Use letters, digits, underscores or hyphens (up to 40 characters).',
+    phone: 'Enter 10 to 15 digits, with an optional + at the start.',
+  };
+  // Show native constraint failures inline, next to the field, instead of in browser bubbles.
+  function onInvalid(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const el = e.target as HTMLInputElement;
+    if (!el.name) return;
+    const v = el.validity;
+    const msg = v.valueMissing ? (el.type === 'checkbox' ? 'Please confirm to continue.' : 'This field is required.')
+      : v.patternMismatch || v.typeMismatch ? MESSAGES[el.name] ?? 'Check this value.'
+      : v.tooShort ? `Enter at least ${el.minLength} characters.` : el.validationMessage;
+    setFieldErrors((prev) => {
+      if (!Object.keys(prev).length) queueMicrotask(() => el.focus());
+      return { ...prev, [el.name]: msg };
+    });
+  }
+  const clearError = (e: React.FormEvent<HTMLFormElement>) => {
+    const n = (e.target as HTMLInputElement).name;
+    if (n) setFieldErrors((p) => { if (!(n in p)) return p; const rest = { ...p }; delete rest[n]; return rest; });
+  };
+  const fe = (n: string) => fieldErrors[n];
   const finish = (r: AuthResponse) => { if (r.user && r.csrfToken) setSession(r.user, r.csrfToken); };
 
   async function onCredential(idToken: string) {
@@ -40,7 +69,7 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
 
   async function submit(e: React.FormEvent<HTMLFormElement>, idToken: string) {
     e.preventDefault();
-    setBusy(true); setError(undefined);
+    setBusy(true); setError(undefined); setFieldErrors({});
     const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
     try {
       if (mode === 'student') finish(await api<AuthResponse>('/auth/register/student', { method: 'POST', body: { idToken, ...f, claimCode: f.claimCode || undefined, leetcodeConsent: f.leetcodeConsent === 'on' } }));
@@ -51,55 +80,70 @@ export function LoginFlow({ mode, expired }: { mode: 'student' | 'trainer'; expi
     } catch (err) { setError(errorMessage(err)); } finally { setBusy(false); }
   }
 
-  if (loading) return null;
+  const waiting = loading || !!user;
+  const title = mode === 'student' ? 'Student sign in' : 'Trainer and admin sign in';
+  const subtitle = mode === 'student' ? 'Use the Google account you want to learn with.' : 'Management access requires approval by the Super Admin.';
   return (
-    <main className="grid min-h-screen place-items-center bg-gradient-to-br from-slate-50 to-indigo-50 p-4">
+    <main className="relative grid min-h-screen place-items-center bg-canvas p-4">
+      <div className="absolute right-4 top-4"><ThemePicker /></div>
       <div className="w-full max-w-md">
-        <Link href="/" className="mb-6 flex items-center justify-center gap-2 text-xl font-bold text-slate-900"><span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-600 text-white">A</span>Algora</Link>
-        <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+        <Link href="/" className="mb-6 flex items-center justify-center gap-2 text-lg font-semibold text-fg"><span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-sm font-bold text-white" aria-hidden>A</span>Algora</Link>
+        <div className="space-y-5 rounded-xl border border-line bg-surface p-6 sm:p-8">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">{mode === 'student' ? 'Student sign in' : 'Trainer & admin sign in'}</h1>
-            <p className="mt-1 text-sm text-slate-500">{mode === 'student' ? 'Use the Google account you want to learn with.' : 'Management access requires approval by the Super Admin.'}</p>
+            <h1 className="text-xl font-semibold text-fg">{step.kind === 'register' ? (mode === 'student' ? 'Create your account' : 'Request management access') : title}</h1>
+            <p className="mt-1 text-sm text-fg-muted">{step.kind === 'register' ? (mode === 'student' ? 'A few details so your trainer can find you.' : 'The Super Admin reviews every request.') : subtitle}</p>
           </div>
-          {expired && step.kind === 'signin' && <Notice tone="warn">Your session ended. Please sign in again.</Notice>}
+          {waiting && <p role="status" className="flex items-center justify-center gap-2 py-4 text-sm text-fg-muted"><Spinner />{user ? 'Signing you in…' : 'Checking your session…'}</p>}
+          {!waiting && expired && step.kind === 'signin' && <Notice tone="warn">Your session ended. Please sign in again.</Notice>}
           {error && <Notice tone="error">{error}</Notice>}
-          {step.kind === 'signin' && <GoogleSignIn onCredential={onCredential} />}
-          {step.kind === 'pending' && <Notice tone="info" title="Access request pending">The Super Admin will review your request. Sign in again once it is approved.</Notice>}
-          {step.kind === 'rejected' && <Notice tone="error" title="Access request rejected">{step.reason ? `Reason: ${step.reason}. ` : ''}You can submit a new request.</Notice>}
-          {step.kind === 'rejected' && mode === 'trainer' && <Button variant="secondary" onClick={() => setStep({ kind: 'signin' })}>Sign in again to resubmit</Button>}
-
-          {step.kind === 'register' && mode === 'student' && (
-            <form className="space-y-3" onSubmit={(e) => submit(e, step.idToken)}>
-              <p className="text-sm text-slate-600">Signed in as <strong>{step.email}</strong>. Complete your registration.</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input label="First name" name="firstName" required maxLength={60} autoComplete="given-name" />
-                <Input label="Last name" name="lastName" required maxLength={60} autoComplete="family-name" />
-              </div>
-              <Input label="Roll number" name="rollNumber" required pattern="[A-Za-z0-9]{10}" maxLength={10} hint="Exactly 10 letters or digits. It cannot be changed later." />
-              <Input label="College" name="college" required minLength={2} />
-              <Input label="Mobile number" name="mobile" required pattern="\+?[0-9]{10,15}" type="tel" autoComplete="tel" />
-              <Input label="LeetCode username" name="leetcodeUsername" required pattern="[A-Za-z0-9_\-]{1,40}" hint="The public LeetCode account whose accepted submissions Algora should read. You can change it later from your profile." />
-              <Input label="Claim code (optional)" name="claimCode" hint="Only if your trainer gave you one for a reserved roll number." />
-              <label className="flex items-start gap-2 text-sm text-slate-700">
-                <input type="checkbox" name="leetcodeConsent" required className="mt-1" />
-                <span>I agree that Algora may read the <strong>public accepted submissions</strong> of this LeetCode account to verify my progress. Algora never asks for my LeetCode password. I can withdraw and delete this data from my profile at any time.</span>
-              </label>
+          {!waiting && step.kind === 'signin' && <GoogleSignIn onCredential={onCredential} />}
+          {!waiting && step.kind === 'pending' && <Notice tone="info" title="Access request pending">The Super Admin will review your request. Sign in again once it is approved.</Notice>}
+          {!waiting && step.kind === 'rejected' && <Notice tone="error" title="Access request rejected">{step.reason ? `Reason: ${step.reason}. ` : ''}You can submit a new request.</Notice>}
+          {!waiting && step.kind === 'rejected' && mode === 'trainer' && <Button variant="secondary" onClick={() => setStep({ kind: 'signin' })}>Sign in again to resubmit</Button>}
+          {!waiting && step.kind === 'register' && mode === 'student' && (
+            <form className="space-y-5" onSubmit={(e) => submit(e, step.idToken)} onInvalidCapture={onInvalid} onInput={clearError}>
+              <p className="text-sm text-fg-muted">Signed in as <strong className="text-fg">{step.email}</strong>.</p>
+              <fieldset className="space-y-3">
+                <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">About you</legend>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input label="First name" name="firstName" required maxLength={60} autoComplete="given-name" error={fe('firstName')} />
+                  <Input label="Last name" name="lastName" required maxLength={60} autoComplete="family-name" error={fe('lastName')} />
+                </div>
+                <Input label="Mobile number" name="mobile" required pattern="\+?[0-9]{10,15}" type="tel" autoComplete="tel" error={fe('mobile')} />
+              </fieldset>
+              <fieldset className="space-y-3">
+                <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">College</legend>
+                <Input label="Roll number" name="rollNumber" required pattern="[A-Za-z0-9]{10}" maxLength={10} error={fe('rollNumber')} hint="Exactly 10 letters or digits. You cannot change it later, so check it carefully." />
+                <Input label="College" name="college" required minLength={2} error={fe('college')} />
+              </fieldset>
+              <fieldset className="space-y-3">
+                <legend className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">LeetCode</legend>
+                <Input label="LeetCode username" name="leetcodeUsername" required pattern="[A-Za-z0-9_\-]{1,40}" error={fe('leetcodeUsername')} hint="The public account whose accepted submissions Algora should read. You can change it later from your profile." />
+                <div>
+                  <Checkbox name="leetcodeConsent" required
+                    label={<>I agree that Algora may read the <strong>public accepted submissions</strong> of this LeetCode account to verify my progress. Algora never asks for my LeetCode password. I can withdraw and delete this data from my profile at any time.</>} />
+                  {fe('leetcodeConsent') && <p role="alert" className="mt-1 text-xs text-danger-fg">{fe('leetcodeConsent')}</p>}
+                </div>
+              </fieldset>
+              {hasClaim
+                ? <Input label="Claim code" name="claimCode" autoComplete="off" hint="The code your trainer gave you for a reserved roll number." />
+                : <button type="button" onClick={() => setHasClaim(true)} className="text-[13px] font-medium text-accent-fg hover:underline">I have a claim code</button>}
               <Button loading={busy} type="submit" className="w-full">Create account</Button>
             </form>
           )}
-          {step.kind === 'register' && mode === 'trainer' && (
-            <form className="space-y-3" onSubmit={(e) => submit(e, step.idToken)}>
-              <p className="text-sm text-slate-600"><strong>{step.email}</strong> is not an approved trainer yet. Request access:</p>
-              <Input label="Full name" name="fullName" defaultValue={step.name} required minLength={2} />
-              <Input label="Phone (optional)" name="phone" pattern="\+?[0-9]{10,15}" type="tel" />
+          {!waiting && step.kind === 'register' && mode === 'trainer' && (
+            <form className="space-y-3" onSubmit={(e) => submit(e, step.idToken)} onInvalidCapture={onInvalid} onInput={clearError}>
+              <p className="text-sm text-fg-muted"><strong className="text-fg">{step.email}</strong> is not an approved trainer yet. Request access:</p>
+              <Input label="Full name" name="fullName" defaultValue={step.name} required minLength={2} error={fe('fullName')} />
+              <Input label="Phone (optional)" name="phone" pattern="\+?[0-9]{10,15}" type="tel" error={fe('phone')} />
               <Input label="College or organisation (optional)" name="college" />
               <Textarea label="Note for the Super Admin (optional)" name="note" maxLength={1000} />
               <Button loading={busy} type="submit" className="w-full">Request access</Button>
             </form>
           )}
         </div>
-        <p className="mt-4 text-center text-sm text-slate-500">
-          {mode === 'student' ? <>Trainer or admin? <Link className="text-indigo-600 hover:underline" href="/trainer/login">Management sign in</Link></> : <>Student? <Link className="text-indigo-600 hover:underline" href="/login">Student sign in</Link></>}
+        <p className="mt-4 text-center text-sm text-fg-muted">
+          {mode === 'student' ? <>Trainer or admin? <Link className="font-medium text-accent-fg hover:underline" href="/trainer/login">Management sign in</Link></> : <>Student? <Link className="font-medium text-accent-fg hover:underline" href="/login">Student sign in</Link></>}
         </p>
       </div>
     </main>

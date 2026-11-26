@@ -1,46 +1,82 @@
 'use client';
 import Link from 'next/link';
-import { useState } from 'react';
-import { Card, DataTable, EmptyState, ErrorState, InlineSelect, PageHeader, Pagination, SearchInput, StatusBadge, TableSkeleton, timeAgo } from '@/components/ui';
-import { useApi, useDebounced } from '@/hooks/useApi';
+import { SlidersHorizontal } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Badge, Button, Card, Combobox, DataTable, EmptyState, ErrorState, FilterChips, InlineSelect, PageHeader, Pagination, Popover, SearchInput, StatusBadge, TableSkeleton, timeAgo } from '@/components/ui';
+import { useDebouncedUrlText } from '@/components/manage/Filters';
+import type { Paged } from '@/components/manage/types';
+import { useApi } from '@/hooks/useApi';
+import { useUrlState } from '@/hooks/useUrlState';
 import { qs } from '@/lib/api';
 import { isAdmin, useAuth } from '@/lib/auth';
-import type { Batch, Paged } from '@/components/manage/types';
+import { loadBatches, loadColleges } from '@/lib/options';
+import { useState } from 'react';
 
 interface Row { _id: string; fullName: string; rollNumber: string; college: string | null; status: string; syncStatus: string; lastSyncAt: string | null; possibleGap?: boolean; syncError?: string | null; syncDetail?: string | null; link: { status: string; username: string } | null; batches: number }
+
+const ISSUES = [
+  { value: '', label: 'Needs attention: any' },
+  { value: 'MISSING_USERNAME', label: 'No LeetCode username' },
+  { value: 'SYNC_FAILURE', label: 'Progress updates failing' },
+  { value: 'POSSIBLE_GAP', label: 'Incomplete submission history' },
+  { value: 'NO_SUBMISSIONS', label: 'No accepted submissions' },
+  { value: 'SUBMISSIONS_UNAVAILABLE', label: 'Submissions not visible' },
+  { value: 'ACCOUNT_NOT_FOUND', label: 'Username not found' },
+];
+
 export default function Page() {
   const { user } = useAuth();
-  const [q, setQ] = useState(''); const [batchId, setBatchId] = useState(''); const [collegeId, setCollegeId] = useState(''); const [issue, setIssue] = useState(''); const [page, setPage] = useState(1);
-  const dq = useDebounced(q);
-  const list = useApi<Paged<Row>>(`/students${qs({ q: dq, batchId, collegeId, issue, page })}`);
-  const batches = useApi<Paged<Batch>>('/batches?pageSize=100');
-  const colleges = useApi<Paged<{ _id: string; name: string }>>('/colleges?pageSize=100');
-  const reset = () => setPage(1);
+  const router = useRouter();
+  const [f, set] = useUrlState({ q: '', batchId: '', collegeId: '', issue: '', page: '1' });
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [text, setText] = useDebouncedUrlText(f.q, (q) => set({ q, page: '' }));
+  const page = Math.max(1, Number(f.page) || 1);
+  const list = useApi<Paged<Row>>(`/students${qs({ q: f.q, batchId: f.batchId, collegeId: f.collegeId, issue: f.issue, page })}`);
+  const filtered = !!(f.q || f.batchId || f.collegeId || f.issue);
+  const clear = () => set({ q: '', batchId: '', collegeId: '', issue: '', page: '' });
+  const chips: { key: string; label: string; onRemove: () => void }[] = [];
+  if (f.collegeId) chips.push({ key: 'college', label: `College: ${names[f.collegeId] ?? 'Selected college'}`, onRemove: () => set({ collegeId: '', page: '' }) });
+
+  const toolbar = (
+    <>
+      <SearchInput value={text} onChange={setText} placeholder="Name or roll number" label="Name or roll number" />
+      <Combobox label="Batch" value={f.batchId} onChange={(batchId) => set({ batchId, page: '' })} load={loadBatches} emptyLabel="All batches" />
+      <InlineSelect label="Needs attention" value={f.issue} onChange={(issue) => set({ issue, page: '' })} options={ISSUES} />
+      <Popover label="More filters" align="start" button={<><SlidersHorizontal size={15} aria-hidden />More filters{f.collegeId && <span className="rounded-full bg-accent-soft px-1.5 text-xs text-accent-fg">1</span>}</>}>
+        <Combobox label="College" labelHidden={false} value={f.collegeId} onChange={(collegeId, o) => { if (o) setNames((n) => ({ ...n, [o.value]: o.label })); set({ collegeId, page: '' }); }} load={loadColleges} emptyLabel="All colleges" />
+      </Popover>
+    </>
+  );
+
   return (
-    <div>
-      <PageHeader title="Students" subtitle={isAdmin(user) ? 'All registered students' : 'Students enrolled in your batches'} />
-      <Card title={<div className="flex flex-wrap gap-2">
-        <SearchInput value={q} onChange={(v) => { setQ(v); reset(); }} placeholder="Name or roll number" />
-        <InlineSelect label="Batch" value={batchId} onChange={(v) => { setBatchId(v); reset(); }} options={[{ value: '', label: 'All batches' }, ...(batches.data?.items ?? []).map((b) => ({ value: b._id, label: b.name }))]} />
-        <InlineSelect label="College" value={collegeId} onChange={(v) => { setCollegeId(v); reset(); }} options={[{ value: '', label: 'All colleges' }, ...(colleges.data?.items ?? []).map((c) => ({ value: c._id, label: c.name }))]} />
-        <InlineSelect label="Needs attention" value={issue} onChange={(v) => { setIssue(v); reset(); }} options={[
-          { value: '', label: 'Any account state' }, { value: 'MISSING_USERNAME', label: 'No username' }, { value: 'SYNC_FAILURE', label: 'Sync failures' },
-          { value: 'POSSIBLE_GAP', label: 'Possible evidence gap' }, { value: 'NO_SUBMISSIONS', label: 'No accepted submissions' },
-          { value: 'SUBMISSIONS_UNAVAILABLE', label: 'Submissions not visible' }, { value: 'ACCOUNT_NOT_FOUND', label: 'Username not found' },
-        ]} />
-      </div>}>
-        {list.error ? <ErrorState message={list.error} retry={list.reload} /> : !list.data ? <TableSkeleton /> : (
+    <div className="space-y-4">
+      <PageHeader title="Students" subtitle={isAdmin(user) ? 'All registered students.' : 'Students in your batches.'} />
+      {chips.length > 0 && <FilterChips chips={chips} onClear={clear} />}
+      <Card flush>
+        {list.error ? <div className="p-4"><ErrorState message={list.error} retry={list.reload} /></div> : (
           <>
-            <DataTable rows={list.data.items} rowKey={(r) => r._id} empty={<EmptyState title="No students found" />} columns={[
-              { key: 'r', header: 'Roll number', cell: (r) => <code className="text-xs">{r.rollNumber}</code> },
-              { key: 'n', header: 'Name', cell: (r) => <Link className="font-medium text-indigo-700 hover:underline" href={`/manage/students/${r._id}`}>{r.fullName}</Link> },
-              { key: 'c', header: 'College', cell: (r) => r.college ?? '—' },
-              { key: 'b', header: 'Batches', cell: (r) => r.batches },
-              { key: 'l', header: 'LeetCode account', cell: (r) => r.link ? <span className="inline-flex items-center gap-2">{r.link.username}<StatusBadge status={r.link.status} /></span> : <StatusBadge status="UNLINKED" /> },
-              { key: 's', header: 'Last sync', cell: (r) => <span className="inline-flex items-center gap-2" title={r.syncDetail ?? r.syncError ?? undefined}><StatusBadge status={r.syncStatus} /><span className="text-xs text-slate-500">{timeAgo(r.lastSyncAt)}</span>{r.possibleGap && <span className="text-xs font-medium text-amber-700">gap</span>}</span> },
-              { key: 'st', header: 'Account', cell: (r) => <StatusBadge status={r.status} /> },
-            ]} />
-            <Pagination page={page} pageSize={list.data.pageSize} total={list.data.total} onPage={setPage} />
+            <DataTable
+              toolbar={toolbar} columnsKey="students" caption="Students" rows={list.data?.items ?? []} rowKey={(r) => r._id}
+              onRowClick={(r) => router.push(`/manage/students/${r._id}`)}
+              empty={!list.data ? <TableSkeleton /> : (
+                <EmptyState title={filtered ? 'No students match these filters' : 'No students yet'}
+                  body={filtered ? undefined : 'Students appear here after they register and are enrolled in a batch.'}
+                  action={filtered ? <Button variant="secondary" size="sm" onClick={clear}>Clear filters</Button> : undefined} />
+              )}
+              columns={[
+                { key: 'student', header: 'Student', cell: (r) => <div><Link className="font-medium text-accent-fg hover:underline" href={`/manage/students/${r._id}`}>{r.fullName}</Link><p className="text-xs text-fg-subtle">{r.rollNumber}</p></div> },
+                { key: 'college', header: 'College', optional: true, cell: (r) => r.college ?? '—' },
+                { key: 'batches', header: 'Batches', optional: true, align: 'right', cell: (r) => <span className="tabular-nums">{r.batches}</span> },
+                { key: 'leetcode', header: 'LeetCode', cell: (r) => r.link ? <span className="inline-flex items-center gap-2">{r.link.username}<StatusBadge status={r.link.status} /></span> : <StatusBadge status="UNLINKED" /> },
+                { key: 'update', header: 'Last update', cell: (r) => (
+                  <span className="inline-flex items-center gap-2" title={r.syncDetail ?? r.syncError ?? undefined}>
+                    <StatusBadge status={r.syncStatus} /><span className="text-xs text-fg-subtle">{timeAgo(r.lastSyncAt)}</span>
+                    {r.possibleGap && <Badge tone="warning">Incomplete history</Badge>}
+                  </span>) },
+                { key: 'account', header: 'Account', cell: (r) => r.status === 'ACTIVE' ? null : <StatusBadge status={r.status} /> },
+              ]}
+            />
+            {list.data && <Pagination page={page} pageSize={list.data.pageSize} total={list.data.total} onPage={(p) => set({ page: String(p) })} />}
           </>
         )}
       </Card>

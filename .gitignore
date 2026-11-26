@@ -11,3 +11,6 @@ docs/poc-results/
 
 # project documentation (kept locally, not in the repository)
 docs/
+
+# audit screenshots (local only)
+/docs/ss/

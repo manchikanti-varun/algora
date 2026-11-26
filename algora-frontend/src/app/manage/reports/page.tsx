@@ -1,33 +1,44 @@
 'use client';
+import { Download } from 'lucide-react';
 import { useState } from 'react';
-import { Button, Card, Notice, PageHeader, useToast } from '@/components/ui';
-import { emptyFilters, Filters, toQuery, type FilterState } from '@/components/manage/Filters';
+import { Button, Card, PageHeader, useToast } from '@/components/ui';
+import { Filters, useFilterQuery, useFilterState } from '@/components/manage/Filters';
 import { download, errorMessage, qs } from '@/lib/api';
 
 const REPORTS = [
-  { type: 'student', title: 'Student report', body: 'One row per student and course: roll number, college, batch, difficulty breakdown, solved, completion, points, rank, last verification and LeetCode link status.' },
-  { type: 'batch', title: 'Batch report', body: 'Per batch: status, dates, students, pending enrollments, active courses, average completion and verified completions.' },
-  { type: 'course', title: 'Course report', body: 'Per course: student-course rows, average completion and students who completed all available problems.' },
-  { type: 'chapter', title: 'Chapter report', body: 'Per unlocked chapter of each batch-course: problems, students who completed it and average completion.' },
-  { type: 'problem', title: 'Problem report', body: 'Per unlocked problem of each batch-course: difficulty and how many students have verified it.' },
+  { type: 'student', title: 'Student report', body: 'One row per student and course, with batch, difficulty counts, verified problems, completion, points, rank and LeetCode status.' },
+  { type: 'batch', title: 'Batch report', body: 'Each batch with its dates, students, reserved enrollments, courses, average completion and verified problems.' },
+  { type: 'course', title: 'Course report', body: 'Each course with its student rows, average completion and students who finished every available problem.' },
+  { type: 'chapter', title: 'Chapter report', body: 'Each visible chapter of every course in a batch: problems, students who finished it and average completion.' },
+  { type: 'problem', title: 'Problem report', body: 'Each visible problem of every course in a batch: difficulty and how many students have verified it.' },
 ];
+
 export default function Page() {
-  const [f, setF] = useState<FilterState>(emptyFilters);
+  const { state, set, clearFilters } = useFilterState({});
+  const query = useFilterQuery(state);
   const [busy, setBusy] = useState<string | null>(null);
   const toast = useToast();
-  const go = async (type: string) => { setBusy(type); try { await download(`/reports/export${qs({ ...toQuery(f), type })}`); } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(null); } };
+  const go = async (type: string) => {
+    setBusy(type);
+    try { await download(`/reports/export${qs({ ...query, type })}`); } catch (e) { toast.error(errorMessage(e)); } finally { setBusy(null); }
+  };
   return (
-    <div>
-      <PageHeader title="Reports" subtitle="CSV exports respect your access: trainers only export their batches. Contact details are never included." />
-      <Filters value={f} onChange={setF} />
-      <div className="mb-4"><Notice tone="info">Exports are recorded in the audit log. Values starting with =, +, - or @ are escaped so spreadsheets do not run them as formulas.</Notice></div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {REPORTS.map((r) => (
-          <Card key={r.type} title={r.title} actions={<Button size="sm" loading={busy === r.type} onClick={() => go(r.type)}>Download CSV</Button>}>
-            <p className="text-sm text-slate-600">{r.body}</p>
-          </Card>
-        ))}
-      </div>
+    <div className="space-y-6">
+      <PageHeader title="Reports" subtitle="CSV exports for the batches you can access. Contact details are never included." />
+      <Filters value={state} onChange={set} onClear={clearFilters} />
+      <Card flush footer={<p className="text-xs text-fg-subtle">Exports are recorded in Audit Logs. Values starting with =, +, - or @ are escaped so spreadsheets do not run them as formulas.</p>}>
+        <ul className="divide-y divide-line">
+          {REPORTS.map((r) => (
+            <li key={r.type} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1 basis-64">
+                <h2 className="text-sm font-semibold text-fg">{r.title}</h2>
+                <p className="text-[13px] text-fg-muted">{r.body}</p>
+              </div>
+              <Button variant="secondary" size="sm" icon={<Download size={15} aria-hidden />} loading={busy === r.type} onClick={() => go(r.type)}>Download CSV</Button>
+            </li>
+          ))}
+        </ul>
+      </Card>
     </div>
   );
 }

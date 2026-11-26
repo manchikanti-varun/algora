@@ -13,7 +13,7 @@ const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 export function GoogleSignIn({ onCredential }: { onCredential: (idToken: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(CLIENT_ID ? null : 'Google sign-in is not configured (NEXT_PUBLIC_GOOGLE_CLIENT_ID is missing).');
+  const [error, setError] = useState<string | null>(CLIENT_ID ? null : 'Google sign-in is not available right now. Please contact your administrator.');
   const cb = useRef(onCredential);
   useEffect(() => { cb.current = onCredential; });
   useEffect(() => {
@@ -31,8 +31,8 @@ export function GoogleSignIn({ onCredential }: { onCredential: (idToken: string)
   }, []);
   return (
     <div>
-      <div ref={ref} aria-label="Continue with Google" className="min-h-11" />
-      {error && <p role="alert" className="mt-2 text-sm text-rose-600">{error}</p>}
+      <div ref={ref} aria-label="Continue with Google" className="flex min-h-11 justify-center" />
+      {error && <p role="alert" className="mt-2 text-sm text-danger-fg">{error}</p>}
     </div>
   );
 }

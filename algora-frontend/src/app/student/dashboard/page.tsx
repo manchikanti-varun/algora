@@ -1,74 +1,83 @@
 'use client';
 import Link from 'next/link';
+import { ExternalLink, GraduationCap } from 'lucide-react';
 import { ButtonLink, Card, DifficultyBadge, EmptyState, ErrorState, Grid, PageHeader, PageSkeleton, ProgressBar, StatCard } from '@/components/ui';
 import { ContextPicker } from '@/components/student/ContextPicker';
-import { SyncPanel, useSync } from '@/components/student/SyncProvider';
-import { useContextChoice } from '@/components/student/useContextChoice';
-import type { Dashboard } from '@/components/student/types';
-import { useApi } from '@/hooks/useApi';
-import { qs } from '@/lib/api';
+import { ProgressNotices, ProgressStatusLine } from '@/components/student/SyncProvider';
+import { useStudentDashboard } from '@/components/student/useContextChoice';
 import { useAuth } from '@/lib/auth';
-
 export default function Page() {
   const { user } = useAuth();
-  const [choice, choose] = useContextChoice();
-  const { version, view } = useSync();
-  const probe = useApi<Dashboard>(`/student/dashboard${qs({ v: version })}`); // lists contexts; default context
-  const valid = probe.data?.contexts.some((c) => c.batchCourseId === choice);
-  const selectedId = valid ? choice! : probe.data?.selected?.batchCourseId;
-  const d = useApi<Dashboard>(selectedId && valid ? `/student/dashboard${qs({ batchCourseId: selectedId, v: version })}` : null);
-  const data = valid ? d.data : probe.data;
-  const err = probe.error ?? d.error;
-  if (err) return <ErrorState message={err} retry={() => { probe.reload(); d.reload(); }} />;
+  const { data, error, reload, selectedId, choose } = useStudentDashboard();
+  const first = user?.fullName.split(' ')[0];
+  const title = first ? `Welcome back, ${first}` : 'Welcome back';
+  if (error) return <ErrorState message={error} retry={reload} />;
   if (!data) return <PageSkeleton />;
   const s = data.summary;
-  const nextChapter = data.chapters.find((chapter) => chapter.solved < chapter.total) ?? data.chapters[0];
+  const bc = data.selected?.batchCourseId;
+  const current = data.chapters.find((c) => c.solved < c.total);
+  const next = current?.problems?.find((p) => !p.verified);
   return (
     <div className="space-y-6">
-      <PageHeader title={`Hi, ${user?.fullName.split(' ')[0]}`} subtitle={data.selected ? `${data.selected.courseTitle} · ${data.selected.batchName}` : undefined}
+      <PageHeader title={title} docTitle="Home" subtitle={data.selected ? `${data.selected.courseTitle} · ${data.selected.batchName}` : undefined}
         actions={<ContextPicker contexts={data.contexts} value={selectedId} onChange={choose} />} />
-      {nextChapter && data.selected && <Card title="Continue learning"
-        actions={<ButtonLink href={`/student/chapters/${nextChapter.chapterId}?batchCourseId=${data.selected.batchCourseId}`}>Open chapter</ButtonLink>}>
-        <p className="font-medium text-slate-900">{nextChapter.title}</p>
-        <p className="mt-1 text-sm text-slate-500">{nextChapter.solved} of {nextChapter.total} problems verified</p>
-      </Card>}
-      <SyncPanel verified={s ? { solved: s.verifiedSolved, total: s.accessibleProblems } : null} />
-      {view && view.link.state !== 'LINKED' && (
-        <Card><p className="text-sm text-slate-700">Link your LeetCode username to track accepted submissions. <Link className="font-medium text-indigo-600 hover:underline" href="/student/profile">Go to profile</Link></p></Card>
-      )}
-      {!s ? (
-        <EmptyState title="No courses yet" body="You are not enrolled in an active course. Your trainer will enroll you using your roll number; courses appear here automatically." />
+      <ProgressNotices />
+      {!s || !bc ? (
+        <Card><EmptyState icon={GraduationCap} title="You are not enrolled in a course yet"
+          body="Your trainer enrolls you using your roll number. Once that is done, your course and progress appear here." /></Card>
       ) : (
         <>
+          <Card title="Continue learning" footer={<ProgressStatusLine />}>
+            {!data.chapters.length ? (
+              <p className="text-sm text-fg-muted">Your trainer has not made any chapters visible yet. They will appear here.</p>
+            ) : current ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="font-medium text-fg">{current.title}</p>
+                  <p className="text-[13px] text-fg-muted">{current.solved} of {current.total} problems verified</p>
+                  <ProgressBar value={current.completionPct} label={`${current.title} progress`} />
+                </div>
+                {next && (
+                  <p className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+                    <span>Next up:</span><span className="font-medium text-fg">{next.title}</span><DifficultyBadge d={next.difficulty} />
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <ButtonLink href={`/student/chapters/${current.chapterId}?batchCourseId=${bc}`}>Open chapter</ButtonLink>
+                  {next?.url && <ButtonLink external href={next.url} variant="secondary" icon={<ExternalLink size={15} aria-hidden />}>Open on LeetCode<span className="sr-only"> (opens in a new tab)</span></ButtonLink>}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-fg">Every problem in your visible chapters is verified. New chapters appear here when your trainer makes them visible.</p>
+                <ButtonLink href={`/student/courses/${bc}`} variant="secondary">Open course</ButtonLink>
+              </div>
+            )}
+          </Card>
           <Grid>
-            <StatCard label="Verified solved" value={`${s.verifiedSolved} / ${s.accessibleProblems}`} hint={`${s.accessibleProblems - s.verifiedSolved} not yet verified`} tone="good" />
-            <StatCard label="Completion" value={s.completionPct === null ? '—' : `${s.completionPct}%`} hint={s.completionPct === null ? 'No chapters unlocked yet' : undefined} />
-            <StatCard label="Points" value={s.points} hint={`Easy ${s.scoring.EASY} · Medium ${s.scoring.MEDIUM} · Hard ${s.scoring.HARD}`} />
-            <StatCard label="Batch rank" value={s.batchRank ? `#${s.batchRank}` : '—'} hint={s.batchRank ? (s.courseRank ? `Course-wide #${s.courseRank}` : 'Course-wide: not comparable yet') : 'Unranked until a problem is verified'} />
+            <StatCard label="Verified problems" value={`${s.verifiedSolved} / ${s.accessibleProblems}`} tone="good" />
+            <StatCard label="Completion" value={s.completionPct === null ? '—' : `${s.completionPct}%`} hint={s.completionPct === null ? 'No chapters visible yet' : undefined} />
+            <StatCard label="Points" value={s.points} hint={`Easy ${s.scoring.EASY} · Medium ${s.scoring.MEDIUM} · Hard ${s.scoring.HARD} per problem`} />
+            <StatCard label="Batch rank" value={s.batchRank ? `#${s.batchRank}` : 'Unranked'} href="/student/leaderboard"
+              hint={s.batchRank ? (s.courseRank ? `Course-wide #${s.courseRank}` : undefined) : 'After your first verified problem'} />
           </Grid>
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card title="Difficulty">
-              <div className="space-y-3">{(['EASY', 'MEDIUM', 'HARD'] as const).map((k) => (
-                <div key={k}><div className="mb-1 flex items-center justify-between text-sm"><DifficultyBadge d={k} /><span className="tabular-nums text-slate-500">{data.difficulty![k].solved} / {data.difficulty![k].total}</span></div>
-                  <ProgressBar value={data.difficulty![k].total ? (data.difficulty![k].solved / data.difficulty![k].total) * 100 : null} label={`${k} progress`} /></div>))}</div>
-            </Card>
-            <Card title={`Chapters (${s.completedChapters} of ${s.unlockedChapters} complete)`} className="lg:col-span-2">
-              {!data.chapters.length ? <EmptyState title="No chapters unlocked yet" body="Your trainer unlocks chapters as the course progresses." /> : (
-                <ul className="divide-y divide-slate-100">
-                  {data.chapters.map((c) => (
-                    <li key={c.chapterId} className="py-3">
-                      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                        <Link className="font-medium text-indigo-700 hover:underline" href={`/student/chapters/${c.chapterId}?batchCourseId=${data.selected!.batchCourseId}`}>{c.title}</Link>
-                        <span className="text-slate-500">{c.solved} / {c.total} · E {c.difficulty.EASY.solved}/{c.difficulty.EASY.total} · M {c.difficulty.MEDIUM.solved}/{c.difficulty.MEDIUM.total} · H {c.difficulty.HARD.solved}/{c.difficulty.HARD.total}</span>
+          <Card title="Chapters" description={`${s.completedChapters} of ${s.unlockedChapters} complete`} flush>
+            {!data.chapters.length ? <EmptyState compact title="No chapters yet" body="Your trainer makes chapters visible as the course goes on." /> : (
+              <ul className="divide-y divide-line">
+                {data.chapters.map((c) => (
+                  <li key={c.chapterId}>
+                    <Link href={`/student/chapters/${c.chapterId}?batchCourseId=${bc}`} className="block px-4 py-3 transition-colors hover:bg-hover">
+                      <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate font-medium text-fg">{c.title}</span>
+                        <span className="shrink-0 tabular-nums text-[13px] text-fg-muted">{c.solved} / {c.total} verified</span>
                       </div>
                       <ProgressBar value={c.completionPct} size="sm" label={`${c.title} progress`} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          </div>
-          <p className="text-xs text-slate-500">{data.sync.note}</p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         </>
       )}
     </div>

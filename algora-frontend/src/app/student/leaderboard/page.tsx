@@ -1,31 +1,28 @@
 'use client';
-import { useState } from 'react';
-import { Card, EmptyState, ErrorState, PageHeader, PageSkeleton, Tabs } from '@/components/ui';
+import { Trophy } from 'lucide-react';
+import { Card, EmptyState, ErrorState, Notice, PageHeader, PageSkeleton, Tabs } from '@/components/ui';
 import { LeaderboardTable } from '@/components/manage/Leaderboard';
 import { ContextPicker } from '@/components/student/ContextPicker';
 import { useSync } from '@/components/student/SyncProvider';
-import { useContextChoice } from '@/components/student/useContextChoice';
-import type { Dashboard } from '@/components/student/types';
-import { useApi } from '@/hooks/useApi';
-
+import { useStudentDashboard } from '@/components/student/useContextChoice';
+import { useUrlState } from '@/hooks/useUrlState';
+const TABS = [{ key: 'batch-course', label: 'My batch' }, { key: 'course', label: 'Course-wide' }, { key: 'batch', label: 'All my courses' }];
 export default function Page() {
-  const [choice, choose] = useContextChoice();
-  const [scope, setScope] = useState('batch-course');
   const { view, version } = useSync();
-  const ctx = useApi<Dashboard>('/student/dashboard');
-  if (ctx.error) return <ErrorState message={ctx.error} retry={ctx.reload} />;
-  if (!ctx.data) return <PageSkeleton />;
-  const valid = ctx.data.contexts.some((c) => c.batchCourseId === choice);
-  const bc = valid ? choice! : ctx.data.selected?.batchCourseId;
+  const [{ tab }, setUrl] = useUrlState({ tab: 'batch-course' });
+  const { data, error, reload, selectedId, choose } = useStudentDashboard();
+  if (error) return <ErrorState message={error} retry={reload} />;
+  if (!data) return <PageSkeleton />;
+  const scope = TABS.some((t) => t.key === tab) ? tab : 'batch-course';
   return (
-    <div>
-      <PageHeader title="Leaderboard" actions={<ContextPicker contexts={ctx.data.contexts} value={bc} onChange={choose} />} />
-      {view && !view.syncEnabled && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Automatic verification is not available yet, so rankings do not reflect LeetCode activity. Do not treat them as final.</div>}
-      {!bc ? <EmptyState title="No courses yet" /> : (
-        <>
-          <Tabs active={scope} onChange={setScope} tabs={[{ key: 'batch-course', label: 'My batch' }, { key: 'course', label: 'Course-wide' }, { key: 'batch', label: 'All my batch courses' }]} />
-          <Card><LeaderboardTable key={`${bc}-${scope}-${version}`} path="/student/leaderboard" query={{ batchCourseId: bc, scope }} /></Card>
-        </>
+    <div className="space-y-4">
+      <PageHeader title="Leaderboard" subtitle={data.selected ? `${data.selected.courseTitle} · ${data.selected.batchName}` : undefined}
+        actions={<ContextPicker contexts={data.contexts} value={selectedId} onChange={choose} />} />
+      {view && !view.syncEnabled && <Notice tone="warn" title="Rankings only include verified problems">Progress updates are unavailable right now, so rankings may not show your latest LeetCode activity.</Notice>}
+      {!selectedId ? <Card><EmptyState icon={Trophy} title="No leaderboard yet" body="Rankings appear once you are enrolled in a course." /></Card> : (
+        <Tabs active={scope} onChange={(k) => setUrl({ tab: k })} tabs={TABS}>
+          <Card><LeaderboardTable key={`${selectedId}-${scope}-${version}`} path="/student/leaderboard" query={{ batchCourseId: selectedId, scope }} /></Card>
+        </Tabs>
       )}
     </div>
   );

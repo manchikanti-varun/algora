@@ -1,49 +1,59 @@
 'use client';
 import { useState } from 'react';
-import { cx, DataTable, EmptyState, ErrorState, Notice, Pagination, ProgressBar, StatusBadge, TableSkeleton, timeAgo } from '@/components/ui';
+import { cx, DataTable, EmptyState, ErrorState, Pagination, ProgressBar, StatusBadge, TableSkeleton, timeAgo } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { qs } from '@/lib/api';
 import type { Board, BoardRow } from './types';
-
-/** Shared leaderboard table for management (`path` = management endpoint) and students (rows carry isMe). */
+const MEDAL: Record<number, string> = { 1: 'bg-gold text-gold-fg', 2: 'bg-silver text-silver-fg', 3: 'bg-bronze text-bronze-fg' };
+const medal = (rank: number) => MEDAL[rank] ?? 'bg-subtle text-fg-muted';
+/**
+ * Shared leaderboard table: `path` is the management endpoint or /student/leaderboard (rows then carry isMe).
+ * `showRoll` adds the roll number, `showSync` adds the last progress update (management only).
+ */
 export function LeaderboardTable({ path, query = {}, showRoll, showSync }: { path: string; query?: Record<string, string | undefined>; showRoll?: boolean; showSync?: boolean }) {
   const [page, setPage] = useState(1);
-  const b = useApi<Board & { me?: BoardRow | null; top3?: BoardRow[]; note?: string }>(`${path}${qs({ ...query, page, pageSize: 25 })}`);
+  const b = useApi<Board & { me?: BoardRow | null; top3?: BoardRow[] }>(`${path}${qs({ ...query, page, pageSize: 25 })}`);
   if (b.error) return <ErrorState message={b.error} retry={b.reload} />;
   if (!b.data) return <TableSkeleton rows={8} />;
   const d = b.data;
-  const medal = (r: number) => (r === 1 ? 'bg-amber-100 text-amber-800 ring-amber-300' : r === 2 ? 'bg-slate-100 text-slate-700 ring-slate-300' : r === 3 ? 'bg-orange-100 text-orange-800 ring-orange-300' : 'bg-white text-slate-600 ring-slate-200');
+  const scope = d.scope.type === 'COURSE' ? `Compared on the ${d.scope.problems} problems visible in all ${d.scope.batches} batches`
+    : d.scope.type === 'BATCH' ? `Compared on all ${d.scope.problems} visible problems across the courses of this batch, each counted once`
+      : `Compared on the ${d.scope.problems} visible problems in this course`;
   return (
     <div className="space-y-4">
-      <Notice tone="info">
-        <strong>Scope:</strong> {d.scope.type === 'COURSE' ? `${d.scope.problems} problems unlocked in every one of ${d.scope.batches} batches.` : d.scope.type === 'BATCH' ? `all ${d.scope.problems} unlocked problems across this batch's courses, each counted once.` : `${d.scope.problems} unlocked problems in this batch-course.`}{' '}
-        Ranks use verified accepted LeetCode submissions only; students whose account is not verified or not yet synced may rank lower than their real activity.
-      </Notice>
+      <p className="text-[13px] text-fg-muted">{scope}. Only verified problems count.</p>
       {d.top3 && d.top3.length > 0 && page === 1 && (
         <ol className="grid gap-3 sm:grid-cols-3" aria-label="Top three">
           {d.top3.map((r) => (
-            <li key={`${r.rank}-${r.name}`} className={cx('rounded-xl border p-4 shadow-sm', r.isMe ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 bg-white')}>
-              <span className={cx('inline-grid h-8 w-8 place-items-center rounded-full text-sm font-bold ring-1', medal(r.rank))}>{r.rank}</span>
-              <p className="mt-2 truncate font-semibold">{r.name}{r.isMe && ' (you)'}</p>
-              <p className="text-sm text-slate-500">{r.points} pts · {r.solved} solved</p>
+            <li key={`${r.rank}-${r.name}`} className={cx('flex items-center gap-3 rounded-lg border p-3', r.isMe ? 'border-accent-line bg-accent-soft' : 'border-line bg-surface')}>
+              <span className={cx('grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold', medal(r.rank))}><span className="sr-only">Rank </span>{r.rank}</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-fg">{r.name}{r.isMe && ' (you)'}</p>
+                <p className="text-[13px] tabular-nums text-fg-muted">{r.points} points · {r.solved} verified</p>
+              </div>
             </li>
           ))}
         </ol>
       )}
-      {d.me && <p className="text-sm text-slate-600">Your position: <strong>#{d.me.rank}</strong> with {d.me.points} points.</p>}
-      <DataTable rows={d.items} rowKey={(r) => `${r.rank}-${r.name}-${r.rollNumber ?? ''}`} rowClassName={(r) => (r.isMe ? 'bg-indigo-50/70 font-medium' : undefined)}
-        empty={<EmptyState title="No ranked students" body={d.scope.problems ? 'Nobody has verified evidence in this scope yet.' : 'No problems are comparable in this scope yet.'} />}
-        columns={[
-          { key: 'rank', header: 'Rank', cell: (r) => <span className={cx('inline-grid h-7 w-7 place-items-center rounded-full text-xs font-semibold ring-1', medal(r.rank))}>{r.rank}</span> },
-          { key: 'name', header: 'Student', cell: (r) => <span>{r.name}{r.isMe && <span className="ml-1 text-indigo-600">(you)</span>}</span> },
-          ...(showRoll ? [{ key: 'roll', header: 'Roll number', cell: (r: BoardRow) => <code className="text-xs">{r.rollNumber}</code> }] : []),
-          { key: 'solved', header: 'Solved', cell: (r) => r.solved },
-          { key: 'e', header: 'Easy', cell: (r) => r.easy }, { key: 'm', header: 'Medium', cell: (r) => r.medium }, { key: 'h', header: 'Hard', cell: (r) => r.hard },
-          { key: 'pts', header: 'Points', cell: (r) => <strong>{r.points}</strong> },
-          { key: 'pct', header: 'Completion', className: 'min-w-36', cell: (r) => <ProgressBar value={r.completionPct} size="sm" /> },
-          ...(showSync ? [{ key: 'sync', header: 'Last sync', cell: (r: BoardRow) => <span className="inline-flex items-center gap-2"><StatusBadge status={r.syncStatus} /><span className="text-xs text-slate-500">{timeAgo(r.lastSyncAt)}</span></span> }] : []),
-        ]} />
-      <Pagination page={page} pageSize={d.pageSize} total={d.total} onPage={setPage} />
+      {d.me && <p className="rounded-lg bg-accent-soft px-4 py-2.5 text-sm font-medium text-accent-fg">Your position: #{d.me.rank} · {d.me.points} points</p>}
+      <div className="overflow-hidden rounded-lg border border-line">
+        <DataTable rows={d.items} rowKey={(r) => `${r.rank}-${r.name}-${r.rollNumber ?? ''}`} rowClassName={(r) => (r.isMe ? 'bg-accent-soft font-medium' : undefined)}
+          columnsKey={showRoll || showSync ? 'leaderboard-manage' : 'leaderboard-student'} caption="Leaderboard"
+          empty={<EmptyState compact title="No ranked students yet" body={d.scope.problems ? 'Nobody has a verified problem in this scope yet.' : 'There are no problems to compare in this scope yet.'} />}
+          columns={[
+            { key: 'rank', header: 'Rank', cell: (r) => <span className={cx('inline-grid h-7 w-7 place-items-center rounded-full text-xs font-semibold tabular-nums', medal(r.rank))}>{r.rank}</span> },
+            { key: 'name', header: 'Student', cell: (r) => <span>{r.name}{r.isMe && <span className="ml-1 text-accent-fg">(you)</span>}</span> },
+            ...(showRoll ? [{ key: 'roll', header: 'Roll number', cell: (r: BoardRow) => <span className="text-[13px] tabular-nums text-fg-muted">{r.rollNumber}</span> }] : []),
+            { key: 'solved', header: 'Verified', cell: (r) => <span className="tabular-nums">{r.solved}</span> },
+            { key: 'e', header: 'Easy', optional: true, defaultHidden: true, cell: (r) => <span className="tabular-nums">{r.easy}</span> },
+            { key: 'm', header: 'Medium', optional: true, defaultHidden: true, cell: (r) => <span className="tabular-nums">{r.medium}</span> },
+            { key: 'h', header: 'Hard', optional: true, defaultHidden: true, cell: (r) => <span className="tabular-nums">{r.hard}</span> },
+            { key: 'pts', header: 'Points', cell: (r) => <span className="font-semibold tabular-nums">{r.points}</span> },
+            { key: 'pct', header: 'Completion', className: 'min-w-36', cell: (r) => <ProgressBar value={r.completionPct} size="sm" label="Completion" /> },
+            ...(showSync ? [{ key: 'sync', header: 'Last update', cell: (r: BoardRow) => <span className="inline-flex items-center gap-2"><StatusBadge status={r.syncStatus} /><span className="text-xs text-fg-subtle">{timeAgo(r.lastSyncAt)}</span></span> }] : []),
+          ]} />
+      </div>
+      <Pagination page={page} pageSize={d.pageSize} total={d.total} onPage={setPage} className="px-0" />
     </div>
   );
 }

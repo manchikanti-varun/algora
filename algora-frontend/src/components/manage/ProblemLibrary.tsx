@@ -1,7 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Button, DifficultyBadge, Input, Notice, Select, Textarea } from '@/components/ui';
+import { SlidersHorizontal } from 'lucide-react';
+import { Button, type Column, DataTable, DifficultyBadge, EmptyState, ErrorState, FilterChips, InlineSelect, Input, Notice, Pagination, Popover, SearchInput, Select, TableSkeleton, Textarea } from '@/components/ui';
 import { useApi, useDebounced } from '@/hooks/useApi';
 import { api, errorMessage, qs } from '@/lib/api';
 
@@ -16,13 +17,16 @@ export type CatalogEntry = {
   isPremium?: boolean;
 };
 
+const DIFFICULTIES = [{ value: '', label: 'All difficulties' }, { value: 'EASY', label: 'Easy' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'HARD', label: 'Hard' }];
+const AVAILABILITY = [{ value: '', label: 'All availability' }, { value: 'false', label: 'Free' }, { value: 'true', label: 'Premium' }];
+const PAGE_SIZE = 15;
 export function CatalogBrowser({ assigned = [], selected, onSelect, onAdd }: {
   assigned?: string[];
   selected?: CatalogEntry[];
   onSelect?: (entries: CatalogEntry[]) => void;
   onAdd?: (entries: CatalogEntry[]) => Promise<boolean>;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const [difficulty, setDifficulty] = useState('');
   const [topic, setTopic] = useState('');
@@ -32,77 +36,75 @@ export function CatalogBrowser({ assigned = [], selected, onSelect, onAdd }: {
   const search = useDebounced(query);
   const searchTopic = useDebounced(topic);
   const result = useApi<{ items: CatalogEntry[]; total: number; catalogTotal: number; numbered: number }>(
-    '/problem-library' + qs({ q: search, difficulty, topic: searchTopic, premium, page, pageSize: 15 }),
+    '/problem-library' + qs({ q: search, difficulty, topic: searchTopic, premium, page, pageSize: PAGE_SIZE }),
   );
-  const filtered = !!(query || difficulty || topic || premium);
   const pending = result.loading || query !== search || topic !== searchTopic;
   const visible = pending ? [] : result.data?.items ?? [];
   const eligible = visible.filter((entry) => !assigned.includes(entry.slug));
   const selectedIds = new Set(selected?.map((entry) => entry._id));
   const allSelected = eligible.length > 0 && eligible.every((entry) => selectedIds.has(entry._id));
   const exact = /^\d+$/.test(query.trim()) && eligible.length === 1 && eligible[0].problemNumber === Number(query) ? eligible[0] : null;
-
+  const chips = [
+    difficulty && { key: 'difficulty', label: `Difficulty: ${DIFFICULTIES.find((o) => o.value === difficulty)?.label}`, onRemove: () => { setDifficulty(''); setPage(1); } },
+    topic && { key: 'topic', label: `Topic: ${topic}`, onRemove: () => { setTopic(''); setPage(1); } },
+    premium && { key: 'premium', label: `Availability: ${AVAILABILITY.find((o) => o.value === premium)?.label}`, onRemove: () => { setPremium(''); setPage(1); } },
+  ].filter((chip): chip is { key: string; label: string; onRemove: () => void } => !!chip);
+  const clearAll = () => { setDifficulty(''); setTopic(''); setPremium(''); setPage(1); };
   async function addExact() {
     if (!exact || !onAdd || busy) return;
     setBusy(true);
     try {
       if (await onAdd([exact])) {
         setQuery('');
-        const field = formRef.current?.elements.namedItem('catalog-search');
-        if (field instanceof HTMLInputElement) field.focus();
+        rootRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
       }
     } finally { setBusy(false); }
   }
-
-  return <div className="space-y-3">
-    <form ref={formRef} onSubmit={(event) => { event.preventDefault(); void addExact(); }} className="grid gap-3 sm:grid-cols-2">
-      <Input name="catalog-search" label="Problem number, title, slug or URL" value={query} maxLength={300}
-        onChange={(event) => { setQuery(event.target.value); setPage(1); }}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
-          event.preventDefault();
-          void addExact();
-        }} />
-      <Input label="Topic" value={topic} maxLength={60} onChange={(event) => { setTopic(event.target.value); setPage(1); }} />
-      <Select label="Difficulty" value={difficulty} onChange={(event) => { setDifficulty(event.target.value); setPage(1); }}
-        options={[{ value: '', label: 'All difficulties' }, ...['EASY', 'MEDIUM', 'HARD'].map((value) => ({ value, label: value }))]} />
-      <Select label="Availability" value={premium} onChange={(event) => { setPremium(event.target.value); setPage(1); }}
-        options={[{ value: '', label: 'All availability' }, { value: 'false', label: 'Free' }, { value: 'true', label: 'Premium' }]} />
-      {exact && onAdd && <Button type="submit" loading={busy}>Add {exact.title}</Button>}
-    </form>
-    {filtered && <Button size="sm" variant="ghost" onClick={() => { setQuery(''); setDifficulty(''); setTopic(''); setPremium(''); setPage(1); }}>Clear filters</Button>}
-    {pending && <p role="status">Searching the library…</p>}
-    {!pending && result.error && <Notice tone="error">{result.error} <Button size="sm" onClick={result.reload}>Retry</Button></Notice>}
-    {!pending && !result.error && visible.length === 0 && <p role="status">No matching problems. Adjust the filters or enter the problem manually.</p>}
-    {!onSelect && result.data && <p className="text-sm text-slate-500">{result.data.catalogTotal} catalog entries · {result.data.numbered} with problem numbers</p>}
-    {visible.length > 0 && <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead><tr className="border-b border-slate-200">
-          {onSelect && <th className="p-2"><input type="checkbox" aria-label="Select all available results" checked={allSelected} disabled={!eligible.length}
-            onChange={() => onSelect(allSelected ? selected!.filter((entry) => !eligible.some((item) => item._id === entry._id))
-              : [...selected!, ...eligible.filter((entry) => !selectedIds.has(entry._id))])} /></th>}
-          {['Number', 'Title', 'Difficulty', 'Topics', 'Availability'].map((label) => <th key={label} scope="col" className="p-2">{label}</th>)}
-        </tr></thead>
-        <tbody>{visible.map((entry) => <tr key={entry._id} className="border-b border-slate-100">
-          {onSelect && <td className="p-2"><input type="checkbox" aria-label={`Select ${entry.title}`} disabled={assigned.includes(entry.slug)} checked={selectedIds.has(entry._id)}
-            onChange={() => onSelect(selectedIds.has(entry._id) ? selected!.filter((item) => item._id !== entry._id) : [...selected!, entry])} /></td>}
-          <td className="p-2 tabular-nums">{entry.problemNumber ?? '—'}</td>
-          <td className="p-2"><a className="font-medium hover:underline" href={entry.url} target="_blank" rel="noopener noreferrer">{entry.title}</a>
-            {assigned.includes(entry.slug) && <span className="block text-xs text-slate-500">Already added</span>}</td>
-          <td className="p-2"><DifficultyBadge d={entry.difficulty} /></td>
-          <td className="p-2">{entry.topics.join(', ') || '—'}</td>
-          <td className="p-2">{entry.isPremium === undefined ? 'Unknown' : entry.isPremium ? 'Premium' : 'Free'}</td>
-        </tr>)}</tbody>
-      </table>
-    </div>}
-    {!pending && (result.data?.total ?? 0) > 15 && result.data && <div className="flex items-center gap-3 text-sm">
-      <Button size="sm" variant="secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</Button>
-      <span>Page {page} of {Math.ceil(result.data.total / 15)}</span>
-      <Button size="sm" variant="secondary" disabled={page * 15 >= result.data.total} onClick={() => setPage(page + 1)}>Next</Button>
-    </div>}
+  const columns: Column<CatalogEntry>[] = [
+    ...(onSelect ? [{
+      key: 'sel', className: 'w-10',
+      header: <input type="checkbox" className="h-4 w-4" aria-label="Select all available results" checked={allSelected} disabled={!eligible.length}
+        onChange={() => onSelect(allSelected ? selected!.filter((entry) => !eligible.some((item) => item._id === entry._id))
+          : [...selected!, ...eligible.filter((entry) => !selectedIds.has(entry._id))])} />,
+      cell: (entry: CatalogEntry) => <input type="checkbox" className="h-4 w-4" aria-label={`Select ${entry.title}`} disabled={assigned.includes(entry.slug)} checked={selectedIds.has(entry._id)}
+        onChange={() => onSelect(selectedIds.has(entry._id) ? selected!.filter((item) => item._id !== entry._id) : [...selected!, entry])} />,
+    }] : []),
+    { key: 'n', header: 'Number', cell: (entry) => <span className="tabular-nums">{entry.problemNumber ?? '—'}</span> },
+    { key: 't', header: 'Title', cell: (entry) => <div>
+      <a className="font-medium text-accent-fg hover:underline" href={entry.url} target="_blank" rel="noopener noreferrer">{entry.title}</a>
+      {assigned.includes(entry.slug) && <span className="block text-xs text-fg-subtle">Already added</span>}
+    </div> },
+    { key: 'd', header: 'Difficulty', cell: (entry) => <DifficultyBadge d={entry.difficulty} /> },
+    { key: 'topics', header: 'Topics', optional: true, cell: (entry) => <span className="block max-w-xs truncate text-fg-muted">{entry.topics.join(', ') || '—'}</span> },
+    { key: 'a', header: 'Availability', optional: true, cell: (entry) => entry.isPremium === undefined ? 'Unknown' : entry.isPremium ? 'Premium' : 'Free' },
+  ];
+  return <div ref={rootRef}>
+    <DataTable rows={visible} rowKey={(entry) => entry._id} columns={columns} caption="Problem library"
+      toolbar={<>
+        <SearchInput label="Problem number, title, slug or URL" placeholder="Search by number, title, slug or URL" value={query}
+          onChange={(v) => { setQuery(v.slice(0, 300)); setPage(1); }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            void addExact();
+          }} />
+        <InlineSelect label="Difficulty" value={difficulty} onChange={(v) => { setDifficulty(v); setPage(1); }} options={DIFFICULTIES} />
+        <Popover label="More filters" button={<><SlidersHorizontal size={15} aria-hidden />More filters</>} variant="secondary" size="sm" align="start">
+          <div className="space-y-3">
+            <Input label="Topic" value={topic} maxLength={60} onChange={(event) => { setTopic(event.target.value); setPage(1); }} />
+            <Select label="Availability" value={premium} onChange={(event) => { setPremium(event.target.value); setPage(1); }} options={AVAILABILITY} />
+          </div>
+        </Popover>
+        {exact && onAdd && <Button size="sm" loading={busy} onClick={() => void addExact()}>Add {exact.title}</Button>}
+      </>}
+      empty={pending ? <TableSkeleton />
+        : result.error ? <div className="p-4"><ErrorState message={result.error} retry={result.reload} /></div>
+          : <EmptyState compact title="No matching problems" body="Adjust the filters or enter the problem manually." />} />
+    {chips.length > 0 && <div className="border-t border-line px-4 py-2.5"><FilterChips chips={chips} onClear={clearAll} /></div>}
+    {!onSelect && result.data && <p className="border-t border-line px-4 py-2.5 text-[13px] text-fg-muted">{result.data.catalogTotal} catalog entries · {result.data.numbered} with problem numbers</p>}
+    {!pending && result.data && <Pagination page={page} pageSize={PAGE_SIZE} total={result.data.total} onPage={setPage} className="border-t border-line" />}
   </div>;
 }
-
 type Resolved = { identifier: string; status: string; problem?: CatalogEntry };
 
 export function BulkProblemLookup({ assigned, onAdd }: { assigned: string[]; onAdd: (entries: CatalogEntry[]) => Promise<boolean> }) {
@@ -125,7 +127,7 @@ export function BulkProblemLookup({ assigned, onAdd }: { assigned: string[]; onA
       disabled={busy} onChange={(event) => { setInput(event.target.value); setRows([]); setError(''); }} />
     <Button variant="secondary" loading={busy} disabled={!input.trim()} onClick={preview}>Preview matches</Button>
     {error && <Notice tone="error">{error}</Notice>}
-    {!!rows.length && <ul className="divide-y divide-slate-100 text-sm" aria-label="Bulk match preview">
+    {!!rows.length && <ul className="divide-y divide-line text-sm" aria-label="Bulk match preview">
       {rows.map((row, index) => <li key={index} className="flex flex-wrap items-center justify-between gap-2 py-2">
         <span>{row.identifier}{row.problem && ` · ${row.problem.title}`}{row.problem?.isPremium && ' · Premium'}</span>
         <span>{row.problem && assigned.includes(row.problem.slug) ? 'Already assigned' : row.status.toLowerCase().replaceAll('_', ' ')}</span>

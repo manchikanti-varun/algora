@@ -1,13 +1,19 @@
 'use client';
+import Link from 'next/link';
+import { Clock, Info, Link2, RefreshCw } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError } from '@/lib/api';
-import { Button, cx, timeAgo, useToast } from '@/components/ui';
+import { Button, ButtonLink, fmtTime, Notice, Popover, Spinner, timeAgo, useToast } from '@/components/ui';
 
+/*
+ * Student progress updates. The backend owns every rule (30-minute automatic updates, 10-minute manual cooldown, queue,
+ * verification). This file only displays state and sends the one "request an update" call. Reloading or switching pages
+ * never contacts LeetCode: polling reads Algora's own database through /leetcode/sync-status.
+ */
 export interface LinkView { state: 'LINKED' | 'UNLINKED'; username: string | null; current: { username: string; linkedAt: string | null } | null; countsEvidence: boolean; consentedAt?: string | null }
 export interface JobInfo { id: string; status: 'QUEUED' | 'RUNNING'; trigger: string; attempts: number; enqueuedAt: string; runAfter: string; startedAt: string | null; delayed: boolean }
 export interface SyncView {
   serverTime: string; syncEnabled: boolean; paused?: boolean; coverage?: 'FULL' | 'REDUCED' | null;
-  /** Display status computed by the server: QUEUED, DELAYED and UPDATING come from the job queue, the rest from the last result. */
   status: string; statusDetail?: string | null;
   lastSuccessAt: string | null; lastAttemptAt: string | null; lastManualRequestAt: string | null;
   nextAutoSyncAt: string | null; autoIntervalMin: number; nextManualAt: string | null; cooldownRemainingSec: number; canRequest: boolean;
@@ -16,23 +22,22 @@ export interface SyncView {
 }
 interface Ctx {
   view: SyncView | null;
-  /** Seconds until the next manual update, counted down to the SERVER's timestamp (corrected for clock skew). */
+  /** Seconds until the next manual update, counted down to the server's timestamp (corrected for clock skew). */
   cooldown: number;
-  /** True while a job is queued or running (database state, not a local flag). */
-  busy: boolean; requesting: boolean;
-  version: number;
+  busy: boolean; requesting: boolean; version: number;
   request: () => Promise<void>; refresh: () => Promise<void>;
 }
 const SyncCtx = createContext<Ctx | null>(null);
 export const useSync = () => { const c = useContext(SyncCtx); if (!c) throw new Error('useSync outside SyncProvider'); return c; };
 
-const POLL_ACTIVE_MS = 4_000;   // while a job is queued or running (reads MongoDB through our API only)
-const POLL_IDLE_MS = 60_000;    // keeps "next automatic update" and results fresh
+const POLL_ACTIVE_MS = 4_000;
+const POLL_IDLE_MS = 60_000;
 export const mmss = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+const verifiedText = (n: number) => (n > 0 ? `${n} new ${n === 1 ? 'problem' : 'problems'} verified` : 'No new verified problems');
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const [view, setView] = useState<SyncView | null>(null);
-  const [skew, setSkew] = useState(0);            // serverTime - browser time at the last response
+  const [skew, setSkew] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [requesting, setRequesting] = useState(false);
   const [version, setVersion] = useState(0);
@@ -44,15 +49,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     setView(v); setSkew(new Date(v.serverTime).getTime() - Date.now());
     const before = prev.current;
     if (before?.active && !v.job) {
-      // The job finished since the last poll: report what really happened, from the database.
       const ok = v.lastJob?.status === 'SUCCEEDED';
       if (requestedByMe.current || (v.lastSuccessAt && v.lastSuccessAt !== before.success)) {
-        if (ok && (v.lastJob?.newlyVerified ?? 0) > 0) toast.success(`Progress updated successfully. ${v.lastJob!.newlyVerified} new problem${v.lastJob!.newlyVerified === 1 ? '' : 's'} verified.`);
-        else if (ok) toast.info('Progress updated. No new accepted submissions observed.');
-        else if (requestedByMe.current) toast.error('Update could not be completed. It will be retried automatically.');
+        if (ok) toast.success(`Progress updated. ${verifiedText(v.lastJob?.newlyVerified ?? 0)}.`);
+        else if (requestedByMe.current) toast.error('Unable to update progress. Please try again later.');
       }
       requestedByMe.current = false;
-      setVersion((n) => n + 1); // refetch progress and leaderboards from the backend
+      setVersion((n) => n + 1);
     }
     prev.current = { active: !!v.job, success: v.lastSuccessAt };
   }, [toast]);
@@ -60,16 +63,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try { apply(await api<SyncView>('/leetcode/sync-status')); } catch { /* pages show their own errors */ }
   }, [apply]);
-
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const busy = !!view?.job;
-  // Read-only status polling. It never asks the backend to contact LeetCode.
   useEffect(() => {
     const tick = () => { if (document.visibilityState === 'visible') void refresh(); };
     const t = setInterval(tick, busy ? POLL_ACTIVE_MS : POLL_IDLE_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); }; // a status read, not a sync
+    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); }; // a status read, not an update request
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
   }, [busy, refresh]);
@@ -83,93 +84,98 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const r = await api<{ accepted: boolean; created?: boolean; sync: SyncView; outcome?: { message?: string } }>('/leetcode/request-sync', { method: 'POST', body: {} });
       requestedByMe.current = true;
       apply(r.sync);
-      if (r.accepted === false) { requestedByMe.current = false; toast.info(r.outcome?.message ?? 'Updates are not available right now'); }
-      else toast.info(r.created === false ? 'An update is already queued for you.' : 'Update queued. Your progress will refresh when it completes.');
+      if (r.accepted === false) { requestedByMe.current = false; toast.info('Progress updates are unavailable right now.'); }
+      else toast.info(r.created === false ? 'An update is already queued.' : 'Update queued. Your progress will refresh when it finishes.');
     } catch (e) {
       if (e instanceof ApiError && e.status === 429) {
         const d = e.details as { sync?: SyncView; retryAfterSec?: number } | undefined;
         if (d?.sync) apply(d.sync);
-        toast.info(`You can request another update in ${mmss(d?.retryAfterSec ?? 60)}.`);
-      } else toast.error('Could not queue the update. Try again later.');
+        toast.info(`Next update available in ${mmss(d?.retryAfterSec ?? 60)}.`);
+      } else toast.error('Unable to update progress. Please try again later.');
     } finally { setRequesting(false); }
   }, [apply, requesting, toast]);
 
   return <SyncCtx.Provider value={{ view, cooldown, busy, requesting, version, request, refresh }}>{children}</SyncCtx.Provider>;
 }
 
-function buttonState(view: SyncView, cooldown: number, busy: boolean, requesting: boolean) {
-  if (requesting) return { label: 'Queuing…', disabled: true };
-  if (view.job?.status === 'RUNNING') return { label: 'Updating progress…', disabled: true };
-  if (view.job) return { label: view.job.delayed ? 'Update delayed' : 'Update queued', disabled: true };
-  if (cooldown > 0) return { label: `Update available in ${mmss(cooldown)}`, disabled: true };
-  if (!view.canRequest) return { label: 'Update Progress', disabled: true };
-  return { label: 'Update Progress', disabled: busy };
+/** What the single Update progress control shows. */
+function controlState(view: SyncView, cooldown: number, requesting: boolean) {
+  if (requesting) return { label: 'Requesting…', short: 'Requesting…', disabled: true, spin: true };
+  if (view.job?.status === 'RUNNING') return { label: 'Updating progress…', short: 'Updating…', disabled: true, spin: true };
+  if (view.job) return { label: view.job.delayed ? 'Update delayed' : 'Update queued', short: view.job.delayed ? 'Delayed' : 'Queued', disabled: true, spin: false };
+  if (cooldown > 0) return { label: `Next update in ${mmss(cooldown)}`, short: mmss(cooldown), disabled: true, spin: false, clock: true };
+  return { label: 'Update progress', short: 'Update', disabled: false, spin: false };
 }
 
-/** Compact header control, shown on every student page. */
-export function SyncButton() {
-  const { view, cooldown, busy, requesting, request } = useSync();
+/**
+ * The one Update progress control (in the student header on every page). Next to it, an info button shows the details:
+ * connected account, last update, next automatic update. Unavailable states are shown as plain text, not as errors.
+ */
+export function UpdateProgress() {
+  const { view, cooldown, requesting, request } = useSync();
   if (!view) return null;
-  if (!view.syncEnabled) return <span className="hidden rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-amber-200 sm:inline" title="Synchronization is temporarily unavailable. Your verified progress is unchanged.">Synchronization unavailable</span>;
-  if (view.link.state !== 'LINKED') return null;
-  if (view.paused) return <span className="hidden rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ring-1 ring-amber-200 sm:inline">Updates paused</span>;
-  const b = buttonState(view, cooldown, busy, requesting);
+  if (!view.syncEnabled) return <span className="hidden text-xs text-fg-subtle sm:inline">Progress updates unavailable</span>;
+  if (view.link.state !== 'LINKED') return <ButtonLink href="/student/profile#connected-accounts" variant="secondary" size="sm" icon={<Link2 size={14} aria-hidden />}>Connect LeetCode</ButtonLink>;
+  if (view.paused) return <span className="text-xs text-fg-subtle">Updates paused</span>;
+  const s = controlState(view, cooldown, requesting);
   return (
-    <Button size="sm" variant="secondary" loading={requesting || view.job?.status === 'RUNNING'} disabled={b.disabled} onClick={() => void request()} title={`Last successful update ${timeAgo(view.lastSuccessAt)}`}>
-      {b.label}
-    </Button>
-  );
-}
-
-const STATE_COPY: Record<string, { tone: string; text: string }> = {
-  IDLE: { tone: 'gray', text: 'Not updated yet' }, QUEUED: { tone: 'blue', text: 'Update queued' }, UPDATING: { tone: 'blue', text: 'Updating progress' },
-  DELAYED: { tone: 'amber', text: 'Synchronization delayed' }, SYNC_PENDING: { tone: 'blue', text: 'Update queued' }, SYNCING: { tone: 'blue', text: 'Updating progress' },
-  SYNC_SUCCESS: { tone: 'green', text: 'Progress up to date' }, POSSIBLE_EVIDENCE_GAP: { tone: 'amber', text: 'Updated · possible gap' },
-  NO_SUBMISSIONS_OBSERVED: { tone: 'gray', text: 'No accepted submissions observed yet' }, SUBMISSIONS_UNAVAILABLE: { tone: 'amber', text: 'Submissions not visible' },
-  ACCOUNT_NOT_FOUND: { tone: 'red', text: 'Username not found' }, SYNC_FAILED: { tone: 'red', text: 'Last update failed' },
-  SYNC_PAUSED: { tone: 'amber', text: 'Paused by administrator' }, RATE_LIMITED: { tone: 'amber', text: 'Synchronization delayed' },
-  PROVIDER_UNAVAILABLE: { tone: 'amber', text: 'Synchronization temporarily unavailable' }, VERIFICATION_UNAVAILABLE: { tone: 'amber', text: 'Synchronization unavailable' },
-};
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
-
-/** Full status panel for the dashboard, progress page and profile. */
-export function SyncPanel({ verified }: { verified?: { solved: number; total: number } | null }) {
-  const { view, cooldown, busy, requesting, request } = useSync();
-  if (!view) return null;
-  const s = STATE_COPY[view.status] ?? STATE_COPY.IDLE;
-  let body: ReactNode;
-  if (!view.syncEnabled) body = <p>Synchronization is temporarily unavailable. Your verified progress is unchanged. Keep solving on LeetCode; accepted submissions Algora can see will be verified once synchronization resumes. Nothing is marked unsolved in the meantime.</p>;
-  else if (view.paused) body = <p>Synchronization is paused by the administrator. Your verified progress is unchanged and new solves will be checked when it resumes.</p>;
-  else if (view.link.state !== 'LINKED') body = <p>Link your LeetCode username on your <a className="font-medium underline" href="/student/profile">profile</a> to start counting progress.</p>;
-  else if (view.status === 'ACCOUNT_NOT_FOUND') body = <p>LeetCode could not find <strong>{view.link.username}</strong>. Check the spelling on your <a className="font-medium underline" href="/student/profile">profile</a> and update it.</p>;
-  else if (view.job?.status === 'RUNNING') body = <p>Checking <strong>{view.link.username}</strong> for new accepted submissions…</p>;
-  else if (view.job) body = <p>{view.job.delayed ? 'Updates are taking longer than usual because many students are waiting. ' : ''}Your update is queued and will run when the shared request budget allows. This page refreshes by itself.</p>;
-  else if (view.status === 'PROVIDER_UNAVAILABLE' || view.status === 'RATE_LIMITED') body = <p>Synchronization is temporarily unavailable. Your verified progress is unchanged and Algora will retry automatically.</p>;
-  else if (view.status === 'SUBMISSIONS_UNAVAILABLE') body = <p>LeetCode reports activity on <strong>{view.link.username}</strong>, but the latest check returned no accepted submissions. Previously verified progress is still available.</p>;
-  else if (view.status === 'NO_SUBMISSIONS_OBSERVED') body = <p>No accepted submissions are visible on <strong>{view.link.username}</strong> yet. Solve an assigned problem on LeetCode and Algora will pick it up.</p>;
-  else body = <p>{view.lastJob?.status === 'SUCCEEDED' && view.lastJob.newlyVerified === 0 && view.lastJob.trigger === 'MANUAL' ? 'No new accepted submissions observed in the latest check. ' : ''}Tracking <strong>{view.link.username}</strong>.</p>;
-  const b = buttonState(view, cooldown, busy, requesting);
-  const canShow = view.syncEnabled && !view.paused && view.link.state === 'LINKED';
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="sync-panel">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">LeetCode progress
-          <span data-testid="sync-status" className={cx('rounded-full px-2 py-0.5 text-xs font-medium ring-1', { gray: 'bg-slate-100 text-slate-700 ring-slate-200', blue: 'bg-sky-50 text-sky-700 ring-sky-200', green: 'bg-emerald-50 text-emerald-700 ring-emerald-200', red: 'bg-rose-50 text-rose-700 ring-rose-200', amber: 'bg-amber-50 text-amber-800 ring-amber-200' }[s.tone])}>{view.syncEnabled ? s.text : 'Unavailable'}</span></p>
-        {canShow && <Button size="sm" loading={requesting || view.job?.status === 'RUNNING'} disabled={b.disabled} onClick={() => void request()}>{b.label}</Button>}
-      </div>
-      <div className="mt-2 text-sm text-slate-600">{body}</div>
-      {canShow && (
-        <dl className="mt-3 grid gap-x-6 gap-y-1 text-xs text-slate-500 sm:grid-cols-3">
-          <div><dt className="inline">Account: </dt><dd className="inline font-medium text-slate-700">{view.link.username}</dd></div>
-          <div><dt className="inline">Last successful update: </dt><dd className="inline font-medium text-slate-700">{view.lastSuccessAt ? timeAgo(view.lastSuccessAt) : 'never'}</dd></div>
-          <div><dt className="inline">Next automatic update: </dt><dd className="inline font-medium text-slate-700">{view.job ? 'queued now' : when(view.nextAutoSyncAt)}</dd></div>
-          {verified && <div><dt className="inline">Verified problems: </dt><dd className="inline font-medium text-slate-700">{verified.solved} of {verified.total}</dd></div>}
-          {verified && verified.total > verified.solved && <div className="sm:col-span-2"><dt className="inline">Pending verification: </dt><dd className="inline font-medium text-slate-700">{verified.total - verified.solved} not yet verified. A problem you solved on LeetCode appears here after the next successful update.</dd></div>}
-        </dl>
-      )}
-      {canShow && <p className="mt-2 text-xs text-slate-500">Progress updates automatically about every {view.autoIntervalMin} minutes, subject to queue delays and LeetCode availability. You can request an extra update once every 10 minutes. Reloading this page never contacts LeetCode.</p>}
-      {view.coverage === 'REDUCED' && <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">The last check could only see your most recent submissions of every kind, not just accepted ones, so failed attempts may have hidden a few accepted solves. Older accepted submissions may fall outside the next available window.</p>}
-      {view.possibleGap && <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">LeetCode only shows your most recent accepted submissions, and the latest check did not overlap with earlier ones. Some accepted submissions may not have been observed. Previously verified progress is unchanged. Ask your trainer if a problem you solved is missing.</p>}
+    <div className="flex items-center">
+      <Button variant="secondary" size="sm" disabled={s.disabled} onClick={() => void request()} aria-live="polite"
+        icon={s.spin ? <Spinner /> : s.clock ? <Clock size={14} aria-hidden /> : <RefreshCw size={14} aria-hidden />}
+        className="rounded-r-none" title={s.label}>
+        <span className="hidden sm:inline">{s.label}</span><span className="sm:hidden">{s.short}</span>
+      </Button>
+      <Popover label="Progress update details" button={<Info size={15} aria-hidden />} variant="secondary" size="sm" className="-ml-px w-8 rounded-l-none px-0">
+        <ProgressDetails view={view} cooldown={cooldown} />
+      </Popover>
     </div>
   );
+}
+
+function ProgressDetails({ view, cooldown }: { view: SyncView; cooldown: number }) {
+  return (
+    <div className="space-y-3">
+      <p className="font-medium text-fg">Progress updates</p>
+      <dl className="space-y-1.5 text-[13px]">
+        <div className="flex justify-between gap-3"><dt className="text-fg-muted">LeetCode account</dt><dd className="truncate font-medium text-fg">{view.link.username}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-fg-muted">Last updated</dt><dd className="text-fg">{timeAgo(view.lastSuccessAt)}</dd></div>
+        <div className="flex justify-between gap-3"><dt className="text-fg-muted">Next automatic update</dt><dd className="text-fg">{view.job ? 'In progress' : view.nextAutoSyncAt ? fmtTime(view.nextAutoSyncAt) : 'Not scheduled'}</dd></div>
+        {cooldown > 0 && <div className="flex justify-between gap-3"><dt className="text-fg-muted">Next update available in</dt><dd className="tabular-nums text-fg">{mmss(cooldown)}</dd></div>}
+      </dl>
+      <p className="text-xs text-fg-subtle">Your progress updates automatically about every {view.autoIntervalMin} minutes. You can also request an update every 10 minutes.</p>
+      <Link href="/student/profile#connected-accounts" className="text-xs font-medium text-accent-fg hover:underline">Manage connected account</Link>
+    </div>
+  );
+}
+
+/** One quiet line for the home page. Not a second control: it only describes the current state. */
+export function ProgressStatusLine() {
+  const { view } = useSync();
+  if (!view || !view.syncEnabled || view.paused || view.link.state !== 'LINKED') return null;
+  const parts = [
+    view.job ? (view.job.status === 'RUNNING' ? 'Updating your progress…' : 'Update queued') : `Progress last updated ${timeAgo(view.lastSuccessAt)}`,
+    !view.job && view.nextAutoSyncAt ? `next automatic update at ${fmtTime(view.nextAutoSyncAt)}` : null,
+  ].filter(Boolean);
+  return <p className="text-[13px] text-fg-subtle" aria-live="polite">{parts.join(' · ')}</p>;
+}
+
+/**
+ * Situations the student must know about. Warnings are never hidden: account not found, incomplete history, limited
+ * visibility, updates unavailable or paused, or no connected account.
+ */
+export function ProgressNotices() {
+  const { view } = useSync();
+  if (!view) return null;
+  const out: ReactNode[] = [];
+  if (!view.syncEnabled) out.push(<Notice key="off" tone="info" title="Progress updates are not available yet">Keep solving your assigned problems on LeetCode. They will be verified once updates are turned on. Problems that are not verified yet are not marked as unsolved.</Notice>);
+  else if (view.link.state !== 'LINKED') out.push(<Notice key="link" tone="warn" title="Connect your LeetCode account" action={<ButtonLink href="/student/profile#connected-accounts" size="sm">Connect</ButtonLink>}>Algora verifies problems from the accepted submissions on your LeetCode account.</Notice>);
+  else if (view.paused) out.push(<Notice key="paused" tone="info" title="Progress updates are paused">Your verified progress is unchanged. New solves will be checked when updates resume.</Notice>);
+  else {
+    if (view.status === 'ACCOUNT_NOT_FOUND') out.push(<Notice key="nf" tone="error" title={`LeetCode could not find “${view.link.username}”`} action={<ButtonLink href="/student/profile#connected-accounts" size="sm" variant="secondary">Fix username</ButtonLink>}>Check the spelling of your LeetCode username.</Notice>);
+    if (view.status === 'SUBMISSIONS_UNAVAILABLE') out.push(<Notice key="sv" tone="warn" title="Your submissions are not visible">LeetCode shows activity on this account, but the latest check returned no accepted submissions. Your verified progress is unchanged.</Notice>);
+    if (view.status === 'PROVIDER_UNAVAILABLE' || view.status === 'RATE_LIMITED' || view.status === 'SYNC_FAILED') out.push(<Notice key="pu" tone="warn" title="Unable to update progress right now">Algora will try again automatically. Your verified progress is unchanged.</Notice>);
+    if (view.possibleGap) out.push(<Notice key="gap" tone="warn" title="Some submissions may not have been seen">LeetCode only shares your most recent accepted submissions, and the latest check did not overlap with earlier ones. Previously verified problems still count. Ask your trainer if a problem you solved is missing.</Notice>);
+    if (view.coverage === 'REDUCED') out.push(<Notice key="cov" tone="info" title="Limited view of your submissions">The last check could only see your most recent submissions of every kind, so a few accepted solves may appear later.</Notice>);
+  }
+  return out.length ? <div className="space-y-3">{out}</div> : null;
 }

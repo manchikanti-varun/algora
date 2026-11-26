@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Button, Card, Input, Notice, PageHeader, Textarea, useToast } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-
 export default function Page() {
   const router = useRouter(); const toast = useToast(); const { user } = useAuth();
   const [busy, setBusy] = useState(false); const [err, setErr] = useState<string>();
@@ -17,13 +16,14 @@ export default function Page() {
   }
   return (
     <div className="max-w-2xl">
-      <PageHeader title="New course" back={{ href: '/manage/courses', label: 'Courses' }} subtitle="Courses start as drafts. Add chapters and problems, then publish to make the course assignable." />
+      <PageHeader title="New course" breadcrumbs={[{ label: 'Courses', href: '/manage/courses' }, { label: 'New course' }]}
+        subtitle="Courses start as drafts. Add chapters and problems, then publish to make the course available to batches." />
       <Card>
         <form onSubmit={submit} className="space-y-4">
           {err && <Notice tone="error">{err}</Notice>}
           <Input label="Title" name="title" required maxLength={150} placeholder="Java & DSA" autoFocus />
           <Textarea label="Description" name="description" maxLength={5000} rows={4} />
-          <div className="flex gap-2"><Button loading={busy} type="submit">Create course</Button><Button variant="ghost" type="button" onClick={() => router.back()}>Cancel</Button></div>
+          <div className="flex gap-2"><Button loading={busy} type="submit">Create course</Button><Button variant="ghost" type="button" onClick={() => router.push('/manage/courses')}>Cancel</Button></div>
         </form>
       </Card>
     </div>

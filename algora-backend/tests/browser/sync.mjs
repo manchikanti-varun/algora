@@ -63,7 +63,7 @@ try {
   });
   await step('Registration immediately links the consenting username', async () => {
     await s.page.goto(`${FE}/student/profile`);
-    await s.page.getByText('Linked account:', { exact: false }).waitFor();
+    await s.page.locator('#connected-accounts').getByText('Connected', { exact: true }).waitFor();
     await mock('/solve', { username: 'asha_rao', slug: 'unrelated-problem' });
   });
   await step('Update Progress queues a job, shows queued/updating, then verifies from the backend; dashboard and chapter update; button shows a server-based countdown', async () => {
@@ -71,18 +71,23 @@ try {
     await s.page.goto(`${FE}/student/dashboard`);
     await s.page.getByText('0 / 2').first().waitFor();
     assert((await mock('/x', {})).calls === 0, 'page load called the provider');
-    await s.page.getByRole('button', { name: 'Update Progress' }).first().click();
+    // exactly one Update progress control on the page (the header); Home only describes the state
+    assert((await s.page.getByRole('button', { name: /Update progress/ }).count()) === 1, 'duplicate Update progress controls');
+    await s.page.getByRole('button', { name: /Update progress/ }).click();
     await s.page.getByText(/Update queued|Updating progress/).first().waitFor();
-    await s.page.getByText(/Progress updated successfully\. 2 new problems verified/).waitFor(); // two-sum + the unrelated problem from setup (evidence is canonical, not course-bound)
+    await s.page.getByText('Progress updated. 2 new problems verified.').waitFor(); // two-sum + the unrelated problem from setup (evidence is canonical, not course-bound)
     await s.page.getByText('1 / 2').first().waitFor();
-    await s.page.getByRole('button', { name: /Update available in \d\d:\d\d/ }).first().waitFor();
+    await s.page.getByRole('button', { name: /Next update in \d\d:\d\d/ }).first().waitFor(); // server-based cooldown
     await s.page.getByText('Batch rank').waitFor();
     assert((await mock('/x', {})).calls === 1, 'exactly one provider call expected');
-    await s.page.getByRole('link', { name: 'Arrays' }).click();
-    await s.page.getByLabel('Verified', { exact: true }).waitFor();
-    await s.page.getByText(/Verified .* last accepted/).waitFor();
-    await s.page.getByText('#1', { exact: true }).waitFor();
-    await s.page.screenshot({ path: '../docs/screenshots/11-verified-chapter.png', fullPage: true });
+    await s.page.getByRole('button', { name: 'Progress update details' }).click();
+    await s.page.getByText('Next automatic update', { exact: true }).waitFor();
+    await s.page.keyboard.press('Escape');
+    await s.page.getByRole('link', { name: /Arrays/ }).first().click();
+    await s.page.locator('main li').getByText('Verified', { exact: true }).first().waitFor(); // status as text, not colour only
+    await s.page.locator('main li').getByText(/Verified [A-Z][a-z]{2} \d+/).first().waitFor();
+    await s.page.goto(`${FE}/student/leaderboard`);
+    await s.page.getByText('Your position: #1', { exact: false }).waitFor();
   });
   await step('Reloading, navigating and switching tabs never contact LeetCode', async () => {
     await mock('/solve', { username: 'asha_rao', slug: '3sum' });
@@ -96,25 +101,25 @@ try {
   });
   await step('After the cooldown a second request is accepted once (double click makes one job) and picks up the new solve', async () => {
     await s.page.waitForTimeout(2_000); // cooldown is 10 s in this harness
-    const btn = s.page.getByRole('button', { name: 'Update Progress' }).first();
+    const btn = s.page.getByRole('button', { name: /Update progress/ });
     await btn.waitFor();
     const before = (await mock('/x', {})).calls;
     await btn.dblclick({ delay: 10 }).catch(() => {});
-    await s.page.getByText(/Progress updated successfully\. 1 new problem verified/).waitFor();
+    await s.page.getByText('Progress updated. 1 new problem verified.').waitFor();
     assert((await mock('/x', {})).calls === before + 1, 'double click must make exactly one provider call');
     await s.page.getByText('2 / 2').first().waitFor(); // dashboard refetched from the backend after the job finished
   });
   await step('Leaderboard ranks the student with verified points; management analytics agree', async () => {
     await s.page.goto(`${FE}/student/leaderboard`);
-    await s.page.getByText('Your position: #1 with 30 points').waitFor();
+    await s.page.getByText('Your position: #1 · 30 points').waitFor();
     const a = await apiAs(admin.page, 'GET', `/analytics/students?batchId=${ids.b._id}`);
     assert(a.body.items[0].points === 30 && a.body.items[0].solved === 2, JSON.stringify(a.body.items[0]));
   });
   await step('Unlinking stops evidence counting immediately; evidence is kept', async () => {
     await s.page.goto(`${FE}/student/profile`);
-    await s.page.getByRole('button', { name: 'Unlink account' }).click();
-    await s.page.locator('dialog[open]').getByRole('button', { name: 'Unlink' }).click();
-    await s.page.getByText('Account unlinked', { exact: true }).waitFor();
+    await s.page.getByRole('button', { name: 'Disconnect', exact: true }).click();
+    await s.page.locator('dialog[open]').getByRole('button', { name: 'Disconnect' }).click();
+    await s.page.getByText('LeetCode account disconnected', { exact: true }).waitFor();
     await s.page.goto(`${FE}/student/dashboard`);
     await s.page.getByText('0 / 2').first().waitFor();
     const d = await apiAs(admin.page, 'GET', `/analytics/students?batchId=${ids.b._id}`);
@@ -125,22 +130,28 @@ try {
     await admin.page.getByText('Mock (mock)', { exact: true }).waitFor();
     await admin.page.getByText('Serving', { exact: true }).waitFor();
     await admin.page.getByText('A development mock provider is active').waitFor();
-    await admin.page.screenshot({ path: '../docs/screenshots/12-integration.png', fullPage: true });
+    await admin.page.getByText('Active, connectivity untested').or(admin.page.getByText('Healthy', { exact: true })).first().waitFor(); // never "healthy" before a real answer
     await admin.page.getByRole('button', { name: 'Pause synchronization' }).click();
     await admin.page.locator('dialog[open]').getByRole('button', { name: 'Pause', exact: true }).click();
     await admin.page.getByText('Synchronization paused').first().waitFor();
-    await admin.page.getByRole('tab', { name: 'Failover & errors' }).click();
+    await admin.page.getByRole('tab', { name: 'Errors' }).click();
+    await admin.page.waitForURL(/tab=errors/);
     await admin.page.getByText('No events').or(admin.page.getByText('HEALTH_CHECK')).or(admin.page.getByRole('row').nth(1)).first().waitFor();
-    // student view while paused (relink so the state is visible)
+    // student view while paused (reconnect first so the paused state, not the connect prompt, is what applies)
+    await s.page.goto(`${FE}/student/profile`);
+    await s.page.locator('#connected-accounts').getByLabel('LeetCode username').fill('asha_rao');
+    await s.page.locator('#connected-accounts').getByRole('checkbox').check();
+    await s.page.locator('#connected-accounts').getByRole('button', { name: /^Connect/ }).click();
+    await s.page.getByText('LeetCode account connected').waitFor();
     await s.page.goto(`${FE}/student/dashboard`);
-    await s.page.getByText('Synchronization is paused by the administrator').waitFor();
+    await s.page.getByText('Progress updates are paused').first().waitFor();
     await admin.page.goto(`${FE}/manage/integration`);
     await admin.page.getByRole('button', { name: 'Resume synchronization' }).click();
     await admin.page.getByText('Synchronization resumed').first().waitFor();
   });
   await step('Withdraw consent and delete LeetCode data from the profile', async () => {
     await s.page.goto(`${FE}/student/profile`);
-    await s.page.getByRole('button', { name: 'Withdraw and delete my data' }).click();
+    await s.page.getByRole('button', { name: 'Withdraw consent and delete my data' }).click();
     await s.page.locator('dialog[open]').getByRole('button', { name: 'Delete my data' }).click();
     await s.page.getByText(/Deleted \d+ verified problem record/).waitFor();
     const d = await apiAs(admin.page, 'GET', `/analytics/students/${(await apiAs(admin.page, 'GET', `/analytics/students?batchId=${ids.b._id}`)).body.items[0].studentId}`);
