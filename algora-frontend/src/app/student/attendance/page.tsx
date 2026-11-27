@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Badge, Card, DataTable, EmptyState, ErrorState, fmtDateTime, Grid, InlineSelect, PageHeader, PageSkeleton, StatCard, StatusBadge, type Column } from '@/components/ui';
+import { Badge, Card, DataTable, EmptyState, ErrorState, Grid, InlineSelect, PageHeader, PageSkeleton, StatCard, StatusBadge, type Column } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { attendancePct, fmtAttendanceDate, sessionLabel, type StudentAttendance } from '@/lib/attendance';
 import { qs } from '@/lib/api';
@@ -34,7 +34,6 @@ export default function Page() {
     { key: 'date', header: 'Date', cell: (r) => fmtAttendanceDate(r.attendanceDate) },
     { key: 'session', header: 'Session', cell: (r) => sessionLabel(r.sessionType) },
     { key: 'status', header: 'Status', cell: (r) => <StatusBadge status={r.status} /> },
-    { key: 'scan', header: 'Attendance time', cell: (r) => (r.scanAt ? fmtDateTime(r.scanAt) : '—') },
   ];
   return (
     <div className="space-y-6">

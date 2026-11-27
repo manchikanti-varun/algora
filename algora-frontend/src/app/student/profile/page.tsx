@@ -23,9 +23,11 @@ export default function Page() {
   const [busy, setBusy] = useState<string | null>(null);
   const [newName, setNewName] = useState(''); const [consent, setConsent] = useState(false);
   const [collegeId, setCollegeId] = useState('');
-  const ready = !!p.data && !l.loading;
-  // The account menu links to #connected-accounts; the sections only exist after loading.
-  useEffect(() => { if (ready && window.location.hash) document.getElementById(window.location.hash.slice(1))?.scrollIntoView(); }, [ready]);
+  const profileReady = !!p.data;
+  // Menu links can arrive before the profile has rendered its anchor sections.
+  useEffect(() => {
+    if (profileReady && window.location.hash) document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
+  }, [profileReady]);
   if (p.error) return <ErrorState message={p.error} retry={p.reload} />;
   if (!p.data) return <PageSkeleton />;
   const link = l.data;
@@ -91,9 +93,11 @@ export default function Page() {
       <Card title="Academic information" actions={<Button variant="secondary" size="sm" onClick={openRequest}>Request changes</Button>}>
         <DescriptionList cols={2} items={[{ label: 'Roll number', value: p.data.rollNumber }, { label: 'College', value: p.data.college ?? '—' }]} />
       </Card>
-      {p.data.rollNumber ? <AttendanceQr key={p.data.rollNumber} studentName={[p.data.firstName, p.data.lastName].filter(Boolean).join(' ') || 'Student'} rollNumber={p.data.rollNumber} /> : (
-        <Card title="Attendance QR code" description="Ask your trainer to verify your approved roll number." />
-      )}
+      <div id="attendance-qr" className="scroll-mt-24">
+        {p.data.rollNumber ? <AttendanceQr key={p.data.rollNumber} studentName={[p.data.firstName, p.data.lastName].filter(Boolean).join(' ') || 'Student'} rollNumber={p.data.rollNumber} /> : (
+          <Card title="Attendance QR code" description="Ask your trainer to verify your approved roll number." />
+        )}
+      </div>
       <Modal open={showProfile} onClose={() => setShowProfile(false)} title="Request a change" description="Your trainer or a Super Admin reviews every request before it is applied.">
         <form onSubmit={saveProfile} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">

@@ -1,5 +1,5 @@
 'use client';
-import { Download, QrCode } from 'lucide-react';
+import { QrCode } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Button, Card, Modal } from '@/components/ui';
@@ -23,12 +23,6 @@ export function AttendanceQr({ studentName, rollNumber }: { studentName: string;
     return () => { live = false; };
   }, [rollNumber]);
 
-  const download = () => {
-    if (!dataUrl) return;
-    const a = Object.assign(document.createElement('a'), { href: dataUrl, download: `algora-attendance-${rollNumber}.png` });
-    document.body.appendChild(a); a.click(); a.remove();
-  };
-
   return (
     <Card title="Attendance QR code" description="Show this code to your trainer when attendance is taken.">
       <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
@@ -45,7 +39,6 @@ export function AttendanceQr({ studentName, rollNumber }: { studentName: string;
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <Button variant="secondary" size="sm" icon={<QrCode size={15} aria-hidden />} onClick={() => setOpen(true)} disabled={!dataUrl}>View QR code</Button>
-            <Button variant="ghost" size="sm" icon={<Download size={15} aria-hidden />} onClick={download} disabled={!dataUrl}>Download PNG</Button>
           </div>
           {failed && <p className="text-xs text-danger-fg">The QR image could not be generated. Your roll number is {rollNumber}.</p>}
         </div>
@@ -57,7 +50,6 @@ export function AttendanceQr({ studentName, rollNumber }: { studentName: string;
           </div>
           <p className="text-sm font-semibold tabular-nums text-fg">{rollNumber}</p>
           <p className="max-w-sm text-center text-[13px] text-fg-muted">{studentName} · {rollNumber}</p>
-          <Button variant="secondary" size="sm" icon={<Download size={15} aria-hidden />} onClick={download} disabled={!dataUrl}>Download PNG</Button>
         </div>
       </Modal>
     </Card>

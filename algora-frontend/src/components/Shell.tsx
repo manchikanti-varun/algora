@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import {
   Activity, ArrowUpRight, BookOpen, Inbox, ChartNoAxesCombined, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
-  CalendarCheck2, ClipboardCheck, PanelLeftClose, PanelLeftOpen, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
+  CalendarCheck2, ClipboardCheck, PanelLeftClose, PanelLeftOpen, QrCode, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -211,7 +211,12 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
           </nav>
           <div className="ml-auto flex items-center gap-1.5">
             {aside}
-            <AccountMenu user={user} onSignOut={signOut} extra={[{ label: 'Profile', href: '/student/profile', icon: <UserRound size={15} aria-hidden /> }, { label: 'My Requests', href: '/student/profile#my-requests', icon: <Inbox size={15} aria-hidden /> }, { label: 'Connected Accounts', href: '/student/profile#connected-accounts', icon: <ArrowUpRight size={15} aria-hidden /> }]} />
+            <AccountMenu user={user} onSignOut={signOut} extra={[
+              { label: 'Profile', href: '/student/profile', icon: <UserRound size={15} aria-hidden /> },
+              { label: 'Attendance QR', href: '/student/profile#attendance-qr', icon: <QrCode size={15} aria-hidden /> },
+              { label: 'My Requests', href: '/student/profile#my-requests', icon: <Inbox size={15} aria-hidden /> },
+              { label: 'Connected Accounts', href: '/student/profile#connected-accounts', icon: <ArrowUpRight size={15} aria-hidden /> },
+            ]} />
           </div>
         </div>
       </header>

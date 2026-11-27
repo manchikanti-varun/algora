@@ -437,18 +437,22 @@ try {
     for (const raw of ['LEETCODE_', 'SYNC_', 'statusDetail', 'provider']) assert(!(await p.locator('body').innerText()).includes(raw), `technical text "${raw}" on the profile`);
     await shot(p, '08-profile');
   });
-  await step('Profile QR: renders, enlarges, downloads and decodes to exactly the approved roll number', async () => {
+  await step('Attendance QR shortcut opens Profile, and the enlarged image decodes to the approved roll number', async () => {
     const p = student.page;
-    await p.goto(`${FE}/student/profile`);
-    await p.getByText('Attendance QR code').waitFor();
-    await p.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).first().waitFor();
-    await p.getByRole('button', { name: 'View QR code' }).click();
+    await p.goto(`${FE}/student/attendance`);
+    await menu(p, p, 'Account menu', 'Attendance QR');
+    await p.waitForURL('**/student/profile#attendance-qr');
+    const card = p.locator('#attendance-qr');
+    await card.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).waitFor();
+    await card.getByRole('button', { name: 'View QR code' }).click();
     const dlg = p.locator('dialog[open]');
-    await dlg.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).waitFor();
-    const [download] = await Promise.all([p.waitForEvent('download'), dlg.getByRole('button', { name: 'Download PNG' }).click()]);
-    const png = PNG.sync.read(fs.readFileSync(await download.path()));
+    const image = dlg.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' });
+    await image.waitFor();
+    const src = await image.getAttribute('src');
+    const png = PNG.sync.read(Buffer.from(src.split(',')[1], 'base64'));
     const decoded = jsQR(new Uint8ClampedArray(png.data), png.width, png.height);
-    assert(decoded && decoded.data === 'AB12CD34EF', `decoded QR payload=${decoded?.data}`);
+    assert(decoded?.data === 'AB12CD34EF', `decoded QR payload=${decoded?.data}`);
+    assert(!(await p.getByRole('button', { name: /Download/ }).count()), 'QR download button is present');
     await dlg.getByRole('button', { name: 'Close', exact: true }).click();
   });
   await step('Profile QR survives LeetCode failure on mobile in light and dark themes', async () => {
@@ -623,8 +627,8 @@ try {
     await p.locator('#personal-information').getByText('9876543219', { exact: true }).waitFor();
     await p.getByRole('table', { name: 'My requests' }).getByText('Approved', { exact: true }).waitFor();
     await p.getByRole('img', { name: 'Attendance QR code for roll number 22AG1A0501' }).waitFor();
-    const [download] = await Promise.all([p.waitForEvent('download'), p.getByRole('button', { name: 'Download PNG' }).click()]);
-    const png = PNG.sync.read(fs.readFileSync(await download.path()));
+    const src = await p.getByRole('img', { name: 'Attendance QR code for roll number 22AG1A0501' }).getAttribute('src');
+    const png = PNG.sync.read(Buffer.from(src.split(',')[1], 'base64'));
     assert(jsQR(new Uint8ClampedArray(png.data), png.width, png.height)?.data === '22AG1A0501', 'QR did not reflect the approved correction');
   });
 
