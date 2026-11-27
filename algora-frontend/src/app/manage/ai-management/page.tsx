@@ -1,7 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
-import { Badge, BarList, Button, Card, Checkbox, DescriptionList, ErrorState, Grid, Input, Notice, PageHeader, Select, StatCard, useConfirm, useToast } from '@/components/ui';
-import { ProviderConfigForm, type ProviderBudgetView as Budget, type ProviderConfig as Config } from '@/components/ai/ProviderConfigForm';
+import { Badge, Button, Card, Checkbox, DataTable, DescriptionList, ErrorState, Grid, InlineSelect, Input, Menu, Notice, PageHeader, SearchInput, Select, StatCard, StatusBadge, Tabs, useConfirm, useToast } from '@/components/ui';
+import { ProviderConfigForm, type ProviderConfig as Config } from '@/components/ai/ProviderConfigForm';
 import { useApi } from '@/hooks/useApi';
 import { api, download, errorMessage, qs } from '@/lib/api';
 import { BrainCircuit, GraduationCap, Settings2 } from 'lucide-react';
@@ -52,11 +52,17 @@ export default function Page() {
   async function refresh() { await Promise.all([settings.reload(), providers.reload(), usage.reload()]); }
   return <div className="space-y-5">
     <PageHeader title="AI Management" subtitle="Configure AI providers, workload budgets and practice access." />
-    <div role="group" aria-label="AI Management views" className="flex flex-wrap gap-2">
-      {Object.entries({ overview: 'Overview', student: 'Student AI', staff: 'Staff AI', usage: 'Usage analytics',
-        'student-limits': 'Student limits', 'staff-limits': 'Staff limits', failover: 'Failover history', batches: 'Batch controls', education: 'Educational settings' }).map(([key, name]) =>
-        <Button key={key} size="sm" variant={tab === key ? 'primary' : 'secondary'} aria-pressed={tab === key} onClick={() => setTab(key)}>{name}</Button>)}
-    </div>
+    <Tabs active={tab} onChange={setTab} tabs={[
+      { key: 'overview', label: 'Overview' },
+      { key: 'student', label: 'Student AI' },
+      { key: 'staff', label: 'Staff AI' },
+      { key: 'usage', label: 'Usage analytics' },
+      { key: 'student-limits', label: 'Student settings' },
+      { key: 'staff-limits', label: 'Staff settings' },
+      { key: 'batches', label: 'Batch controls' },
+      { key: 'education', label: 'Educational settings' },
+      { key: 'failover', label: 'Failover history' },
+    ]} />
     {settings.data && !settings.data.encryptionReady && <Notice tone="warn">Railway credential encryption is missing or invalid. Provider requests are unavailable.</Notice>}
     {(settings.error || providers.error || usage.error) && <ErrorState message={settings.error ?? providers.error ?? usage.error!} retry={refresh} />}
     {tab === 'overview' && <div className="grid gap-4 lg:grid-cols-2">
@@ -74,26 +80,29 @@ export default function Page() {
     {tab === 'failover' && <FailoverHistory items={providers.data?.items ?? []} />}
     {tab === 'batches' && <Batches />}
     {tab === 'usage' && <>
-      <Card title="Usage filters">
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); setQuery(draft); }}>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{filterKeys.map((key) => key === 'workload' || key === 'role' || key === 'provider' ? (
+      <Card title="Usage filters" flush>
+        <form onSubmit={(e) => { e.preventDefault(); setQuery(draft); }}>
+          <div className="grid gap-3 border-b border-line px-4 py-3 md:grid-cols-2 lg:grid-cols-4">{filterKeys.map((key) => key === 'workload' || key === 'role' || key === 'provider' ? (
             <Select key={key} label={filters[key]} value={draft[key] ?? ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}
               options={[{ value: '', label: 'All' }, ...(key === 'workload' ? workloads : key === 'provider' ? Object.keys(names) : ['STUDENT', 'TRAINER', 'SUPER_ADMIN']).map((value) => ({ value, label: value }))]} />
           ) : <Input key={key} label={filters[key]} type={key === 'from' || key === 'to' ? 'date' : 'text'}
             value={draft[key] ?? ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />)}</div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 px-4 py-3">
             <Button type="submit">Apply filters</Button>
             {['csv', 'xlsx'].map((format) => <Button key={format} variant="secondary"
               onClick={() => void download(`${base}/usage/export${qs({ ...query, format })}`).catch((e) => toast.error(errorMessage(e)))}>Export {format.toUpperCase()}</Button>)}
           </div>
         </form>
       </Card>
-      <Card title="Daily usage" description="Algora-observed activity. Token totals include reported usage only and can differ from organization-wide usage.">
-        <BarList items={(usage.data?.daily ?? []).slice(-14).map((row) => ({
-          key: `${row._id.day}:${row._id.workload}`, label: `${row._id.day} · ${label(row._id.workload)}`, value: row.outbound,
-          sub: row.unknownTokens === row.outbound && row.outbound ? 'Token usage unavailable' : `${num(row.total)} reported tokens`,
-        }))} />
-        <List rows={(usage.data?.daily ?? []).map((row) => ({ name: `${row._id.day} · ${label(row._id.workload)}`, ...row }))} />
+      <Card title="Daily usage" description="Algora-observed activity. Token totals include reported usage only and can differ from organization-wide usage." flush>
+        <DataTable caption="Daily AI usage" rows={(usage.data?.daily ?? []).slice(-14)} rowKey={(row) => `${row._id.day}:${row._id.workload}`} columns={[
+          { key: 'day', header: 'Day', cell: (row) => row._id.day },
+          { key: 'workload', header: 'Workload', cell: (row) => label(row._id.workload) },
+          { key: 'outbound', header: 'Provider attempts', align: 'right', cell: (row) => num(row.outbound) },
+          { key: 'success', header: 'Successful', align: 'right', cell: (row) => num(row.success) },
+          { key: 'failed', header: 'Failed', align: 'right', cell: (row) => num(row.failed) },
+          { key: 'tokens', header: 'Reported tokens', align: 'right', cell: (row) => row.unknownTokens === row.outbound && row.outbound ? 'Unavailable' : num(row.total) },
+        ]} />
       </Card>
       <Card title="Assistance and preparation actions"><List rows={(usage.data?.actions ?? []).map((row) => ({ name: row._id, ...row }))} /></Card>
       <Card title="Most assisted problems"><List rows={(usage.data?.problems ?? []).map((row) => ({ name: row._id, ...row }))} /></Card>
@@ -185,39 +194,11 @@ function WorkloadSummary({ workload, controls, items, usage }: {
   </Card>;
 }
 
-function ObservedQuota({ quota, observed }: { quota?: Record<string, string>; observed?: string }) {
-  const values = Object.entries(quota ?? {});
-  if (!values.length) return <p className="text-sm text-fg-muted">Provider-reported allowance: Unavailable. Run Test connection to capture headers when the provider reports them.</p>;
-  return <details className="text-sm text-fg-muted">
-    <summary className="cursor-pointer">Provider-reported allowance ({values.length} headers) · {date(observed)}</summary>
-    <dl className="mt-2 grid gap-1">
-      {values.map(([header, value]) => <div key={header} className="flex flex-wrap gap-x-2"><dt>{header}</dt><dd>{value}</dd></div>)}
-    </dl>
-    <p>Provider-defined limits and remaining allowance only. Application budgets are shown separately.</p>
-  </details>;
-}
-
-function tokenValue(row: ProviderMetric | undefined, field: 'input' | 'output' | 'total') {
-  if (!row) return 'Unavailable';
-  return row.outbound > 0 && row.unknownTokens >= row.outbound ? 'Unavailable' : num(row[field]);
-}
-
-/** Mirrors the backend eligibility rules so the card can explain why activation is unavailable. */
-function eligibility(item: Config, controls?: Settings) {
-  if (!item.enabled) return 'Disabled';
-  if (item.eligible) return 'Enabled · Eligible';
-  if (item.plan === 'PAID' && (!item.paidApproved || !controls?.paidAllowed)) return 'Enabled · Paid use not approved';
-  if (item.plan !== 'PAID' && item.provider === 'OPENROUTER' && !item.model.endsWith(':free')) return 'Enabled · Free plan needs a :free model';
-  if (item.provider !== 'GROQ' && !(item.lastTest?.status === 'SUCCESS' && item.lastTest.version === item.version)) return 'Enabled · Test this version before activation';
-  return 'Enabled · Needs attention';
-}
-
 function Providers({ workload, items, usage, refresh, encryption, controls, providerOptions, endpoints }: {
   workload: Workload; items: Config[]; usage?: Usage | null; refresh: () => Promise<void>; encryption: boolean;
   controls?: Settings; providerOptions: string[]; endpoints: string[];
 }) {
   const [edit, setEdit] = useState<Config | 'new' | null>(null);
-  const [budget, setBudget] = useState<string>();
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
   const toast = useToast();
@@ -250,76 +231,31 @@ function Providers({ workload, items, usage, refresh, encryption, controls, prov
         <Button variant="secondary" disabled={busy} onClick={() => void action(`/deactivate/${workload}`, 'POST', undefined, 'Active configuration cleared')}>Deactivate all</Button>
       </div>
     </Card>
-    {saved.map((item) => {
-      const history = usage?.history.find((row) => row._id === item._id);
-      const today = usage?.providers.find((row) => row._id === item._id);
-      const quota = history?.quota ?? item.lastTest?.quota;
-      const remainingRequests = item.budget ? Math.max(0, item.budget.configured.requestsDay - item.budget.day.requests) : undefined;
-      const remainingTokens = item.budget ? Math.max(0, item.budget.configured.tokensDay - item.budget.day.tokens) : undefined;
-      return <Card title={item.name} key={item._id}
-        description={`${item.active ? 'Primary' : item.backup ? 'Backup' : 'Inactive'} · ${names[item.provider] ?? item.provider} · ${item.model} · ${item.masked} · ${item.plan === 'PAID' ? 'Paid' : 'Free'}`}>
-        <DescriptionList cols={4} items={[
-          { label: 'Status', value: eligibility(item, controls) },
-          { label: 'Connection', value: item.lastTest ? `${item.lastTest.status} · ${item.lastTest.latency} ms` : 'Untested' },
-          { label: 'Today', value: `${num(today?.outbound)} provider attempts` },
-          { label: 'Last success', value: history?.lastSuccess ? date(history.lastSuccess) : 'Unavailable' },
-          { label: 'Input tokens', value: tokenValue(history, 'input') },
-          { label: 'Output tokens', value: tokenValue(history, 'output') },
-          { label: 'Total tokens', value: tokenValue(history, 'total') },
-          { label: 'Remaining configuration budget', value: remainingRequests == null ? 'Unavailable' : `${num(remainingRequests)} requests · ${num(remainingTokens)} tokens` },
+    <Card title="Saved API keys" description="Connection tests and usage are shown separately from actual teaching or mentoring activity." flush>
+      <DataTable caption={`${label(workload)} API key configurations`} rows={saved} rowKey={(item) => item._id}
+        empty={<div className="p-5"><Notice tone="info">No API key is configured for this workload.</Notice></div>}
+        columns={[
+          { key: 'name', header: 'Configuration', cell: (item) => <div className="max-w-56 whitespace-normal"><p className="font-medium text-fg">{item.name}</p><p className="text-xs text-fg-muted">{item.masked}</p></div> },
+          { key: 'model', header: 'Model', cell: (item) => <code className="text-xs">{item.model}</code> },
+          { key: 'role', header: 'Role', cell: (item) => <StatusBadge status={item.active ? 'ACTIVE' : item.backup ? 'BACKUP' : 'INACTIVE'} label={item.active ? 'Primary' : item.backup ? 'Backup' : 'Inactive'} /> },
+          { key: 'connection', header: 'Connection', cell: (item) => item.lastTest ? <StatusBadge status={item.lastTest.status} label={`${item.lastTest.status} · ${item.lastTest.latency} ms`} /> : <Badge>Untested</Badge> },
+          { key: 'enabled', header: 'Enabled', cell: (item) => <StatusBadge status={item.enabled ? 'ACTIVE' : 'INACTIVE'} /> },
+          { key: 'usage', header: 'Usage', cell: (item) => <span className="text-xs text-fg-muted">{num(usage?.providers.find((row) => row._id === item._id)?.outbound)} requests · {num(item.budget?.day.tokens)} tokens</span> },
+          { key: 'actions', header: 'Actions', align: 'right', cell: (item) => <div className="flex justify-end">
+            <Menu label={`Actions for ${item.name}`} button={<span>Actions</span>} items={[
+              { label: 'Edit configuration', onSelect: () => setEdit(item) },
+              { label: 'Test connection', disabled: busy || !encryption, onSelect: () => void action(`/${item._id}/test`, 'POST', undefined, 'Connection tested') },
+              ...(!item.active || controls?.servingId !== item._id ? [{ label: item.active ? 'Restore primary' : 'Activate', disabled: busy || !encryption || !item.eligible, onSelect: () => void action(`/${item._id}/activate`, 'POST', undefined, 'Primary configuration activated') }] : []),
+              { label: item.enabled ? 'Disable' : 'Enable', disabled: busy, onSelect: () => void action(`/${item._id}`, 'PATCH', { enabled: !item.enabled }, item.enabled ? 'Configuration disabled' : 'Configuration enabled') },
+              { label: 'Replace API key', onSelect: () => setEdit(item) },
+              'separator',
+              { label: 'Archive', danger: true, disabled: busy, onSelect: () => void confirm({ title: 'Archive this configuration?', body: 'The stored credential is removed. Usage history remains available.', confirmLabel: 'Archive', danger: true }).then((ok) => { if (ok) void action(`/${item._id}`, 'DELETE', undefined, 'Configuration archived'); }) },
+            ]} />
+          </div> },
         ]} />
-        <div className="mt-3"><ObservedQuota quota={quota} observed={history?.lastObserved ?? item.lastTest?.at} /></div>
-        {(item.circuitUntil || item.budget?.quotaCooldownUntil) && <p className="mt-2 text-sm text-warning-fg">
-          Provider cooling down until {date(item.circuitUntil ?? item.budget?.quotaCooldownUntil)}
-        </p>}
-        <details className="mt-3 text-sm">
-          <summary className="cursor-pointer text-fg-muted">Technical details and lifetime usage</summary>
-          <div className="mt-2 space-y-1 text-fg-muted">
-            <p>Priority {item.priority} · Quota group {item.quotaGroup} ({item.quotaScope.toLowerCase()}) · Version {item.version} · {item.timeoutMs} ms timeout</p>
-            {item.circuitUntil && <p>Recovery probe eligible after {date(item.circuitUntil)}</p>}
-            {history ? <>
-              <p>Lifetime {num(history.outbound)} sent · {num(history.success)} successful · {num(history.failed)} failed · {num(history.rateLimited)} rate-limited</p>
-              <p>{num(history.input)} input · {num(history.output)} output · {num(history.total)} reported total · {num(history.unknownTokens)} with unknown usage</p>
-              <p>{history.averageLatency != null && `Average ${Math.round(history.averageLatency)} ms · `}Last failure {date(history.lastFailureAt)} · Last observed {date(history.lastObserved)}</p>
-              <p>Known or estimated spend {history.knownCost ? `$${history.costUsd?.toFixed(4)}` : 'Unavailable'}</p>
-            </> : <p>No provider usage recorded yet.</p>}
-          </div>
-        </details>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEdit(item)}>Edit configuration</Button>
-          <Button size="sm" variant="secondary" disabled={busy || !encryption || (item.plan === 'PAID' && (!item.paidApproved || !controls?.paidAllowed))}
-            onClick={() => void action(`/${item._id}/test`, 'POST', undefined, 'Connection tested')}>Test connection</Button>
-          {!item.active || controls?.servingId !== item._id ? <Button size="sm" disabled={busy || !encryption || !item.eligible}
-            onClick={() => void action(`/${item._id}/activate`, 'POST', undefined, 'Primary configuration activated')}>{item.active ? 'Restore primary' : 'Activate'}</Button> : null}
-          {item.active && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action(`/deactivate/${workload}`, 'POST', undefined, 'Active configuration cleared')}>Deactivate</Button>}
-          <Button size="sm" variant="secondary" disabled={busy}
-            onClick={() => void action(`/${item._id}`, 'PATCH', { enabled: !item.enabled }, item.enabled ? 'Configuration disabled' : 'Configuration enabled')}>
-            {item.enabled ? 'Disable' : 'Enable'}
-          </Button>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBudget(budget === item._id ? undefined : item._id)}>{budget === item._id ? 'Hide budget' : 'View application budget'}</Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void confirm({ title: 'Archive this configuration?', body: 'The stored credential is removed. Usage history remains available.', confirmLabel: 'Archive', danger: true })
-            .then((ok) => { if (ok) void action(`/${item._id}`, 'DELETE', undefined, 'Configuration archived'); })}>Archive</Button>
-        </div>
-        {budget === item._id && <ProviderBudget id={item._id} spending={item.spending?.dailyUsd} />}
-      </Card>;
-    })}
+    </Card>
     {edit && <ProviderConfigForm key={edit === 'new' ? 'new' : edit._id} workload={workload} current={edit === 'new' ? undefined : edit}
       providerOptions={providerOptions} endpoints={endpoints} close={() => setEdit(null)} refresh={refresh} />}
-  </div>;
-}
-
-function ProviderBudget({ id, spending }: { id: string; spending?: number }) {
-  const budget = useApi<Budget>(`${base}/providers/${id}/budget`);
-  if (budget.error) return <ErrorState message={budget.error} retry={budget.reload} />;
-  if (!budget.data) return <p className="text-sm">Loading application budget…</p>;
-  const { day, minute, configured, quotaCooldownUntil } = budget.data;
-  const remaining = (limit: number, used: number) => num(Math.max(0, limit - used));
-  return <div className="mt-3 space-y-1 text-sm">
-    <p>Today {num(day.requests)} / {num(configured.requestsDay)} requests, {num(day.tokens)} / {num(configured.tokensDay)} reserved or reported tokens.</p>
-    <p>Remaining application budget today {remaining(configured.requestsDay, day.requests)} requests and {remaining(configured.tokensDay, day.tokens)} tokens.</p>
-    <p>This minute {remaining(configured.requestsMinute, minute.requests)} requests and {remaining(configured.tokensMinute, minute.tokens)} tokens remaining.</p>
-    {spending && <p>Daily application spend estimate ${day.estimatedUsd.toFixed(4)} / ${spending.toFixed(2)} USD.</p>}
-    {quotaCooldownUntil && <p>Shared quota cooling down until {date(quotaCooldownUntil)}.</p>}
   </div>;
 }
 
@@ -399,13 +335,34 @@ function Limits({ item, education, refresh }: { item: Settings; education: boole
 function Batches() {
   const data = useApi<{ items: Batch[] }>(`${base}/batches`);
   const [id, setId] = useState('');
+  const [query, setQuery] = useState('');
+  const [policy, setPolicy] = useState('');
   const batch = data.data?.items.find((item) => item._id === id);
-  return <Card title="Batch controls" description="Student availability times use Asia/Kolkata.">
-    {data.error && <ErrorState message={data.error} retry={data.reload} />}
-    <Select label="Batch" value={id} onChange={(e) => setId(e.target.value)} options={[{ value: '', label: 'Select a batch' },
-      ...(data.data?.items ?? []).map((item) => ({ value: item._id, label: item.name }))]} />
-    {batch && <BatchForm key={batch._id} batch={batch} refresh={data.reload} />}
-  </Card>;
+  const filtered = (data.data?.items ?? []).filter((item) => {
+    const matchesName = item.name.toLowerCase().includes(query.trim().toLowerCase());
+    const matchesPolicy = !policy || (policy === 'inherit' ? item.controls?.enabled === undefined : policy === 'enable' ? item.controls?.enabled === true : item.controls?.enabled === false);
+    return matchesName && matchesPolicy;
+  });
+  return <div className="space-y-4">
+    <Card title="Batch AI controls" description="Most batches should inherit global Student AI. Use an override only for an explicit exception." flush>
+      {data.error ? <ErrorState message={data.error} retry={data.reload} /> : <>
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+          <SearchInput value={query} onChange={setQuery} placeholder="Search batches" label="Search batches" />
+          <InlineSelect label="AI policy" value={policy} onChange={setPolicy} options={[
+            { value: '', label: 'All policies' }, { value: 'inherit', label: 'Inherit global' }, { value: 'enable', label: 'Explicitly enabled' }, { value: 'disable', label: 'Explicitly disabled' },
+          ]} />
+        </div>
+        <DataTable caption="Batch AI policies" rows={filtered} rowKey={(item) => item._id}
+          columns={[
+            { key: 'batch', header: 'Batch', cell: (item) => <button type="button" onClick={() => setId(item._id)} className="text-left font-medium text-accent-fg hover:underline">{item.name}</button> },
+            { key: 'policy', header: 'AI policy', cell: (item) => <StatusBadge status={item.controls?.enabled === true ? 'ACTIVE' : item.controls?.enabled === false ? 'INACTIVE' : 'INHERITED'} label={item.controls?.enabled === true ? 'Explicitly enabled' : item.controls?.enabled === false ? 'Explicitly disabled' : 'Inherits global'} /> },
+            { key: 'schedule', header: 'Schedule', cell: (item) => item.controls?.startMinute == null && item.controls?.endMinute == null ? 'No AI-specific schedule' : 'Configured' },
+            { key: 'action', header: 'Action', align: 'right', cell: (item) => <Button size="xs" variant="secondary" onClick={() => setId(item._id)}>Manage</Button> },
+          ]} />
+      </>}
+    </Card>
+    {batch && <Card title={batch.name} description="Optional batch-level exception and AI-specific schedule."><BatchForm key={batch._id} batch={batch} refresh={data.reload} /></Card>}
+  </div>;
 }
 const time = (value?: number) => value == null ? '' : `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 function BatchForm({ batch, refresh }: { batch: Batch; refresh: () => Promise<void> }) {

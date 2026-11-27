@@ -201,7 +201,7 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
     <div className="min-h-screen bg-canvas text-fg">
       <a href="#main" className="sr-only z-[70] rounded-md bg-surface px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to content</a>
       <header className="sticky top-0 z-30 border-b border-line bg-surface backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-6 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-[1440px] items-center gap-2 px-4 sm:gap-6 sm:px-6 lg:px-8">
           <Logo href={home} />
           <nav aria-label="Main" className="hidden items-center gap-1 lg:flex">
             {STUDENT_NAV.map((n) => {
@@ -223,7 +223,7 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
         </div>
       </header>
       <StudentAttendanceQrDialog open={qrOpen} onClose={() => setQrOpen(false)} />
-      <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-10 md:pt-8">
+      <main id="main" className="mx-auto max-w-[1440px] px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-10 md:pt-8">
         <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
       </main>
       {/* Phones and small tablets: bottom tab bar, every destination visible without scrolling. */}

@@ -72,7 +72,7 @@ staffAi.get('/material', async (req, res) => {
 });
 staffAi.post('/generate', async (req, res) => {
   const { chapterId, problemId, language: lang, action, selected, section, confirm, notes } = parse(identify.extend({
-    action: z.enum(['chapter', 'remaining', 'selected', 'problem', 'summary', 'section', 'refresh']),
+    action: z.enum(['chapter', 'remaining', 'selected', 'problem', 'summary', 'section', 'refresh', 'retry']),
     selected: z.array(objectId).max(50).optional(), section: z.string().regex(/^[a-zA-Z]+$/).optional(), confirm: z.boolean().optional(), notes: z.string().trim().max(2400).optional(),
   }), req.body);
   const ctx = await contextFor(req, chapterId, problemId);
@@ -81,9 +81,16 @@ staffAi.post('/generate', async (req, res) => {
   if (action === 'section' && !section) throw badRequest('Select a section.');
   if (action === 'problem' && !problemId) throw badRequest('Select an assigned problem.');
   if (force) canEdit(req);
-  const ids = action === 'selected' ? [...new Set(selected ?? [])] :
+  let ids = action === 'selected' ? [...new Set(selected ?? [])] :
     action === 'problem' || action === 'section' || (action === 'refresh' && problemId) ? [problemId] :
     action === 'summary' ? [undefined] : [...(action === 'chapter' ? [undefined] : []), ...ctx.problems.map((p) => p.id)];
+  if (action === 'retry') {
+    const jobs = await AiJob.find({ chapterId, language: lang, userId: String(req.user!._id) }, 'tasks').sort({ createdAt: -1 }).limit(20).lean();
+    ids = [...new Set(jobs.flatMap((job) => (job.tasks as { problemId?: string; status?: string }[])
+      .filter((task) => task.status === 'FAILED')
+      .flatMap((task) => task.problemId ? [task.problemId] : [])))];
+    if (!ids.length) return res.status(200).json({ job: null });
+  }
   const job = await enqueue(ctx, req.user!, lang, ids, force, action === 'section' ? section : undefined, notes ? cleanQuestion(notes) : undefined);
   res.status(job ? 202 : 200).json({ job });
 });

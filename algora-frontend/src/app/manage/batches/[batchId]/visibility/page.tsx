@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Button, Card, EmptyState, ButtonLink, ErrorState, fmtDate, StatusBadge, Switch, TableSkeleton, useConfirm, usePageTitle, useToast } from '@/components/ui';
+import { Button, Card, EmptyState, ButtonLink, ErrorState, StatusBadge, Switch, TableSkeleton, DataTable, useConfirm, usePageTitle, useToast } from '@/components/ui';
 import { useBatch } from '@/components/manage/BatchContext';
 import { useApi } from '@/hooks/useApi';
 import { api, errorMessage } from '@/lib/api';
@@ -53,31 +53,18 @@ export default function Page() {
             flush={bc.chapters.length > 0}>
             {inactive && <p className="border-b border-line px-4 py-3 text-sm text-warning-fg">Access to this course was removed for the batch. Restore access in Courses to change chapter access.</p>}
             {!bc.chapters.length ? <p className="text-sm text-fg-muted">This course has no chapters yet.</p> : (
-              <ul className="divide-y divide-line">
-                {bc.chapters.map((c, i) => (
-                  <li key={c.chapterId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
-                    <span className="w-6 tabular-nums text-fg-subtle">{i + 1}</span>
-                    <div className="min-w-0 flex-1 basis-40">
-                      <p className="font-medium text-fg">{c.title}</p>
-                      <p className="text-xs text-fg-muted">{c.problemCount} {c.problemCount === 1 ? 'problem' : 'problems'}</p>
-                    </div>
-                    <StatusBadge status={c.isVisible ? 'VISIBLE' : 'HIDDEN'} />
-                    {c.isVisible && c.unlockedAt && <span className="text-xs text-fg-subtle">Visible since {fmtDate(c.unlockedAt)}</span>}
-                    {editable && (
-                      <span className="ml-auto">
-                        <Switch checked={c.isVisible} disabled={busy === c.chapterId} label={`${c.title} visible to students`}
-                          onChange={(on) => run(c.chapterId, () => api(`/batches/${batch._id}/courses/${bc.course._id}/chapters/${c.chapterId}/access`, { method: 'PUT', body: { isVisible: on } }), on ? `“${c.title}” is now visible` : `“${c.title}” is now hidden`)} />
-                      </span>
-                    )}
-                    <div className="flex basis-full flex-wrap items-center gap-2 sm:basis-auto">
-                      {editable && <Switch checked={c.studentAiEnabled} disabled={!!busy} label={`Ask AI for ${c.title}`}
-                        onChange={(enabled) => void run(`ai-${c.chapterId}`, () => api(`/batches/${batch._id}/courses/${bc.course._id}/chapters/${c.chapterId}/student-ai`,
-                          { method: 'PUT', body: { enabled } }), enabled ? 'Ask AI enabled' : 'Ask AI disabled')} />}
-                      <span className="text-xs text-fg-muted"><span className="font-medium text-fg">Effective status:</span> {availabilityLabels[c.aiAvailability]}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <DataTable caption={`${bc.course.title} chapter access`} rows={bc.chapters} rowKey={(c) => c.chapterId} columns={[
+                { key: 'chapter', header: 'Chapter', cell: (c) => <div className="min-w-48 whitespace-normal"><p className="font-medium text-fg">{c.title}</p><p className="text-xs text-fg-muted">{c.problemCount} {c.problemCount === 1 ? 'problem' : 'problems'}</p></div> },
+                { key: 'visible', header: 'Visibility', cell: (c) => editable
+                  ? <div className="flex items-center gap-2"><Switch checked={c.isVisible} disabled={busy === c.chapterId} showLabel label={`${c.title} visible to students`}
+                    onChange={(on) => run(c.chapterId, () => api(`/batches/${batch._id}/courses/${bc.course._id}/chapters/${c.chapterId}/access`, { method: 'PUT', body: { isVisible: on } }), on ? `“${c.title}” is now visible` : `“${c.title}” is now hidden`)} /><span className="text-xs text-fg-muted">{c.isVisible ? 'Visible' : 'Hidden'}</span></div>
+                  : <StatusBadge status={c.isVisible ? 'VISIBLE' : 'HIDDEN'} /> },
+                { key: 'ask', header: 'Ask AI', cell: (c) => editable
+                  ? <div className="flex items-center gap-2"><Switch checked={c.studentAiEnabled} disabled={!!busy} showLabel label={`Ask AI for ${c.title}`}
+                    onChange={(enabled) => void run(`ai-${c.chapterId}`, () => api(`/batches/${batch._id}/courses/${bc.course._id}/chapters/${c.chapterId}/student-ai`, { method: 'PUT', body: { enabled } }), enabled ? 'Ask AI enabled' : 'Ask AI disabled')} /><span className="text-xs text-fg-muted">{c.studentAiEnabled ? 'Enabled' : 'Disabled'}</span></div>
+                  : <StatusBadge status={c.studentAiEnabled ? 'ACTIVE' : 'INACTIVE'} /> },
+                { key: 'effective', header: 'Effective status', cell: (c) => <StatusBadge status={c.aiAvailability === 'AVAILABLE' ? 'ACTIVE' : c.aiAvailability === 'CHAPTER_DISABLED' ? 'INACTIVE' : 'WARNING'} label={availabilityLabels[c.aiAvailability]} /> },
+              ]} />
             )}
           </Card>
         );

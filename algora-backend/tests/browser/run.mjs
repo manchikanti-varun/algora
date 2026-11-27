@@ -718,30 +718,22 @@ try {
       const p = admin.page;
       await p.goto(`${FE}/manage/ai-management`);
       await p.getByRole('heading', { name: 'AI Management', level: 1 }).waitFor();
-      for (const [view, config, limits] of [['Student AI', 'Student Key 1', 'Student limits'], ['Staff AI', 'Staff Key 1', 'Staff limits']]) {
-        await p.getByRole('button', { name: view, exact: true }).click();
+      await shot(p, '17-ai-management-overview');
+      for (const [view, config, limits] of [['Student AI', 'Student Key 1', 'Student settings'], ['Staff AI', 'Staff Key 1', 'Staff settings']]) {
+        await p.getByRole('tab', { name: view, exact: true }).click();
         await p.getByRole('button', { name: 'Add configuration' }).click();
         await p.getByLabel('Groq API key', { exact: true }).fill(`gsk_fixture_${config.startsWith('Staff') ? 's'.repeat(25) : 'm'.repeat(25)}`);
         await p.getByRole('button', { name: 'Save and test', exact: true }).click();
-        const card = p.locator('section').filter({ has: p.getByRole('heading', { name: config, exact: true }) });
-        await card.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
-        await card.getByRole('button', { name: 'Test connection' }).click();
-        await card.getByText(/^SUCCESS · \d+ ms$/).waitFor();
-        await card.getByRole('button', { name: 'Disable', exact: true }).click();
-        await card.getByRole('button', { name: 'Enable', exact: true }).waitFor();
-        await card.getByRole('button', { name: 'Enable', exact: true }).click();
-        await card.getByRole('button', { name: 'Disable', exact: true }).waitFor();
-        // Disabling the active configuration clears the workload pointer, so promote it again.
-        await card.getByRole('button', { name: 'Activate', exact: true }).click();
-        await card.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
-        await p.getByRole('button', { name: limits, exact: true }).click();
+        const row = p.locator('tr').filter({ has: p.getByText(config, { exact: true }) });
+        await row.getByText(/^SUCCESS · \d+ ms$/).waitFor();
+        await p.getByRole('tab', { name: limits, exact: true }).click();
         await p.getByRole('checkbox', { name: 'Enable workload' }).check();
         await p.getByRole('spinbutton', { name: 'Personal requests per minute' }).fill('10');
         await p.getByRole('button', { name: 'Save settings' }).click();
         await p.getByText('AI settings saved', { exact: true }).waitFor();
       }
-      await p.getByRole('button', { name: 'Batch controls', exact: true }).click();
-      await p.getByLabel('Batch', { exact: true }).selectOption({ label: 'JNTU Bootcamp' });
+      await p.getByRole('tab', { name: 'Batch controls', exact: true }).click();
+      await p.getByRole('button', { name: 'Manage', exact: true }).first().click();
       await p.getByLabel('Batch AI policy', { exact: true }).selectOption('enable');
       await p.getByRole('button', { name: 'Save batch controls' }).click();
       await p.getByText('Batch controls saved', { exact: true }).waitFor();
@@ -767,33 +759,32 @@ try {
     await step('Super Admin tests a second provider, switches Student primary and saves an automatic routing policy', async () => {
       const p = admin.page;
       await p.goto(`${FE}/manage/ai-management`);
-      await p.getByRole('button', { name: 'Student AI', exact: true }).click();
+      await p.getByRole('tab', { name: 'Student AI', exact: true }).click();
       await p.getByRole('button', { name: 'Add configuration' }).click();
       await p.getByLabel('Groq API key', { exact: true }).fill(`fixture_key_${'o'.repeat(22)}`);
       await p.getByRole('button', { name: 'Save and test', exact: true }).click();
-      const provider = p.locator('section').filter({ has: p.getByRole('heading', { name: 'Student Key 2', exact: true }) });
+      const provider = p.locator('tr').filter({ has: p.getByText('Student Key 2', { exact: true }) });
       await provider.getByText(/^SUCCESS · \d+ ms$/).waitFor();
-      await provider.getByRole('button', { name: 'Activate', exact: true }).click();
-      await provider.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
       await p.getByLabel('Switching mode').selectOption('AUTO');
       await p.getByRole('button', { name: 'Save routing policy' }).click();
       await p.getByText('Provider policy saved', { exact: true }).waitFor();
-      await provider.getByRole('button', { name: 'Edit configuration' }).click();
+      await provider.getByRole('button', { name: 'Actions', exact: true }).click();
+      await p.getByRole('menuitem', { name: 'Edit configuration', exact: true }).click();
       await p.locator('summary').filter({ hasText: 'Advanced settings' }).click();
       await p.getByLabel('Shared quota group').fill('student-groq-2');
       await p.getByLabel('Confirmed quota scope').selectOption('PROJECT');
       await p.getByRole('checkbox', { name: /verified independent quota/ }).check();
       await p.getByRole('button', { name: 'Save configuration', exact: true }).click();
       await provider.getByText(/^SUCCESS · \d+ ms$/).waitFor();
-      await p.getByRole('button', { name: 'Failover history' }).click();
-      await p.getByText(/Student Key 2 ·/).first().waitFor();
+      await p.getByRole('tab', { name: 'Failover history' }).click();
     });
     await step('Staff prepares a problem, reviews and publishes a separate student hint', async () => {
       const p = admin.page;
       await p.goto(`${FE}/manage/ai-preparation`);
+      await shot(p, '18-ai-preparation');
       await p.getByLabel('Course', { exact: true }).selectOption({ label: 'Java & DSA' });
       await p.getByLabel('Chapter', { exact: true }).selectOption({ label: 'Arrays' });
-      const problem = p.locator('li').filter({ has: p.getByText(/Two Sum$/, { exact: false }) }).filter({ has: p.getByRole('button', { name: 'View preparation', exact: true }) }).first();
+      const problem = p.locator('tr').filter({ has: p.getByText(/Two Sum$/, { exact: false }) }).filter({ has: p.getByRole('button', { name: 'View preparation', exact: true }) }).first();
       await problem.getByRole('button', { name: 'Prepare', exact: true }).click();
       await p.getByText('Generation queued', { exact: true }).waitFor();
       await problem.getByRole('button', { name: 'View preparation', exact: true }).click();
@@ -809,7 +800,7 @@ try {
       await p.getByRole('checkbox', { name: 'I reviewed this hint for solution disclosure' }).first().check();
       await p.getByRole('button', { name: 'Publish hint', exact: true }).first().click();
       await p.getByText('Hint saved', { exact: true }).waitFor();
-      await p.getByRole('button', { name: 'Ask a follow-up', exact: true }).click();
+      await p.getByRole('tab', { name: 'Ask a follow-up', exact: true }).click();
       await p.getByLabel('Technical or teaching question').fill('Why must the indices be distinct?');
       await p.getByRole('checkbox', { name: /sent to configured AI providers/ }).check();
       await p.getByRole('button', { name: 'Ask a follow-up', exact: true }).last().click();
@@ -837,6 +828,7 @@ try {
       await problem.getByRole('button', { name: 'Ask AI', exact: true }).click();
       const dialog = p.getByRole('dialog', { name: 'Algora AI Mentor' });
       await dialog.getByRole('heading', { name: /Two Sum/ }).waitFor();
+      await shot(p, '19-student-ai-mentor');
       const consent = dialog.getByRole('checkbox', { name: /content may be sent to configured AI providers/ });
       await consent.check();
       await dialog.getByRole('button', { name: 'Request understanding hint' }).click();
@@ -852,6 +844,7 @@ try {
       await p.setViewportSize(MOBILE);
       await p.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
       await problem.getByRole('button', { name: 'Ask AI', exact: true }).click();
+      await shot(p, '20-student-ai-mentor-mobile-dark');
       await noOverflow(p, 'student mentor on mobile in dark theme');
       assert(await dialog.getByLabel('Your attempted code').inputValue() === 'int value = arr[arr.length];', 'draft did not survive closing');
       await dialog.getByText('7 assistance requests remaining today').waitFor();

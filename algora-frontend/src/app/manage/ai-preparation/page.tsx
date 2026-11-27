@@ -1,7 +1,7 @@
 'use client';
 import { Suspense, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Badge, Button, Card, Checkbox, DifficultyBadge, ErrorState, Grid, Notice, PageHeader, Select, StatCard, Textarea, useToast } from '@/components/ui';
+import { Badge, Button, Card, Checkbox, DataTable, DifficultyBadge, ErrorState, Grid, Notice, PageHeader, Select, StatCard, StatusBadge, Tabs, Textarea, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { api, download, errorMessage, qs } from '@/lib/api';
 
@@ -126,6 +126,7 @@ function Workspace() {
             <Button variant="secondary" disabled={!canGenerate} onClick={() => void generate('remaining')}>Prepare remaining</Button>
             <Button variant="secondary" disabled={!canGenerate || !picked.length} onClick={() => void generate('selected')}>Prepare selected</Button>
             <Button variant="secondary" disabled={!canGenerate} onClick={() => void generate('refresh')}>Refresh outdated</Button>
+            <Button variant="secondary" disabled={!canGenerate} onClick={() => void generate('retry')}>Retry failed</Button>
             <Button variant="ghost" onClick={() => void download(`${base}/export${qs({ chapterId: chapter, language: lang })}`).catch((e) => toast.error(errorMessage(e)))}>Export chapter</Button>
           </div>
           {!doc.enabled && <Notice tone="warn">Generation is unavailable because the Staff workload is disabled or no eligible Groq configuration is active. Saved preparation remains accessible.</Notice>}
@@ -140,19 +141,17 @@ function Workspace() {
             </li>)}</ul>
           </li>)}</ul>
         </Card>}
-        <Card title="Assigned problems">
-          <ul className="divide-y divide-line">{doc.problems.map((p) => <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-            <div>
-              <Checkbox label={`Select ${p.title}`} checked={picked.includes(p.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, p.id] : picked.filter((id) => id !== p.id))} />
-              <p className="font-medium">{p.number ? `#${p.number} · ` : ''}{p.title} <DifficultyBadge d={p.difficulty} /></p>
-              <p className="text-xs text-fg-muted">{[label(p.status), p.topics.join(', '), p.updatedAt && new Date(p.updatedAt).toLocaleString()].filter(Boolean).join(' · ')}</p>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => select(p.id)}>View preparation</Button>
-              <Button size="sm" variant="ghost" disabled={!canGenerate} onClick={() => void generate('problem', p.id)}>Prepare</Button>
-            </div>
-          </li>)}</ul>
-          {!doc.problems.length && <p className="text-sm text-fg-muted">No assigned problems.</p>}
+        <Card title="Assigned problems" flush>
+          <DataTable caption="Assigned chapter problems" rows={doc.problems} rowKey={(p) => p.id}
+            empty={<p className="px-5 py-6 text-sm text-fg-muted">No assigned problems.</p>}
+            columns={[
+              { key: 'select', header: 'Select', cell: (p) => <Checkbox label={<span className="sr-only">Select {p.title}</span>} checked={picked.includes(p.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, p.id] : picked.filter((id) => id !== p.id))} /> },
+              { key: 'problem', header: 'Problem', cell: (p) => <div className="min-w-52 whitespace-normal"><p className="font-medium text-fg">{p.number ? `#${p.number} · ` : ''}{p.title}</p><p className="mt-0.5 text-xs text-fg-muted">{p.topics.join(', ') || 'Topics unavailable'}</p></div> },
+              { key: 'difficulty', header: 'Difficulty', cell: (p) => <DifficultyBadge d={p.difficulty} /> },
+              { key: 'status', header: 'Preparation', cell: (p) => <StatusBadge status={p.status} /> },
+              { key: 'updated', header: 'Last generated', optional: true, cell: (p) => p.updatedAt ? new Date(p.updatedAt).toLocaleString() : 'Not generated' },
+              { key: 'actions', header: 'Actions', align: 'right', cell: (p) => <div className="flex justify-end gap-2"><Button size="sm" variant="secondary" onClick={() => select(p.id)}>View preparation</Button><Button size="sm" variant="ghost" disabled={!canGenerate} onClick={() => void generate('problem', p.id)}>Prepare</Button></div> },
+            ]} />
         </Card>
       </div>}
       {(library || (show && doc)) && <MaterialView key={JSON.stringify(scope)} scope={scope} generate={generate} busy={busy} enabled={!!library || !!doc?.enabled} />}
@@ -185,12 +184,13 @@ function MaterialView({ scope, generate, busy, enabled }: { scope: Scope; genera
   return <Card title={data?.context.title ?? (scope.problemId ? 'Problem preparation' : 'Chapter teaching guide')}
     description="Staff only. Generated reference code requires review before teaching.">
     {view.error && <ErrorState message={view.error} retry={view.reload} />}
-    <div className="mb-4 flex flex-wrap gap-2 print:hidden">
-      <Button size="sm" variant={tab === 'material' ? 'primary' : 'secondary'} onClick={() => setTab('material')}>Preparation</Button>
-      <Button size="sm" variant={tab === 'chat' ? 'primary' : 'secondary'} onClick={() => setTab('chat')}>Ask a follow-up</Button>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 print:hidden">
+      <Tabs active={tab} onChange={setTab} className="mb-0" tabs={[{ key: 'material', label: 'Preparation' }, { key: 'chat', label: 'Ask a follow-up' }]} />
+      <div className="flex flex-wrap gap-2">
       <Button size="sm" variant="ghost" onClick={() => void view.reload()}>Reload material</Button>
       {material && <Button size="sm" variant="ghost" onClick={() => window.print()}>Print preparation</Button>}
       <Button size="sm" variant="ghost" onClick={() => void download(`${base}/export${q}`).catch((e) => toast.error(errorMessage(e)))}>Export</Button>
+      </div>
     </div>
     {tab === 'chat' ? <StaffChat scope={scope} enabled={enabled} /> : material ? (
       <div className="space-y-4">
