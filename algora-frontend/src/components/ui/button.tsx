@@ -47,8 +47,8 @@ export function IconButton({ label, icon, variant = 'ghost', size = 'sm', classN
   );
 }
 
-export const ButtonLink = ({ href, children, variant = 'primary', size = 'md', icon, className, external, ...p }:
-  Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { href: string; children: ReactNode; variant?: Variant; size?: Size; icon?: ReactNode; external?: boolean }) =>
+export const ButtonLink = ({ href, children, variant = 'primary', size = 'md', icon, className, external, prefetch, ...p }:
+  Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & { href: string; children: ReactNode; variant?: Variant; size?: Size; icon?: ReactNode; external?: boolean; prefetch?: boolean }) =>
   external
     ? <a href={href} target="_blank" rel="noopener noreferrer" className={buttonClass(variant, size, className)} {...p}>{icon}{children}</a>
-    : <Link href={href} className={buttonClass(variant, size, className)} {...p}>{icon}{children}</Link>;
+    : <Link href={href} prefetch={prefetch} className={buttonClass(variant, size, className)} {...p}>{icon}{children}</Link>;

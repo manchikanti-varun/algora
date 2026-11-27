@@ -69,7 +69,7 @@ export async function scoreStudents(studentIds: Types.ObjectId[], scope: Map<str
   return out;
 }
 
-export interface BoardRow { rank: number; studentId: string; name: string; rollNumber?: string; solved: number; points: number; completionPct: number | null; easy: number; medium: number; hard: number; lastSyncAt: Date | null; syncStatus: string }
+export interface BoardRow { rank: number; studentId: string; name: string; rollNumber?: string; batch?: string; solved: number; points: number; completionPct: number | null; easy: number; medium: number; hard: number; lastSyncAt: Date | null; syncStatus: string }
 export interface Board { scope: { type: 'BATCH_COURSE' | 'COURSE' | 'BATCH'; problems: number; students: number; batches?: number; note?: string }; rows: BoardRow[] }
 
 /** Competition ranking by points (ties share a rank: 1,2,2,4). Deterministic order inside ties: solved desc, then roll number. */
@@ -113,7 +113,17 @@ export async function courseBoard(courseId: string, includeRoll = false): Promis
   const sets = await Promise.all(live.map(async (b) => scopeProblems([await visibleContent(b._id, courseId)])));
   let common = new Map<string, ScopeProblem>();
   if (sets.length) { common = new Map(sets[0]); for (const s of sets.slice(1)) for (const k of [...common.keys()]) if (!s.has(k)) common.delete(k); }
-  return buildBoard('COURSE', await enrolledIn(live.map((b) => b.batchId)), common, { batches: live.length, note: 'Compared on problems unlocked in every participating batch' });
+  const board = await buildBoard('COURSE', await enrolledIn(live.map((b) => b.batchId)), common, { batches: live.length, note: 'Compared on problems unlocked in every participating batch' });
+  // Batch context is advisory only: a student in two batches is shown with both, never ranked twice.
+  const [enrollments, batchDocs] = await Promise.all([
+    Enrollment.find({ studentId: { $in: board.rows.map((r) => r.studentId) }, batchId: { $in: live.map((b) => b.batchId) }, status: 'ACTIVE' }, 'studentId batchId').lean(),
+    Batch.find({ _id: { $in: live.map((b) => b.batchId) } }, 'name').lean(),
+  ]);
+  const batchNames = new Map(batchDocs.map((b) => [String(b._id), b.name]));
+  for (const row of board.rows) {
+    row.batch = enrollments.filter((e) => String(e.studentId) === row.studentId).map((e) => batchNames.get(String(e.batchId))).filter(Boolean).join(', ') || undefined;
+  }
+  return board;
 }
 
 /** Combined batch: union of visible problems across all active courses, each unique slug once. */

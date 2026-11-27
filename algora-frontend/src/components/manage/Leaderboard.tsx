@@ -45,6 +45,7 @@ export function LeaderboardTable({ path, query = {}, showRoll, showSync }: { pat
             { key: 'rank', header: 'Rank', cell: (r) => <span className={cx('inline-grid h-7 w-7 place-items-center rounded-full text-xs font-semibold tabular-nums', medal(r.rank))}>{r.rank}</span> },
             { key: 'name', header: 'Student', cell: (r) => <span>{r.name}{r.isMe && <span className="ml-1 text-accent-fg">(you)</span>}</span> },
             ...(showRoll ? [{ key: 'roll', header: 'Roll number', cell: (r: BoardRow) => <span className="text-[13px] tabular-nums text-fg-muted">{r.rollNumber}</span> }] : []),
+            ...(d.scope.type === 'COURSE' ? [{ key: 'batch', header: 'Batch context', optional: true, cell: (r: BoardRow) => <span className="text-[13px] text-fg-muted">{r.batch ?? '—'}</span> }] : []),
             { key: 'solved', header: 'Verified problems', cell: (r) => <span className="tabular-nums">{r.solved}</span> },
             { key: 'e', header: 'Easy', optional: true, defaultHidden: !student, cell: (r) => <span className="tabular-nums">{r.easy}</span> },
             { key: 'm', header: 'Medium', optional: true, defaultHidden: !student, cell: (r) => <span className="tabular-nums">{r.medium}</span> },

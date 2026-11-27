@@ -18,5 +18,5 @@ export interface Overview {
   courseCompletion: { courseId: string; title: string; rows: number; avgCompletionPct: number | null; completed: number }[];
   needsSupport: PerfRow[];
 }
-export interface BoardRow { rank: number; studentId?: string; name: string; rollNumber?: string; solved: number; points: number; completionPct: number | null; easy: number; medium: number; hard: number; lastSyncAt: string | null; syncStatus: string; isMe?: boolean }
+export interface BoardRow { rank: number; studentId?: string; name: string; rollNumber?: string; batch?: string; solved: number; points: number; completionPct: number | null; easy: number; medium: number; hard: number; lastSyncAt: string | null; syncStatus: string; isMe?: boolean }
 export interface Board { scope: { type: string; problems: number; students: number; batches?: number; note?: string }; items: BoardRow[]; total: number; page: number; pageSize: number }

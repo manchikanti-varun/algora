@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef } from 'react';
-import { Card, Combobox, EmptyState, PageHeader, Select, Tabs } from '@/components/ui';
+import { Card, Combobox, EmptyState, ErrorState, PageHeader, Select, Tabs } from '@/components/ui';
 import { LeaderboardTable } from '@/components/manage/Leaderboard';
 import type { Batch, Paged } from '@/components/manage/types';
 import { useApi } from '@/hooks/useApi';
@@ -17,6 +17,8 @@ export default function Page() {
   const [f, set] = useUrlState({ tab: 'batch', batchId: '', courseId: '', cwCourse: '' });
   const tab = f.tab === 'course' && admin ? 'course' : 'batch';
   const bcs = useApi<{ items: { status: string; courseId: { _id: string; title: string } }[] }>(f.batchId ? `/batches/${f.batchId}/courses` : null);
+  // Resolve the selected batch's real name, so a link or remembered id never shows "Selected" or a raw id.
+  const batch = useApi<Batch>(f.batchId ? `/batches/${f.batchId}` : null);
   const tried = useRef(false);
 
   // Preselect the last used batch, otherwise the first batch the user can see.
@@ -38,6 +40,10 @@ export default function Page() {
     set({ batchId, courseId: '' });
   };
   const courses = (bcs.data?.items ?? []).filter((b) => b.status === 'ACTIVE');
+  // A stale or unauthorized course selection must not silently filter against an id the batch does not use.
+  useEffect(() => {
+    if (f.courseId && bcs.data && !courses.some((c) => c.courseId._id === f.courseId)) set({ courseId: '' });
+  }, [f.courseId, bcs.data, courses, set]);
 
   return (
     <div>
@@ -46,13 +52,14 @@ export default function Page() {
       {tab === 'batch' && (
         <Card>
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Combobox label="Batch" value={f.batchId} onChange={pickBatch} load={loadBatches} placeholder="Choose a batch" />
+            <Combobox label="Batch" value={f.batchId} selectedLabel={batch.data?.name} onChange={pickBatch} load={loadBatches} placeholder="Choose a batch" />
             {f.batchId && <Select label="Course" labelHidden className="h-8 py-0 text-[13px]" value={f.courseId} onChange={(e) => set({ courseId: e.target.value })}
               options={[{ value: '', label: 'All courses' }, ...courses.map((b) => ({ value: b.courseId._id, label: b.courseId.title }))]} />}
           </div>
-          {f.batchId
+          {batch.error && <div className="mb-4"><ErrorState message={batch.error} retry={batch.reload} /></div>}
+          {f.batchId && !batch.error
             ? <LeaderboardTable key={`${f.batchId}-${f.courseId}`} path={`/leaderboards/batches/${f.batchId}`} query={{ courseId: f.courseId || undefined }} showRoll showSync />
-            : <EmptyState title="Choose a batch" body="Pick a batch to see how its students rank. If there are no batches yet, create one under Batches." />}
+            : !batch.error && <EmptyState title="Choose a batch" body="Pick a batch to see how its students rank. If there are no batches yet, create one under Batches." />}
         </Card>
       )}
       {tab === 'course' && (

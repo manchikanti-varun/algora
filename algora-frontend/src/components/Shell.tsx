@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import {
-  Activity, ArrowUpRight, BookOpen, Inbox, ChartNoAxesCombined, FileChartColumn, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
+  Activity, ArrowUpRight, BookOpen, Inbox, ChartNoAxesCombined, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
   CalendarCheck2, ClipboardCheck, PanelLeftClose, PanelLeftOpen, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -108,7 +108,7 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
                 const on = isActive(path, i, home);
                 return (
                   <li key={i.href}>
-                    <Link href={i.href} onClick={closeDrawer} aria-current={on ? 'page' : undefined} title={narrow ? i.label : undefined}
+                    <Link href={i.href} onClick={closeDrawer} prefetch={false} aria-current={on ? 'page' : undefined} title={narrow ? i.label : undefined}
                       className={cx('flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors', narrow && 'lg:justify-center lg:px-0',
                         on ? 'bg-nav-active font-semibold text-accent-fg' : 'text-nav-fg hover:bg-nav-hover hover:text-fg')}>
                       <i.icon size={16} className="shrink-0" aria-hidden /><span className={cx('truncate', narrow && 'lg:sr-only')}>{i.label}</span>
@@ -232,9 +232,9 @@ export const MANAGE_NAV: NavSection[] = [
     { href: '/manage/colleges', label: 'Colleges', icon: School, roles: ['SUPER_ADMIN'] },
   ] },
   { section: 'Insights', items: [
-    { href: '/manage/analytics', label: 'Analytics', icon: ChartNoAxesCombined },
+    // Prefetch is disabled for the sidebar: thirteen RSC prefetches at load cost more than they save.
+    { href: '/manage/analytics', label: 'Analytics & Reports', icon: ChartNoAxesCombined, match: ['/manage/reports'] },
     { href: '/manage/leaderboards', label: 'Leaderboards', icon: Trophy },
-    { href: '/manage/reports', label: 'Reports', icon: FileChartColumn },
   ] },
   { section: 'Settings', items: [
     { href: '/manage/settings', label: 'Scoring', icon: SlidersHorizontal, roles: ['SUPER_ADMIN'] },

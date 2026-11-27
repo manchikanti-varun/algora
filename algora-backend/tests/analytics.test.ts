@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -102,6 +103,10 @@ describe('analytics', () => {
     const det = (await w.trainer.call('get', `/analytics/students/${w.s[0].user._id}`)).body;
     expect(det.student.rollNumber).toBe(w.s[0].user.rollNumber);
     expect(det.history).toHaveLength(3);
+    expect(det.student.email).toBeUndefined();
+    expect(JSON.stringify(det)).not.toMatch(/@x\.com|9999999999/);
+    expect(det.chapters.length).toBeGreaterThan(0);
+    expect(det.attendance).toMatchObject({ eligible: 0, percentage: null }); // never a fabricated 0%
     expect((await w.trainer.call('get', `/analytics/students/${w.s[2].user._id}`)).status).toBe(404);
   });
 
@@ -197,7 +202,119 @@ describe('admin APIs', () => {
     const c = (await w.admin.call('get', '/courses?q=ds')).body.items[0];
     expect(c).toMatchObject({ chapterCount: 2, problemCount: 3, batchCount: 2 });
     const b = (await w.admin.call('get', '/batches?q=a')).body.items.find((x: any) => x.name === 'A');
-    expect(b).toMatchObject({ studentCount: 2, courseCount: 1, college: 'JNTU [JNTU]' });
+    expect(b).toMatchObject({ studentCount: 2, courseCount: 1, college: 'JNTU [JNTU]', collegeCode: 'JNTU', name: 'A' });
+  });
+});
+
+describe('unified analytics & reports', () => {
+  it('batch detail returns the real name, college, trainers, courses, rows and attendance', async () => {
+    const w = await world();
+    const d = (await w.admin.call('get', `/analytics/batches/${w.bA._id}`)).body;
+    expect(d.batch).toMatchObject({ name: 'A', college: 'JNTU [JNTU]', status: 'ACTIVE' });
+    expect(d.batch.trainers.map((t: any) => t.fullName)).toEqual(['T1']);
+    expect(d.batch.courses.map((c: any) => c.title)).toEqual(['DSA']);
+    expect(d.rows).toHaveLength(2);
+    expect(d.attendance.totals.sessions).toBe(0); // no attendance recorded yet, never a fabricated 0%
+    expect((await w.trainer.call('get', `/analytics/batches/${w.bB._id}`)).status).toBe(404);
+  });
+
+  it('course detail counts unique students, keeps contexts separate and hides courses outside a trainer scope', async () => {
+    const w = await world();
+    const d = (await w.admin.call('get', `/analytics/courses/${w.c._id}`)).body;
+    expect(d.uniqueStudents).toBe(3);
+    expect(d.contexts).toBe(3); // three batch-course rows: no double-counting of unique students
+    expect(d.batches.map((b: any) => b.name).sort()).toEqual(['A', 'B']);
+    // A course used only by batch B is invisible to a trainer assigned only to batch A.
+    const c2 = (await w.admin.call('post', '/courses', { title: 'Only B' })).body;
+    await w.admin.call('patch', `/courses/${c2._id}`, { status: 'PUBLISHED' });
+    await w.admin.call('post', `/batches/${w.bB._id}/courses`, { courseId: c2._id });
+    expect((await w.trainer.call('get', `/analytics/courses/${c2._id}`)).status).toBe(404);
+    expect((await w.admin.call('get', `/analytics/courses/${c2._id}`)).status).toBe(200);
+  });
+
+  it('college detail never widens a trainer scope and uses stable college ids', async () => {
+    const w = await world();
+    const d = (await w.admin.call('get', `/analytics/colleges/${w.bA.collegeId}`)).body;
+    expect(d.college).toMatchObject({ name: 'JNTU', code: 'JNTU' });
+    expect(d.totals.batches).toBe(1);
+    expect(d.totals.enrolledStudents).toBe(2);
+    expect(JSON.stringify(d)).not.toContain('Stu c');
+    // A trainer for batch B asking about college A gets nothing, not the whole college.
+    await User.create({ googleSub: 't2', email: 't2@x.com', role: 'TRAINER', fullName: 'T2', trainerId: 'tr_t2' });
+    const t2id = (await User.findOne({ trainerId: 'tr_t2' }))!._id;
+    await w.admin.call('post', `/batches/${w.bB._id}/trainers`, { trainerId: String(t2id) });
+    const t2 = await login(tok('t2', 't2@x.com', 'T2'));
+    const other = (await t2.call('get', `/analytics/colleges/${w.bA.collegeId}`)).body;
+    expect(other.totals.batches).toBe(0);
+    expect(other.rows ?? []).toHaveLength(0);
+    expect((await t2.call('get', `/analytics/colleges/${w.bA.collegeId}`)).status).toBe(200);
+  });
+
+  it('chapter and problem detail expose per-student records and reject unknown contexts', async () => {
+    const w = await world();
+    const ch = (await w.admin.call('get', `/analytics/chapter?courseId=${w.c._id}&chapterId=${w.ch1._id}`)).body;
+    expect(ch.chapter.title).toBe('Arrays');
+    expect(ch.summary).toMatchObject({ problems: 2, students: 2, completedStudents: 1 });
+    expect(ch.items).toHaveLength(3); // both authorized batch contexts
+    const pr = (await w.admin.call('get', `/analytics/problem?courseId=${w.c._id}&slug=two-sum`)).body;
+    expect(pr.problem).toMatchObject({ slug: 'two-sum', difficulty: 'EASY' });
+    expect(pr.scope).toEqual({ students: 3, verified: 2 });
+    expect(pr.items.find((r: any) => r.name === 'Stu a').verified).toBe(true);
+    expect(pr.items.find((r: any) => r.name === 'Stu c').verified).toBe(true);
+    expect(pr.items.find((r: any) => r.name === 'Stu b').verified).toBe(false);
+    expect((await w.admin.call('get', `/analytics/problem?courseId=${w.c._id}&slug=nope`)).status).toBe(404);
+    expect((await w.admin.call('get', `/analytics/problem?courseId=${w.c._id}&slug=Bad%20Slug`)).status).toBe(400);
+  });
+
+  it('dashboard is one scoped request and trainer counts never include other batches', async () => {
+    const w = await world();
+    const d = (await w.admin.call('get', '/dashboard/overview')).body;
+    expect(d.overview.totals.enrolledStudents).toBe(3);
+    expect(d.counts).toMatchObject({ trainerRequests: 0, pendingEnrollments: 0 });
+    expect(d.integration).toHaveProperty('enabled');
+    const t = (await w.trainer.call('get', '/dashboard/overview')).body;
+    expect(t.overview.totals.enrolledStudents).toBe(2);
+    expect(t.counts.trainerRequests).toBe(0);
+    expect(JSON.stringify(t)).not.toContain('Stu c');
+  });
+
+  it('XLSX exports mirror the CSV, stay scoped and keep formula-injection protection', async () => {
+    const w = await world();
+    await User.updateOne({ _id: w.s[1].user._id }, { $set: { fullName: '=2+2' } });
+    const r = await w.admin.call('get', '/reports/export?type=student&format=xlsx');
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toContain('spreadsheetml');
+    expect(r.headers['content-disposition']).toContain('.xlsx');
+    // supertest does not buffer unknown binary bodies by default; read this one explicitly.
+    const bytes = await new Promise<Buffer>((resolve, reject) => {
+      request(app).get('/api/v1/reports/export?type=student&format=xlsx')
+        .set('Origin', 'http://localhost:3000').set('Cookie', w.admin.cookie!).set('X-CSRF-Token', w.admin.csrf!)
+        .buffer(true).parse((res, cb) => { const chunks: Buffer[] = []; res.on('data', (c: Buffer) => chunks.push(c)); res.on('end', () => cb(null, Buffer.concat(chunks))); })
+        .end((err, res) => (err ? reject(err) : resolve(res.body as Buffer)));
+    });
+    expect(bytes.length).toBeGreaterThan(1000);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(bytes as unknown as Parameters<typeof wb.xlsx.load>[0]);
+    const sheet = wb.worksheets[0];
+    const values = sheet.getSheetValues().flat().map(String);
+    expect(values).toContain("'=2+2");
+    expect(values.join('|')).not.toMatch(/@x\.com|9999999999/);
+    // Selected-student export contains exactly one data row.
+    const one = await w.admin.call('get', `/reports/export?type=student&studentId=${w.s[0].user._id}`);
+    expect(one.text.split('\n').filter(Boolean)).toHaveLength(2);
+    const tr = (await w.trainer.call('get', `/reports/export?type=student&studentId=${w.s[2].user._id}`)).text;
+    expect(tr.split('\n').filter(Boolean)).toHaveLength(1); // header only, no cross-batch data
+  });
+
+  it('course-wide leaderboard rows carry batch context and batch selectors receive real names', async () => {
+    const w = await world();
+    const board = (await w.admin.call('get', `/leaderboards/courses/${w.c._id}`)).body;
+    expect(board.items.map((r: any) => r.name).sort()).toEqual(['Stu a', 'Stu b', 'Stu c']);
+    expect(board.items.find((r: any) => r.name === 'Stu a').batch).toBe('A');
+    const list = (await w.trainer.call('get', '/batches')).body.items;
+    expect(list.map((b: any) => b.name)).toEqual(['A']);
+    expect(list.every((b: any) => b.collegeCode === 'JNTU')).toBe(true);
+    expect((await w.trainer.call('get', `/leaderboards/batches/${w.bB._id}`)).status).toBe(404);
   });
 });
 

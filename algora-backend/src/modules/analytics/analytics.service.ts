@@ -6,7 +6,7 @@ import { getScoring } from '../progress/scoring';
 import { displayStatus } from '../leetcode/sync-metrics';
 
 export interface Filters {
-  collegeId?: string; batchId?: string; courseId?: string; chapterId?: string; difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
+  collegeId?: string; batchId?: string; courseId?: string; chapterId?: string; studentId?: string; slug?: string; difficulty?: 'EASY' | 'MEDIUM' | 'HARD';
   /** LINKED/UNLINKED are current; the legacy values are accepted so old links keep working. */
   q?: string; verification?: 'LINKED' | 'UNLINKED' | 'VERIFIED' | 'PENDING_VERIFICATION' | 'REVALIDATION_REQUIRED'; minPct?: number; maxPct?: number;
   from?: Date; to?: Date; dateBasis?: 'verified' | 'submitted';
@@ -35,7 +35,21 @@ export async function scopedBatches(u: UserDoc, f: Filters) {
 function narrow(content: ChapterInfo[], f: Filters): ChapterInfo[] {
   return content
     .filter((c) => !f.chapterId || c.chapterId === f.chapterId)
-    .map((c) => ({ ...c, problems: c.problems.filter((p) => !f.difficulty || p.difficulty === f.difficulty) }));
+    .map((c) => ({ ...c, problems: c.problems.filter((p) => (!f.difficulty || p.difficulty === f.difficulty) && (!f.slug || p.slug === f.slug)) }));
+}
+
+/** Bounded parallelism: independent contexts are fetched concurrently without flooding the database. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 const COUNTING = new Set(['LINKED', 'VERIFIED']);
@@ -55,21 +69,18 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
   const courses = new Map((await Course.find({ _id: { $in: bcs.map((b) => b.courseId) } }, 'title').lean()).map((c) => [String(c._id), c]));
   const batchMap = new Map(batches.map((b) => [String(b._id), b]));
   const scoring = await getScoring();
-  const contexts = [];
-  const rows: PerfRow[] = [];
-  const allIds = new Set<string>();
-  for (const bc of bcs) {
+  // Independent batch-courses are loaded and scored in parallel (bounded), rather than one round trip at a time.
+  const built = await mapLimit(bcs, 4, async (bc) => {
     const content = narrow(await visibleContent(bc._id, bc.courseId), f);
     const scope = scopeProblems([content]);
     const studentIds = (await Enrollment.distinct('studentId', { batchId: bc.batchId, status: 'ACTIVE' })) as Types.ObjectId[];
-    contexts.push({ bc, batch: batchMap.get(String(bc.batchId)), course: courses.get(String(bc.courseId)), content, studentIds });
-    studentIds.forEach((i) => allIds.add(String(i)));
     const scores = await scoreStudents(studentIds, scope, { scoring, from: f.from, to: f.to, dateBasis: f.dateBasis });
     const ordered = [...scores.values()].sort((a, b) => b.points - a.points || b.solved.size - a.solved.size);
+    const builtRows: PerfRow[] = [];
     let prev: { points: number; rank: number } | null = null;
     ordered.forEach((s, i) => {
       const rank = prev && prev.points === s.points ? prev.rank : i + 1; prev = { points: s.points, rank };
-      rows.push({
+      builtRows.push({
         studentId: s.studentId, rollNumber: '', name: '', college: null, batchId: String(bc.batchId), batch: batchMap.get(String(bc.batchId))?.name ?? '',
         courseId: String(bc.courseId), course: courses.get(String(bc.courseId))?.title ?? '', batchCourseId: String(bc._id),
         easy: s.easy, medium: s.medium, hard: s.hard, solved: s.solved.size, accessible: scope.size,
@@ -78,7 +89,11 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
         syncDisplay: 'IDLE', nextAutoSyncAt: null, possibleGap: false, needsAttention: false,
       });
     });
-  }
+    return { bc, batch: batchMap.get(String(bc.batchId)), course: courses.get(String(bc.courseId)), content, studentIds, builtRows };
+  });
+  const contexts = built.map(({ bc, batch, course, content, studentIds }) => ({ bc, batch, course, content, studentIds }));
+  const rows: PerfRow[] = built.flatMap((b) => b.builtRows);
+  const allIds = new Set(rows.map((r) => r.studentId));
   const ids = [...allIds].map((i) => new Types.ObjectId(i));
   const users = new Map((await User.find({ _id: { $in: ids }, status: 'ACTIVE' }, 'fullName rollNumber collegeId sync').lean()).map((x) => [String(x._id), x]));
   const colleges = new Map((await College.find({ _id: { $in: [...users.values()].map((x) => x.collegeId).filter(Boolean) } }, 'name').lean()).map((c) => [String(c._id), c.name]));
@@ -95,6 +110,7 @@ export async function performanceRows(u: UserDoc, f: Filters): Promise<{ rows: P
     })
     .filter((r) => !f.syncFilter || (f.syncFilter === 'QUEUED' ? r.syncDisplay === 'QUEUED' : f.syncFilter === 'DELAYED' ? r.syncDisplay === 'DELAYED' : f.syncFilter === 'FAILED' ? FAILED.has(r.syncDisplay) : f.syncFilter === 'GAP' ? r.possibleGap : r.needsAttention))
     .filter((r) => !q || r.name.toLowerCase().includes(q) || r.rollNumber.toLowerCase().includes(q))
+    .filter((r) => !f.studentId || r.studentId === f.studentId)
     .filter((r) => !f.verification || r.linkState === f.verification)
     .filter((r) => f.minPct === undefined || (r.completionPct ?? 0) >= f.minPct)
     .filter((r) => f.maxPct === undefined || (r.completionPct ?? 0) <= f.maxPct)
@@ -109,7 +125,7 @@ function syncFlags(sync: any, job: any, linkState: string, now: Date, failed: Se
 }
 const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
 
-export async function overview(u: UserDoc, f: Filters) {
+export async function overview(u: UserDoc, f: Filters, opts: { withRows?: boolean } = {}) {
   const { rows, contexts, batches } = await performanceRows(u, f);
   const batchIds = batches.map((batch) => batch._id);
   const [pending, enrollments, batchColleges] = await Promise.all([
@@ -172,6 +188,70 @@ export async function overview(u: UserDoc, f: Filters) {
     difficulty: diff,
     batchComparison, courseCompletion,
     needsSupport: rows.filter((r) => r.linkState !== 'LINKED' || (r.accessible > 0 && r.completionPct !== null && r.completionPct < 25 && r.syncDisplay === 'SYNC_SUCCESS' && !r.possibleGap)).sort((a, b) => (a.completionPct ?? 0) - (b.completionPct ?? 0)).slice(0, 25),
+    ...(opts.withRows ? { rows } : {}),
+  };
+}
+
+/**
+ * Chapter-wise completion for one student, across the batch-course contexts they actually belong to. Unrelated
+ * contexts are never merged: each row names its batch and course, so a student enrolled twice is not double-counted.
+ */
+export async function studentChapters(u: UserDoc, studentId: string, f: Filters) {
+  const { contexts } = await performanceRows(u, f);
+  const scoring = await getScoring();
+  const id = new Types.ObjectId(studentId);
+  const out = [];
+  for (const c of contexts) {
+    if (!c.studentIds.some((sid) => String(sid) === studentId)) continue;
+    for (const ch of c.content) {
+      const scope = scopeProblems([[ch]]);
+      const score = (await scoreStudents([id], scope, { scoring, from: f.from, to: f.to, dateBasis: f.dateBasis })).get(studentId);
+      const weights = { EASY: { solved: 0, available: 0 }, MEDIUM: { solved: 0, available: 0 }, HARD: { solved: 0, available: 0 } };
+      for (const p of ch.problems) {
+        if (scope.has(p.slug)) {
+          weights[p.difficulty].available += 1;
+          if (score?.solved.has(p.slug)) weights[p.difficulty].solved += 1;
+        }
+      }
+      out.push({
+        batchId: String(c.bc.batchId), batch: c.batch?.name ?? 'Batch', courseId: String(c.bc.courseId), course: c.course?.title ?? 'Course',
+        batchCourseId: String(c.bc._id), chapterId: ch.chapterId, chapter: ch.title, problems: scope.size,
+        solved: score?.solved.size ?? 0, completionPct: scope.size ? Math.round(((score?.solved.size ?? 0) / scope.size) * 1000) / 10 : null,
+        difficulty: weights,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * One problem across every authorized batch-course: which eligible students have verified it. A student without
+ * verified evidence is reported as `verified: false`, never as "never solved".
+ */
+export async function problemDetail(u: UserDoc, f: Filters, slug: string) {
+  const { rows, contexts } = await performanceRows(u, { ...f, q: undefined, verification: undefined, minPct: undefined, maxPct: undefined, syncFilter: undefined });
+  const scoring = await getScoring();
+  const matched = [];
+  let problem: { title: string; slug: string; difficulty: string; number: number | null } | null = null;
+  for (const c of contexts) {
+    const chapter = c.content.find((ch) => ch.problems.some((p) => p.slug === slug));
+    if (!chapter) continue;
+    const p = chapter.problems.find((x) => x.slug === slug)!;
+    problem = { title: p.title, slug: p.slug, difficulty: p.difficulty, number: (p as { number?: number }).number ?? null };
+    const scope = scopeProblems([[{ ...chapter, problems: [p] }]]);
+    const scores = await scoreStudents(c.studentIds, scope, { scoring, from: f.from, to: f.to, dateBasis: f.dateBasis });
+    const verified = new Set([...scores.values()].filter((s) => s.solved.has(slug)).map((s) => s.studentId));
+    for (const r of rows.filter((row) => row.batchCourseId === String(c.bc._id))) {
+      matched.push({
+        ...r, chapterId: chapter.chapterId, chapter: chapter.title, verified: verified.has(r.studentId),
+      });
+    }
+  }
+  matched.sort((a, b) => (a.rollNumber || a.name).localeCompare(b.rollNumber || b.name));
+  return {
+    problem, scope: { students: matched.length, verified: matched.filter((r) => r.verified).length },
+    verificationPct: matched.length ? Math.round((matched.filter((r) => r.verified).length / matched.length) * 1000) / 10 : null,
+    items: matched,
   };
 }
 

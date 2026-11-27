@@ -19,6 +19,7 @@ import { catalogRouter } from './modules/catalog/catalog.routes';
 import { leetcodeRouter } from './modules/leetcode/leetcode.routes';
 import { leaderboardsRouter, settingsRouter } from './modules/progress/progress.routes';
 import { analyticsRouter, reportsRouter } from './modules/analytics/analytics.routes';
+import { dashboardRouter } from './modules/dashboard/dashboard.routes';
 import { auditRouter, collegesRouter, pendingRouter, studentsRouter } from './modules/admin/admin.routes';
 import { manageRequestsRouter } from './modules/student/requests';
 import { studentRouter } from './modules/student/student.routes';
@@ -84,6 +85,7 @@ export function createApp() {
   api.use('/settings', settingsRouter);
   api.use('/leaderboards', leaderboardsRouter);
   api.use('/analytics', analyticsRouter);
+  api.use('/dashboard', dashboardRouter);
   api.use('/reports', limiter(60_000, 20), reportsRouter);
   api.use('/colleges', collegesRouter);
   api.use('/student-requests', manageRequestsRouter);

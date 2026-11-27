@@ -44,7 +44,9 @@ export function Combobox({ label, value, onChange, options, load, placeholder = 
 
   const base = load ? remote ?? [] : (options ?? []).filter((o) => !q.trim() || `${o.label} ${o.detail ?? ''}`.toLowerCase().includes(q.trim().toLowerCase()));
   const list: Option[] = [...(emptyLabel && !q.trim() ? [{ value: '', label: emptyLabel }] : []), ...base];
-  const current = value ? (options?.find((o) => o.value === value)?.label ?? known[value] ?? selectedLabel ?? 'Selected') : emptyLabel ?? '';
+  // Until the selected value's label is known (URL value, first page not containing it, remote load in flight), show the
+  // placeholder rather than an internal id or the word "Selected".
+  const current = value ? (options?.find((o) => o.value === value)?.label ?? known[value] ?? selectedLabel ?? '') : emptyLabel ?? '';
 
   useLayoutEffect(() => {
     if (!open) return;

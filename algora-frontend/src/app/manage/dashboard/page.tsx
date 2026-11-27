@@ -4,44 +4,48 @@ import { CheckCircle2, ChevronRight, CirclePlus, GraduationCap, Hourglass, Inbox
 import { BarList, Card, DataTable, ErrorState, Grid, human, PageHeader, PageSkeleton, plural, pct, ProgressBar, StatCard, StatusBadge, ButtonLink, EmptyState } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { isAdmin, useAuth } from '@/lib/auth';
-import type { Overview, Paged } from '@/components/manage/types';
+import type { Overview } from '@/components/manage/types';
 
+interface DashboardData {
+  overview: Overview;
+  counts: { studentRequests: number; trainerRequests: number; pendingEnrollments: number };
+  integration: { enabled?: boolean | null; paused: boolean | null };
+}
 interface Attention { key: string; icon: LucideIcon; text: string; count?: number; href: string; linkLabel: string }
 
 export default function Page() {
   const { user } = useAuth();
   const admin = isAdmin(user);
-  const o = useApi<Overview>('/analytics/overview');
-  const pending = useApi<Paged<unknown>>(admin ? '/trainer-requests?status=PENDING_APPROVAL&pageSize=1' : null);
-  const studentPending = useApi<Paged<unknown>>('/student-requests?status=PENDING&pageSize=1');
-  const health = useApi<{ enabled: boolean; provider: string; breaker: string }>(admin ? '/leetcode/health' : null);
+  // One scoped request drives the whole above-the-fold dashboard (metrics, attention counts, integration state).
+  const d = useApi<DashboardData>('/dashboard/overview');
 
   const header = (
     <PageHeader title="Overview" subtitle={`Welcome, ${user?.fullName.split(' ')[0] ?? ''}. ${admin ? 'Platform-wide summary.' : 'Summary of your batches.'}`}
       actions={<>
-        <ButtonLink href="/manage/batches/new" icon={<CirclePlus size={16} aria-hidden />}>New batch</ButtonLink>
-        {user?.canManageCourses && <ButtonLink href="/manage/courses/new" variant="secondary">New course</ButtonLink>}
+        <ButtonLink href="/manage/batches/new" prefetch={false} icon={<CirclePlus size={16} aria-hidden />}>New batch</ButtonLink>
+        {user?.canManageCourses && <ButtonLink href="/manage/courses/new" variant="secondary" prefetch={false}>New course</ButtonLink>}
       </>} />
   );
-  if (o.loading && !o.data) return <div>{header}<PageSkeleton /></div>;
-  if (o.error) return <div>{header}<ErrorState message={o.error} retry={o.reload} /></div>;
-  const d = o.data!;
-  const t = d.totals;
-  const unlinked = d.verification.linkStates.UNLINKED ?? 0;
-  const hasStatus = d.batchComparison.some((b) => b.status);
-  const activeBatches = hasStatus ? d.batchComparison.filter((b) => b.status === 'ACTIVE') : d.batchComparison;
+  if (d.loading && !d.data) return <div>{header}<PageSkeleton /></div>;
+  if (d.error) return <div>{header}<ErrorState message={d.error} retry={d.reload} /></div>;
+  const data = d.data!;
+  const o = data.overview;
+  const t = o.totals;
+  const unlinked = o.verification.linkStates.UNLINKED ?? 0;
+  const hasStatus = o.batchComparison.some((b) => b.status);
+  const activeBatches = hasStatus ? o.batchComparison.filter((b) => b.status === 'ACTIVE') : o.batchComparison;
   const activeCount = hasStatus ? activeBatches.length : t.batches;
 
   const attention: Attention[] = [
-    admin && { key: 'req', icon: UserPlus, text: 'Trainer requests are waiting for approval', count: pending.data?.total ?? 0, href: '/manage/trainers', linkLabel: 'Review' },
-    admin && health.data?.enabled === false && { key: 'off', icon: ZapOff, text: 'Progress updates are off, so progress will not change', href: '/manage/integration', linkLabel: 'Integrations' },
-    { key: 'pend', icon: Hourglass, text: 'Reserved enrollments have not been claimed yet', count: t.pendingEnrollments, href: '/manage/batches', linkLabel: 'Open batches' },
-    { key: 'student-requests', icon: Inbox, text: 'Student requests awaiting review', count: studentPending.data?.total ?? 0, href: '/manage/requests', linkLabel: 'Review' },
+    admin && { key: 'req', icon: UserPlus, text: 'Trainer requests are waiting for approval', count: data.counts.trainerRequests, href: '/manage/trainers', linkLabel: 'Review' },
+    admin && data.integration.enabled === false && { key: 'off', icon: ZapOff, text: 'Progress updates are off, so progress will not change', href: '/manage/integration', linkLabel: 'Integrations' },
+    { key: 'pend', icon: Hourglass, text: 'Reserved enrollments have not been claimed yet', count: data.counts.pendingEnrollments, href: '/manage/batches', linkLabel: 'Open batches' },
+    { key: 'student-requests', icon: Inbox, text: 'Student requests awaiting review', count: data.counts.studentRequests, href: '/manage/requests', linkLabel: 'Review' },
     { key: 'unl', icon: Link2Off, text: 'Students have not connected a LeetCode account', count: unlinked, href: '/manage/students?issue=MISSING_USERNAME', linkLabel: 'View students' },
   ].filter((x): x is Attention => !!x && (x.count === undefined || x.count > 0));
 
-  const support = d.needsSupport.slice(0, 6);
-  const diff = d.difficulty;
+  const support = o.needsSupport.slice(0, 6);
+  const diff = o.difficulty;
 
   return (
     <div className="space-y-6">
@@ -51,8 +55,8 @@ export default function Page() {
         <StatCard label="Active batches" value={activeCount} icon={<UsersRound size={16} />} href="/manage/batches" />
         <StatCard label="Average completion" value={pct(t.avgCompletionPct)} icon={<Target size={16} />}
           hint={<ProgressBar value={t.avgCompletionPct} label="Average completion" size="sm" showValue={false} />} />
-        <StatCard label="LeetCode connection" value={pct(d.verification.coveragePct)} icon={<Link2 size={16} />}
-          hint={`${d.verification.verifiedLinks} of ${d.verification.studentsInScope} students connected`} />
+        <StatCard label="LeetCode connection" value={pct(o.verification.coveragePct)} icon={<Link2 size={16} />}
+          hint={`${o.verification.verifiedLinks} of ${o.verification.studentsInScope} students connected`} />
       </Grid>
 
       <div className="grid items-start gap-5 lg:grid-cols-2">
@@ -94,9 +98,9 @@ export default function Page() {
         </Card>
       </div>
 
-      <Card title="Active batches" actions={<ButtonLink href="/manage/batches" variant="secondary" size="sm">All batches</ButtonLink>} flush>
+      <Card title="Active batches" actions={<ButtonLink href="/manage/batches" variant="secondary" size="sm" prefetch={false}>All batches</ButtonLink>} flush>
         <DataTable caption="Active batches" rows={activeBatches.slice(0, 8)} rowKey={(batch) => batch.batchId}
-          empty={<EmptyState compact title="No active batches" body="Create a batch to enroll students." action={<ButtonLink href="/manage/batches/new" size="sm">New batch</ButtonLink>} />}
+          empty={<EmptyState compact title="No active batches" body="Create a batch to enroll students." action={<ButtonLink href="/manage/batches/new" size="sm" prefetch={false}>New batch</ButtonLink>} />}
           columns={[
             { key: 'batch', header: 'Batch', cell: (b) => <div className="max-w-64 whitespace-normal"><Link href={`/manage/batches/${b.batchId}`} className="font-medium text-accent-fg hover:underline">{b.name}</Link>{b.college && <p className="text-xs text-fg-muted">{b.college}</p>}</div> },
             { key: 'courses', header: 'Courses', cell: (b) => <span className="block max-w-64 whitespace-normal">{b.courses?.length ? b.courses.join(', ') : 'No courses assigned'}</span> },
@@ -119,7 +123,7 @@ export default function Page() {
           </div>
         </Card>
         <Card title="Course completion" description="Average completion per course">
-          <BarList items={d.courseCompletion.map((c) => ({ key: c.courseId, label: c.title, value: c.avgCompletionPct, sub: plural(c.rows, 'student') }))} max={100} format={(n) => `${n}%`} empty="No course data yet" />
+          <BarList items={o.courseCompletion.map((c) => ({ key: c.courseId, label: c.title, value: c.avgCompletionPct, sub: plural(c.rows, 'student') }))} max={100} format={(n) => `${n}%`} empty="No course data yet" />
         </Card>
       </div>
 
@@ -128,11 +132,12 @@ export default function Page() {
           <div className="space-y-3 text-sm">
             <p className="flex items-center gap-2 text-fg">
               Progress updates
-              {health.data ? <StatusBadge status={health.data.enabled ? 'ACTIVE' : 'INACTIVE'} label={health.data.enabled ? 'On' : 'Off'} /> : <span className="text-fg-subtle">…</span>}
+              {data.integration.enabled === undefined || data.integration.enabled === null ? <span className="text-fg-subtle">…</span>
+                : <StatusBadge status={data.integration.enabled ? 'ACTIVE' : 'INACTIVE'} label={data.integration.enabled ? 'On' : 'Off'} />}
             </p>
-            {Object.keys(d.sync.byStatus).length ? (
+            {Object.keys(o.sync.byStatus).length ? (
               <ul className="flex flex-wrap gap-x-4 gap-y-2" aria-label="Student update states">
-                {Object.entries(d.sync.byStatus).map(([k, v]) => <li key={k} className="flex items-center gap-1.5"><StatusBadge status={k} /><span className="tabular-nums text-fg-muted">{v}</span></li>)}
+                {Object.entries(o.sync.byStatus).map(([k, v]) => <li key={k} className="flex items-center gap-1.5"><StatusBadge status={k} /><span className="tabular-nums text-fg-muted">{v}</span></li>)}
               </ul>
             ) : <p className="text-fg-subtle">No students yet.</p>}
           </div>

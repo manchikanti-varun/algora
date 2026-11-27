@@ -4,6 +4,9 @@
  * (2) the backend's OAuth2Client.verifyIdToken is stubbed (tests/e2e-server.ts). Everything else is production code.
  */
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import jsQR from 'jsqr';
+import { PNG } from 'pngjs';
 import { chromium } from 'playwright';
 
 const FE = 'http://localhost:3000';
@@ -405,13 +408,36 @@ try {
   await step('Profile: roll number immutable and username linked while synchronization is unavailable', async () => {
     const p = student.page;
     await p.goto(`${FE}/student/profile`);
-    await p.getByText('AB12CD34EF', { exact: true }).waitFor();
+    await p.getByRole('definition').filter({ hasText: 'AB12CD34EF' }).waitFor();
     assert(await p.getByRole('textbox', { name: 'Roll number' }).count() === 0, 'roll editable');
     const accounts = p.locator('#connected-accounts');
     await accounts.getByText('Connected', { exact: true }).waitFor();
     await accounts.getByRole('link', { name: /asha_rao/ }).waitFor();
     for (const raw of ['LEETCODE_', 'SYNC_', 'statusDetail', 'provider']) assert(!(await p.locator('body').innerText()).includes(raw), `technical text "${raw}" on the profile`);
     await shot(p, '08-profile');
+  });
+  await step('Profile QR: renders, enlarges, downloads and decodes to exactly the approved roll number', async () => {
+    const p = student.page;
+    await p.goto(`${FE}/student/profile`);
+    await p.getByText('Attendance QR code').waitFor();
+    await p.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).first().waitFor();
+    await p.getByRole('button', { name: 'View QR code' }).click();
+    const dlg = p.locator('dialog[open]');
+    await dlg.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).waitFor();
+    const [download] = await Promise.all([p.waitForEvent('download'), dlg.getByRole('button', { name: 'Download PNG' }).click()]);
+    const png = PNG.sync.read(fs.readFileSync(await download.path()));
+    const decoded = jsQR(new Uint8ClampedArray(png.data), png.width, png.height);
+    assert(decoded && decoded.data === 'AB12CD34EF', `decoded QR payload=${decoded?.data}`);
+    await dlg.getByRole('button', { name: 'Close', exact: true }).click();
+  });
+  await step('Student Attendance destination shows only this student, with no recording controls', async () => {
+    const p = student.page;
+    await p.getByRole('navigation', { name: 'Main' }).first().getByRole('link', { name: 'Attendance' }).click();
+    await p.waitForURL('**/student/attendance');
+    await p.getByRole('heading', { name: 'Attendance', level: 1 }).waitFor();
+    await p.getByText('AB12CD34EF', { exact: true }).first().waitFor();
+    await p.getByText('Not recorded').first().waitFor();
+    for (const forbidden of [/Upload/i, /Record attendance/i, /Finalize/i, /Mark present/i]) assert(!(await p.getByRole('button', { name: forbidden }).count()), `student sees ${forbidden}`);
   });
   await step('Leaderboard page explains verification is unavailable', async () => {
     await student.page.goto(`${FE}/student/leaderboard`);
@@ -452,25 +478,47 @@ try {
     await p.getByText('Roll number already registered').waitFor();
     await other.ctx.close();
   });
-  await step('Analytics, reports and leaderboards render for the admin; CSV download works', async () => {
+  await step('Analytics & Reports: inspect a student before export; legacy /manage/reports redirects', async () => {
     const p = admin.page;
     await p.goto(`${FE}/manage/analytics`);
+    await p.getByRole('heading', { name: 'Analytics & Reports', level: 1 }).waitFor();
     await p.getByText('LeetCode connection').first().waitFor();
-    await p.getByRole('link', { name: 'Asha Rao' }).waitFor();
-    await p.getByRole('tab', { name: 'Chapters' }).click();
-    await p.waitForURL(/tab=chapters/);
+    await p.getByRole('tab', { name: 'Students' }).click();
+    await p.waitForURL(/tab=students/);
+    await p.getByRole('combobox', { name: 'Student' }).click();
+    await p.getByRole('combobox', { name: 'Student' }).fill('Asha');
+    await p.getByRole('option', { name: /Asha Rao/ }).click();
+    await p.getByText('AB12CD34EF', { exact: false }).first().waitFor();
+    await p.getByText('Verified / available').waitFor();
+    await p.getByText('Attendance summary').waitFor();
     await p.reload();
-    assert(await p.getByRole('tab', { name: 'Chapters' }).getAttribute('aria-selected') === 'true', 'tab lost on reload');
-    await p.getByRole('tab', { name: 'Chapters' }).focus();
-    await p.keyboard.press('ArrowRight'); // ARIA tabs: arrow keys move between tabs
-    await p.waitForURL(/tab=problems/);
+    assert(await p.getByRole('tab', { name: 'Students' }).getAttribute('aria-selected') === 'true', 'tab lost on reload');
+    assert(new URL(p.url()).searchParams.get('studentId'), 'student context lost on reload');
+    const [dl] = await Promise.all([p.waitForEvent('download'), (async () => {
+      await p.getByRole('button', { name: 'Export' }).click();
+      await p.getByRole('menuitem', { name: /Selected student — CSV/ }).click();
+    })()]);
+    const csv = fs.readFileSync(await dl.path(), 'utf8');
+    assert(csv.startsWith('Roll number,Name') && csv.includes('AB12CD34EF'), csv.slice(0, 200));
+    assert(!csv.includes('Other Person'), 'selected-student export included another student');
     await shot(p, '09-analytics');
     await p.goto(`${FE}/manage/reports`);
-    const [dl] = await Promise.all([p.waitForEvent('download'), p.getByRole('listitem').filter({ hasText: 'Student report' }).getByRole('button', { name: 'Download CSV' }).click()]);
-    const path = await dl.path();
-    const fs = await import('node:fs');
-    const csv = fs.readFileSync(path, 'utf8');
-    assert(csv.startsWith('Roll number,Name') && csv.includes('AB12CD34EF'), csv.slice(0, 200));
+    await p.waitForURL('**/manage/analytics');
+    await p.getByRole('heading', { name: 'Analytics & Reports', level: 1 }).waitFor();
+    // Leaderboard selectors show the real batch name, never a college name or a raw id.
+    await p.goto(`${FE}/manage/leaderboards`);
+    await p.getByRole('combobox', { name: 'Batch' }).waitFor();
+    const list = await (await p.request.get(`${FE}/api/v1/batches`)).json();
+    const batchId = list.items.find((b) => b.name === 'JNTU Bootcamp')?._id;
+    assert(batchId, 'batch missing from the list response');
+    await p.goto(`${FE}/manage/leaderboards?batchId=${batchId}`);
+    const field = p.getByRole('combobox', { name: 'Batch' });
+    await field.waitFor();
+    // The selected batch is resolved by id, not from the first page of options.
+    await p.waitForFunction(() => [...document.querySelectorAll('input[role="combobox"]')].some((i) => i.value === 'JNTU Bootcamp'), null, { timeout: 10_000 });
+    const label = await field.inputValue();
+    assert(label === 'JNTU Bootcamp', `batch selector label=${label}`);
+    assert(!/^[a-f0-9]{24}$/.test(label) && !label.includes('JNTU Hyderabad'), `selector shows the wrong entity: ${label}`);
     await p.goto(`${FE}/manage/integration`);
     await p.getByText('Automatic verification is disabled').waitFor();
     await p.getByText('Activation is configured on the server', { exact: false }).first().waitFor({ timeout: 5000 }).catch(() => {});

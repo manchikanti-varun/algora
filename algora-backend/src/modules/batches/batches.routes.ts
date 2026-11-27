@@ -68,7 +68,12 @@ batchesRouter.get('/', async (req, res) => {
     PendingEnrollment.aggregate([{ $match: { batchId: { $in: ids }, status: 'PENDING' } }, { $group: { _id: '$batchId', n: { $sum: 1 } } }]),
   ]);
   const n = (arr: any[], id: unknown) => arr.find((x) => String(x._id) === String(id))?.n ?? 0;
-  res.json({ items: items.map((b) => ({ ...b, college: collegeLabel(b.collegeId as any), collegeId: (b.collegeId as any)?._id ?? null, studentCount: n(st, b._id), courseCount: n(co, b._id), pendingCount: n(pe, b._id) })), total, page: q.page, pageSize: q.pageSize });
+  // `name` is always the batch name; college and its code are separate fields so selectors can never swap them.
+  res.json({ items: items.map((b) => ({
+    ...b, name: b.name, college: collegeLabel(b.collegeId as any), collegeCode: (b.collegeId as any)?.code ?? null,
+    collegeId: (b.collegeId as any)?._id ?? null, startDate: b.startDate ?? null, endDate: b.endDate ?? null,
+    studentCount: n(st, b._id), courseCount: n(co, b._id), pendingCount: n(pe, b._id),
+  })), total, page: q.page, pageSize: q.pageSize });
 });
 
 batchesRouter.get('/:id', async (req, res) => {
