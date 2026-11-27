@@ -742,7 +742,7 @@ try {
       }
       await p.getByRole('button', { name: 'Batch controls', exact: true }).click();
       await p.getByLabel('Batch', { exact: true }).selectOption({ label: 'JNTU Bootcamp' });
-      await p.getByRole('checkbox', { name: 'Enable student assistance for this batch' }).check();
+      await p.getByLabel('Batch AI policy', { exact: true }).selectOption('enable');
       await p.getByRole('button', { name: 'Save batch controls' }).click();
       await p.getByText('Batch controls saved', { exact: true }).waitFor();
       const catalogStatus = await p.evaluate(async () => {

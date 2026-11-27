@@ -4,7 +4,7 @@ import { Batch, BatchChapterAccess, BatchCourse, CatalogProblem, Chapter, Course
 import { AiBatch, AiPractice } from '../../models/ai';
 import { trainerBatchIds } from '../access';
 import { studentContexts } from '../student/contexts';
-import { settings } from './runtime';
+import { configuredProvider, settings } from './runtime';
 
 export const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -12,12 +12,34 @@ export function batchAiAvailable(controls: {
   enabled?: boolean | null; courseIds?: string[]; startsAt?: Date | null; endsAt?: Date | null;
   startMinute?: number | null; endMinute?: number | null;
 } | null, courseId: string, now = new Date()) {
+  // Missing configuration inherits the global Student AI policy. Only an explicit false is a batch override.
+  if (!controls) return true;
+  if (controls.enabled === false) return false;
   const minute = (now.getUTCHours() * 60 + now.getUTCMinutes() + 330) % 1440;
   const start = controls?.startMinute;
   const end = controls?.endMinute;
   const inWindow = start == null || end == null || (start <= end ? minute >= start && minute < end : minute >= start || minute < end);
-  return !!controls?.enabled && (!controls.courseIds?.length || controls.courseIds.includes(courseId))
+  return (!controls.courseIds?.length || controls.courseIds.includes(courseId))
     && (!controls.startsAt || controls.startsAt <= now) && (!controls.endsAt || controls.endsAt > now) && inWindow;
+}
+
+export type StudentAiAvailabilityReason =
+  | 'AVAILABLE' | 'GLOBAL_DISABLED' | 'BATCH_DISABLED' | 'BATCH_SCHEDULE'
+  | 'CHAPTER_HIDDEN' | 'CHAPTER_DISABLED' | 'CONTEXT_INACTIVE'
+  | 'PROVIDER_NOT_CONFIGURED' | 'ALLOWANCE_EXHAUSTED';
+
+export function studentAiAvailability(input: {
+  globalEnabled: boolean; batchEnabled: boolean; chapterVisible: boolean; chapterEnabled: boolean;
+  contextActive: boolean; providerReady: boolean; remaining: number;
+}): { allowed: boolean; reason: StudentAiAvailabilityReason } {
+  if (!input.chapterVisible) return { allowed: false, reason: 'CHAPTER_HIDDEN' };
+  if (!input.chapterEnabled) return { allowed: false, reason: 'CHAPTER_DISABLED' };
+  if (!input.globalEnabled) return { allowed: false, reason: 'GLOBAL_DISABLED' };
+  if (!input.contextActive) return { allowed: false, reason: 'CONTEXT_INACTIVE' };
+  if (!input.batchEnabled) return { allowed: false, reason: 'BATCH_DISABLED' };
+  if (!input.providerReady) return { allowed: false, reason: 'PROVIDER_NOT_CONFIGURED' };
+  if (input.remaining <= 0) return { allowed: false, reason: 'ALLOWANCE_EXHAUSTED' };
+  return { allowed: true, reason: 'AVAILABLE' };
 }
 
 export async function studentProblem(user: UserDoc, batchCourseId: string, problemId: string) {
@@ -32,7 +54,10 @@ export async function studentProblem(user: UserDoc, batchCourseId: string, probl
     AiBatch.findById(String(context.bc.batchId)).lean(),
   ]);
   if (!chapter || !visible) throw notFound('Practice problem not found');
-  const allowed = visible.studentAiEnabled === true && !!catalog && batchAiAvailable(controls, String(context.course._id));
+  const mentor = await settings('STUDENT_MENTOR');
+  const allowed = visible.studentAiEnabled === true && !!catalog
+    && mentor.enabled && batchAiAvailable(controls, String(context.course._id))
+    && await configuredProvider('STUDENT_MENTOR', mentor);
   return {
     batchId: String(context.bc.batchId), courseId: String(context.course._id), chapterId: String(chapter._id), problemId,
     course: context.course.title, chapter: chapter.title, title: problem.title, difficulty: problem.difficulty,

@@ -67,8 +67,8 @@ studentRouter.get('/chapters/:chapterId', async (req, res) => {
     getScoring(),
     visible.studentAiEnabled === true ? Promise.all([
       settings('STUDENT_MENTOR'), AiBatch.findById(String(ctx.bc.batchId)).lean(),
-    ]).then(async ([mentor, controls]) =>
-      mentor.enabled && batchAiAvailable(controls, String(ctx.bc.courseId)) && await configuredProvider('STUDENT_MENTOR', mentor)) : false,
+    ]).then(([mentor, controls]) =>
+      mentor.enabled && batchAiAvailable(controls, String(ctx.bc.courseId))) : false,
     AiConversation.distinct('problemId', { workload: 'STUDENT_MENTOR', userId: String(req.user!._id), batchCourseId, chapterId, expiresAt: { $gt: new Date() } }),
   ]);
   const historyIds = new Set(history);

@@ -117,8 +117,6 @@ function Inner() {
                       </ButtonLink>
                       {d.chapter.aiEnabled && p.catalogEligible ? (
                         <Button size="sm" variant="ghost" icon={<Sparkles size={14} aria-hidden />} onClick={() => setMentor(p._id)}>Ask AI</Button>
-                      ) : d.chapter.studentAiEnabled ? (
-                        <Button size="sm" variant="ghost" disabled title="AI is currently unavailable">Ask AI unavailable</Button>
                       ) : p.hasAiHistory && (
                         <Button size="sm" variant="ghost" onClick={() => setMentor(p._id)}>AI history</Button>
                       )}

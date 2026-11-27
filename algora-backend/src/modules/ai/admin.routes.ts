@@ -292,13 +292,18 @@ adminAi.put('/batches/:id', async (req, res) => {
   const id = parse(objectId, req.params.id);
   if (!(await Batch.exists({ _id: id, status: { $ne: 'ARCHIVED' } }))) throw notFound('Batch not found');
   const input = parse(z.object({
-    enabled: z.boolean(), daily: z.number().int().min(1).max(1000).nullable(), courseIds: z.array(objectId).max(100),
+    enabled: z.boolean().nullable(), daily: z.number().int().min(1).max(1000).nullable(), courseIds: z.array(objectId).max(100),
     startsAt: z.iso.datetime({ offset: true }).nullable(), endsAt: z.iso.datetime({ offset: true }).nullable(),
     startMinute: z.number().int().min(0).max(1439).nullable(), endMinute: z.number().int().min(0).max(1439).nullable(),
   }).strict().refine((value) => (!value.startsAt || !value.endsAt || Date.parse(value.startsAt) < Date.parse(value.endsAt))
     && ((value.startMinute != null && value.endMinute != null && value.startMinute !== value.endMinute) ||
       (value.startMinute == null && value.endMinute == null))), req.body);
-  await AiBatch.updateOne({ _id: id }, { $set: input }, { upsert: true });
+  if (input.enabled === null) {
+    const set = Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'enabled'));
+    await AiBatch.updateOne({ _id: id }, { $unset: { enabled: 1 }, $set: set }, { upsert: true });
+  } else {
+    await AiBatch.updateOne({ _id: id }, { $set: input }, { upsert: true });
+  }
   await audit(req, 'ai.batch.update', { type: 'Batch', id }, input);
   res.status(204).end();
 });

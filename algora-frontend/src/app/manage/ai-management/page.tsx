@@ -37,7 +37,7 @@ interface Usage {
   workloads: (Metric & { _id: Workload })[]; daily: (Metric & { _id: { day: string; workload: Workload } })[];
   actions: (Metric & { _id: string })[]; problems: (Metric & { _id: string })[]; history: ProviderMetric[]; providers: ProviderMetric[];
 }
-interface Batch { _id: string; name: string; controls?: { enabled: boolean; daily?: number; courseIds: string[]; startsAt?: string; endsAt?: string; startMinute?: number; endMinute?: number } }
+interface Batch { _id: string; name: string; controls?: { enabled?: boolean; daily?: number; courseIds: string[]; startsAt?: string; endsAt?: string; startMinute?: number; endMinute?: number } }
 const date = (value?: string) => value ? new Date(value).toLocaleString() : 'Unavailable';
 const num = (value?: number) => value?.toLocaleString() ?? '0';
 
@@ -420,7 +420,8 @@ function BatchForm({ batch, refresh }: { batch: Batch; refresh: () => Promise<vo
     setBusy(true);
     try {
       await api(`${base}/batches/${batch._id}`, { method: 'PUT', body: {
-        enabled: !!f.get('enabled'), daily: text('daily') ? Number(text('daily')) : null, courseIds: text('courseIds').split(/[\s,]+/).filter(Boolean),
+        enabled: text('policy') === 'inherit' ? null : text('policy') === 'enable',
+        daily: text('daily') ? Number(text('daily')) : null, courseIds: text('courseIds').split(/[\s,]+/).filter(Boolean),
         startsAt: text('startsAt') ? `${text('startsAt')}T00:00:00+05:30` : null,
         endsAt: text('endsAt') ? `${text('endsAt')}T00:00:00+05:30` : null, startMinute: minutes('start'), endMinute: minutes('end'),
       } });
@@ -431,7 +432,12 @@ function BatchForm({ batch, refresh }: { batch: Batch; refresh: () => Promise<vo
   }
   const indiaDate = (value?: string) => value ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value)) : '';
   return <form onSubmit={save} className="mt-4 space-y-3">
-    <Checkbox name="enabled" label="Enable student assistance for this batch" defaultChecked={c?.enabled} />
+    <Select name="policy" label="Batch AI policy" defaultValue={c?.enabled === true ? 'enable' : c?.enabled === false ? 'disable' : 'inherit'}
+      options={[
+        { value: 'inherit', label: 'Inherit global Student AI setting' },
+        { value: 'enable', label: 'Explicitly enable for this batch' },
+        { value: 'disable', label: 'Explicitly disable for this batch' },
+      ]} />
     <div className="grid gap-3 sm:grid-cols-2">
       <Input name="daily" label="Daily allowance override" type="number" min={1} max={1000} defaultValue={c?.daily} />
       <Input name="courseIds" label="Allowed course IDs (optional)" defaultValue={c?.courseIds.join(', ')} />

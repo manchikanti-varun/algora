@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { AuditLog, Batch, BatchChapterAccess, BatchCourse, CatalogProblem, Chapter, Course, Enrollment, Problem, TrainerBatchAssignment, User } from '../src/models';
 import { AiBatch, AiCounter, AiJob, AiProvider, AiSettings, AiUsage } from '../src/models/ai';
 import { processPreparationTask } from '../src/modules/ai/preparation';
+import { batchAiAvailable, studentAiAvailability } from '../src/modules/ai/context';
 import { fallback, safeGuidance } from '../src/modules/ai/policy';
 import { completion, encrypt } from '../src/modules/ai/runtime';
 import { groqFixture, groqResponse, mentorAnswer } from './ai-fixtures';
@@ -90,6 +91,20 @@ async function configure(actor: Awaited<ReturnType<typeof login>>, workload: typ
 }
 
 describe('AI integration', () => {
+  it('inherits missing batch AI policy and distinguishes explicit batch overrides', () => {
+    expect(batchAiAvailable(null, 'course')).toBe(true);
+    expect(batchAiAvailable({}, 'course')).toBe(true);
+    expect(batchAiAvailable({ enabled: false }, 'course')).toBe(false);
+    expect(batchAiAvailable({ enabled: true, courseIds: ['course'] }, 'course')).toBe(true);
+    expect(batchAiAvailable({ enabled: true, courseIds: ['other'] }, 'course')).toBe(false);
+    expect(studentAiAvailability({
+      globalEnabled: true, batchEnabled: true, chapterVisible: true, chapterEnabled: true, contextActive: true, providerReady: true, remaining: 4,
+    })).toEqual({ allowed: true, reason: 'AVAILABLE' });
+    expect(studentAiAvailability({
+      globalEnabled: true, batchEnabled: true, chapterVisible: true, chapterEnabled: false, contextActive: true, providerReady: true, remaining: 4,
+    })).toEqual({ allowed: false, reason: 'CHAPTER_DISABLED' });
+  });
+
   it('encrypts credentials, limits slots, independently activates workloads, and masks API responses', async () => {
     const admin = await login(tok('admin-ai', 'admin@example.com'));
     const first = await configure(admin, studentWork, 'a');

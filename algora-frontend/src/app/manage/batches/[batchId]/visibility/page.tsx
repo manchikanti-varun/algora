@@ -73,7 +73,7 @@ export default function Page() {
                       {editable && <Switch checked={c.studentAiEnabled} disabled={!!busy} label={`Ask AI for ${c.title}`}
                         onChange={(enabled) => void run(`ai-${c.chapterId}`, () => api(`/batches/${batch._id}/courses/${bc.course._id}/chapters/${c.chapterId}/student-ai`,
                           { method: 'PUT', body: { enabled } }), enabled ? 'Ask AI enabled' : 'Ask AI disabled')} />}
-                      <span className="text-xs text-fg-muted">Ask AI {c.studentAiEnabled ? 'on' : 'off'} · {availabilityLabels[c.aiAvailability]}</span>
+                      <span className="text-xs text-fg-muted"><span className="font-medium text-fg">Effective status:</span> {availabilityLabels[c.aiAvailability]}</span>
                     </div>
                   </li>
                 ))}
