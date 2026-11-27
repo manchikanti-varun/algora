@@ -5,6 +5,8 @@ export interface DiffCount { solved: number; total: number }
 export interface ChapterProblem { slug: string; title: string; url?: string; difficulty: Diff; verified: boolean }
 export interface ChapterProgress { chapterId: string; title: string; order: number; total: number; solved: number; completionPct: number | null; difficulty: Record<Diff, DiffCount>; problems: ChapterProblem[] }
 export interface Dashboard {
+  previousPractice?: { title: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; course: string; chapter: string;
+    chapterId: string; problemId: string; batchCourseId: string; url: string; allowed: boolean } | null;
   contexts: Ctx[];
   selected: { batchCourseId: string; batchName: string; courseTitle: string } | null;
   sync: { status: string; lastSuccessAt: string | null; possibleGap: boolean; note: string };

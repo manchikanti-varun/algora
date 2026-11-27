@@ -30,7 +30,7 @@ export default function Page() {
         {isSuper && <Button onClick={() => setOpen('import')}>Import metadata</Button>}
         {isSuper && <Menu label="More library actions" items={[{ label: 'Import history', onSelect: () => setOpen('history') }]} />}
       </>} />
-    <Card flush><CatalogBrowser key={version} /></Card>
+    <Card flush><CatalogBrowser key={version} preparation={isSuper} /></Card>
     {open === 'import' && <CatalogImport onClose={() => setOpen(null)} onImport={changed} />}
     {open === 'history' && <ImportHistory onClose={() => setOpen(null)} />}
     {open === 'manual' && <ManualEntry onClose={() => setOpen(null)} onSave={() => {

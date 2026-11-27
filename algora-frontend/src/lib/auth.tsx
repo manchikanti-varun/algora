@@ -1,5 +1,6 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { clearAiDrafts } from './aiDrafts';
 import { api, ApiError, setCsrfToken, setUnauthorizedHandler } from './api';
 
 export type Role = 'SUPER_ADMIN' | 'TRAINER' | 'STUDENT';
@@ -29,7 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((e) => { if (!(e instanceof ApiError && e.status === 401)) console.error(e); })
       .finally(() => setLoading(false));
     // Any 401 later (expired, suspended or revoked session) signs the user out of the UI.
-    setUnauthorizedHandler(() => { setCsrfToken(null); setUser((u) => { if (u) setExpired(true); return null; }); });
+    setUnauthorizedHandler(() => { clearAiDrafts(); setCsrfToken(null); setUser((u) => { if (u) setExpired(true); return null; }); });
     const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('algora-session');
     sessionEvents.current = channel;
     // The session cookie is shared across tabs. Reload to discard the previous account's state and rehydrate.
@@ -45,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setSession = useCallback((u: SessionUser, t: string) => {
+    clearAiDrafts();
     setCsrfToken(t);
     setExpired(false);
     setUser(u);
@@ -52,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
   const logout = useCallback(async () => {
     await api('/auth/logout', { method: 'POST' });
+    clearAiDrafts();
     setCsrfToken(null);
     setUser(null);
     sessionEvents.current?.postMessage('changed');

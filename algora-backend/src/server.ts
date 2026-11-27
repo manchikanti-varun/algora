@@ -5,6 +5,7 @@ import { env } from './config/env';
 import { initializeLeetcodeIntegration } from './modules/leetcode/integration-startup';
 import { syncAllIndexes } from './models';
 import { startLeetcodeSyncJob } from './jobs/leetcode-sync.job';
+import { startPreparationWorker } from './modules/ai/preparation';
 import { reconcileSuperAdmin } from './modules/auth/superAdmin';
 
 process.on('unhandledRejection', (reason) => { log.error('unhandled promise rejection', { error: reason }); });
@@ -23,6 +24,7 @@ async function main() {
   server.keepAliveTimeout = 65_000; // above common proxy idle timeouts
   server.headersTimeout = 66_000;
   const stopSync = startLeetcodeSyncJob();
+  const stopPreparation = startPreparationWorker();
   readiness.startupDone = true;
   log.info('startup complete', { syncRequested: env.LEETCODE_SYNC_ENABLED, schedulerRequested: env.LEETCODE_SCHEDULER_ENABLED });
   let stopping = false;
@@ -30,7 +32,7 @@ async function main() {
     if (stopping) return; stopping = true;
     log.info('shutdown: draining', { signal: sig });
     // No new claims; in-flight syncs finish. Anything left running has a job lease that expires and is recovered by another instance.
-    void stopSync().finally(() => server.close(() => mongoose.disconnect().finally(() => process.exit(0))));
+    void Promise.all([stopSync(), stopPreparation()]).finally(() => server.close(() => mongoose.disconnect().finally(() => process.exit(0))));
     setTimeout(() => process.exit(1), 15_000).unref(); // hard stop if connections do not drain
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -200,7 +200,7 @@ reportsRouter.get('/export', async (req, res) => {
 });
 
 /** XLSX mirrors the CSV exactly, including formula-injection escaping. */
-async function toXlsx(header: string[], data: unknown[][], name: string) {
+export async function toXlsx(header: string[], data: unknown[][], name: string) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(name.slice(0, 30));
   sheet.addRow(header.map((h) => String(h)));

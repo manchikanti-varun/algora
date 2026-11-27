@@ -182,7 +182,13 @@ try {
       await dlg.getByLabel('Difficulty').selectOption(d);
       return dlg;
     };
-    const close = () => p.locator('dialog[open]').getByRole('button', { name: 'Close', exact: true }).first().click();
+    const close = async () => {
+      // Manual saves keep this dialog open and ignore dismissal until the form resets.
+      const dialog = p.locator('dialog[open]');
+      await dialog.getByLabel('Title', { exact: true }).and(p.locator('input[value=""]')).waitFor();
+      await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
+      await dialog.waitFor({ state: 'detached' });
+    };
     // dlg below is the manual form; Save is its submit button
     let dlg = await addProblem('Arrays', 'https://leetcode.com/problems/Two-Sum/description/', 'Two Sum', 'EASY');
     await dlg.getByText('two-sum', { exact: true }).waitFor(); // canonical slug preview
@@ -706,6 +712,175 @@ try {
       await page.setViewportSize({ width: 1360, height: 900 });
     }
   });
+  if (process.env.E2E_AI === '1') {
+    let chapterAccessUrl;
+    await step('AI Management configures two independent workloads through the production UI', async () => {
+      const p = admin.page;
+      await p.goto(`${FE}/manage/ai-management`);
+      await p.getByRole('heading', { name: 'AI Management', level: 1 }).waitFor();
+      for (const [view, config, limits] of [['Student AI configurations', 'Student fixture', 'Student limits'], ['Staff AI configuration', 'Staff fixture', 'Staff limits']]) {
+        await p.getByRole('button', { name: view, exact: true }).click();
+        await p.getByRole('button', { name: 'Add configuration' }).click();
+        await p.getByLabel('Display name').fill(config);
+        await p.getByLabel('Model ID').fill('fixture-model');
+        await p.getByLabel('Shared quota group').fill(config.toLowerCase().replace(' ', '-'));
+        await p.getByLabel('API key', { exact: true }).fill(`gsk_fixture_${config.startsWith('Staff') ? 's'.repeat(25) : 'm'.repeat(25)}`);
+        await p.getByRole('button', { name: 'Save configuration' }).click();
+        const card = p.locator('section').filter({ has: p.getByRole('heading', { name: config, exact: true }) });
+        await card.getByRole('button', { name: 'Activate', exact: true }).click();
+        await card.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
+        await card.getByRole('button', { name: 'Test connection' }).click();
+        await card.getByText(/Connection SUCCESS/).waitFor();
+        await p.getByRole('button', { name: limits, exact: true }).click();
+        await p.getByRole('checkbox', { name: 'Enable workload' }).check();
+        await p.getByRole('spinbutton', { name: 'Personal requests per minute' }).fill('10');
+        await p.getByRole('button', { name: 'Save settings' }).click();
+        await p.getByText('AI settings saved', { exact: true }).waitFor();
+      }
+      await p.getByRole('button', { name: 'Batch controls', exact: true }).click();
+      await p.getByLabel('Batch', { exact: true }).selectOption({ label: 'JNTU Bootcamp' });
+      await p.getByRole('checkbox', { name: 'Enable student assistance for this batch' }).check();
+      await p.getByRole('button', { name: 'Save batch controls' }).click();
+      await p.getByText('Batch controls saved', { exact: true }).waitFor();
+      const catalogStatus = await p.evaluate(async () => {
+        const { csrfToken } = await (await fetch('/api/v1/auth/me')).json();
+        const res = await fetch('/api/v1/problem-library', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+          body: JSON.stringify({ title: 'Two Sum', url: 'https://leetcode.com/problems/two-sum/', difficulty: 'EASY', problemNumber: 1, topics: ['Array'] }),
+        });
+        return res.status;
+      });
+      assert(catalogStatus === 201, `catalog setup returned ${catalogStatus}`);
+      const batchId = await p.evaluate(async () => (await (await fetch('/api/v1/batches?q=JNTU')).json()).items.find((batch) => batch.name === 'JNTU Bootcamp')._id);
+      chapterAccessUrl = `${FE}/manage/batches/${batchId}/visibility`;
+      await p.goto(chapterAccessUrl);
+      const ai = p.getByRole('switch', { name: 'Ask AI for Arrays', exact: true });
+      await ai.waitFor();
+      assert(await ai.getAttribute('aria-checked') === 'false', 'chapter AI must start disabled');
+      await ai.click();
+      await p.getByText('Ask AI enabled', { exact: true }).waitFor();
+      assert(await p.getByRole('switch', { name: 'Arrays visible to students' }).getAttribute('aria-checked') === 'true', 'visibility changed');
+    });
+    await step('Super Admin tests a second provider, switches Student primary and saves an automatic routing policy', async () => {
+      const p = admin.page;
+      await p.goto(`${FE}/manage/ai-management`);
+      await p.getByRole('button', { name: 'Student AI configurations', exact: true }).click();
+      await p.getByRole('button', { name: 'Add configuration' }).click();
+      await p.getByLabel('Display name').fill('OpenAI fixture');
+      await p.getByLabel('Provider', { exact: true }).selectOption({ label: 'OpenAI' });
+      await p.getByLabel('Model ID').fill('fixture-openai-model');
+      await p.getByLabel('Shared quota group').fill('openai-fixture');
+      await p.getByLabel('Confirmed quota scope').selectOption('PROJECT');
+      await p.getByRole('checkbox', { name: /verified independent quota/ }).check();
+      await p.getByLabel('API key', { exact: true }).fill(`fixture_key_${'o'.repeat(22)}`);
+      await p.getByRole('button', { name: 'Save and test connection' }).click();
+      const provider = p.locator('section').filter({ has: p.getByRole('heading', { name: 'OpenAI fixture', exact: true }) });
+      await provider.getByText(/Connection SUCCESS/).waitFor();
+      await provider.getByRole('button', { name: 'Activate', exact: true }).click();
+      await provider.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
+      await p.getByLabel('Switching mode').selectOption('AUTO');
+      await p.getByRole('button', { name: 'Save routing policy' }).click();
+      await p.getByText('Provider policy saved', { exact: true }).waitFor();
+      await provider.getByRole('button', { name: 'Edit configuration' }).click();
+      await p.getByRole('button', { name: 'Discover saved provider models' }).click();
+      await p.locator('datalist option[value="fixture-openai-model"]').waitFor({ state: 'attached' });
+      await p.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await p.getByRole('button', { name: 'Failover history' }).click();
+      await p.getByText(/OpenAI fixture ·/).first().waitFor();
+    });
+    await step('Staff prepares a problem, reviews and publishes a separate student hint', async () => {
+      const p = admin.page;
+      await p.goto(`${FE}/manage/ai-preparation`);
+      await p.getByLabel('Course', { exact: true }).selectOption({ label: 'Java & DSA' });
+      await p.getByLabel('Chapter', { exact: true }).selectOption({ label: 'Arrays' });
+      const problem = p.locator('li').filter({ has: p.getByText(/Two Sum$/, { exact: false }) }).filter({ has: p.getByRole('button', { name: 'View preparation', exact: true }) }).first();
+      await problem.getByRole('button', { name: 'Prepare', exact: true }).click();
+      await p.getByText('Generation queued', { exact: true }).waitFor();
+      await problem.getByRole('button', { name: 'View preparation', exact: true }).click();
+      for (let attempt = 0; attempt < 12 && !(await p.getByRole('heading', { name: 'Complexity comparison' }).count()); attempt++) {
+        await p.waitForTimeout(500);
+        await p.getByRole('button', { name: 'Reload material' }).click();
+      }
+      await p.getByRole('heading', { name: 'Complexity comparison' }).waitFor();
+      await p.getByRole('heading', { name: 'Anticipated mistakes' }).waitFor();
+      await p.getByText('Complement map', { exact: true }).first().waitFor();
+      await p.getByRole('button', { name: 'Mark reviewed', exact: true }).click();
+      await p.getByText('Preparation saved', { exact: true }).waitFor();
+      await p.getByRole('checkbox', { name: 'I reviewed this hint for solution disclosure' }).first().check();
+      await p.getByRole('button', { name: 'Publish hint', exact: true }).first().click();
+      await p.getByText('Hint saved', { exact: true }).waitFor();
+      await p.getByRole('button', { name: 'Ask a follow-up', exact: true }).click();
+      await p.getByLabel('Technical or teaching question').fill('Why must the indices be distinct?');
+      await p.getByRole('checkbox', { name: /sent to configured AI providers/ }).check();
+      await p.getByRole('button', { name: 'Ask a follow-up', exact: true }).last().click();
+      await p.getByText('Use two distinct indices and derive the number of candidate pairs.').waitFor();
+      await trainer.page.goto(`${FE}/manage/ai-preparation`);
+      await trainer.page.getByLabel('Course', { exact: true }).selectOption({ label: 'Java & DSA' });
+      await trainer.page.getByLabel('Chapter', { exact: true }).selectOption({ label: 'Strings' });
+      await trainer.page.getByText('Valid Anagram', { exact: false }).first().waitFor();
+      assert(await trainer.page.evaluate(async () => (await fetch('/api/v1/ai/management/providers')).status) === 403, 'trainer can access credentials');
+    });
+    await step('Student mentor preserves progress, drafts, conversation history and practice link', async () => {
+      const p = student.page;
+      await p.goto(`${FE}/student/courses`);
+      await p.getByRole('link', { name: /Java & DSA/ }).first().click();
+      await p.getByRole('link', { name: /Arrays/ }).first().click();
+      const problem = p.locator('main li').filter({ has: p.getByRole('link', { name: /Solve Two Sum/ }) });
+      const practiceSaved = p.waitForResponse((res) => res.url().endsWith('/api/v1/student/ai/practice') && res.status() === 204);
+      await p.context().route('https://leetcode.com/**', (route) => route.fulfill({ status: 200, body: 'External practice fixture' }));
+      const opened = p.waitForEvent('popup');
+      await problem.getByRole('link', { name: /Solve Two Sum/ }).click();
+      const external = await opened;
+      await external.waitForURL('https://leetcode.com/problems/two-sum/');
+      await practiceSaved;
+      await external.close();
+      await problem.getByRole('button', { name: 'Ask AI', exact: true }).click();
+      const dialog = p.getByRole('dialog', { name: 'AI Coding Mentor' });
+      await dialog.getByRole('heading', { name: /Two Sum/ }).waitFor();
+      const consent = dialog.getByRole('checkbox', { name: /content may be sent to configured AI providers/ });
+      await consent.check();
+      await dialog.getByRole('button', { name: 'Request understanding hint' }).click();
+      await dialog.getByText('Consider a one-element example within the requirements.').waitFor();
+      await dialog.getByRole('button', { name: 'Request observation hint' }).click();
+      await dialog.getByText('8 assistance requests remaining today').waitFor();
+      await dialog.getByLabel('Assistance mode').selectOption('Compilation error');
+      await dialog.getByLabel('Your attempted code').fill('int value = arr[arr.length];');
+      await dialog.getByLabel('Error message or observed behavior').fill('Index error');
+      await dialog.getByRole('button', { name: 'Ask for guidance' }).click();
+      await dialog.getByText('7 assistance requests remaining today').waitFor();
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await p.setViewportSize(MOBILE);
+      await p.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+      await problem.getByRole('button', { name: 'Ask AI', exact: true }).click();
+      await noOverflow(p, 'student mentor on mobile in dark theme');
+      assert(await dialog.getByLabel('Your attempted code').inputValue() === 'int value = arr[arr.length];', 'draft did not survive closing');
+      await dialog.getByText('7 assistance requests remaining today').waitFor();
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+      await p.setViewportSize({ width: 1360, height: 900 });
+      await p.goto(`${FE}/student/dashboard`);
+      await p.getByRole('link', { name: 'Continue on LeetCode', exact: true }).waitFor();
+      assert(await p.evaluate(async () => (await fetch('/api/v1/ai/preparation/courses')).status) === 403, 'student can access staff preparation');
+    });
+    await step('Chapter AI bulk disable hides Ask AI while Solve and read-only history remain available', async () => {
+      const a = admin.page;
+      await a.goto(chapterAccessUrl);
+      await a.getByRole('button', { name: 'Disable Ask AI for all', exact: true }).click();
+      await a.getByText('Ask AI disabled for all chapters', { exact: true }).waitFor();
+      const p = student.page;
+      await p.goto(`${FE}/student/courses`);
+      await p.getByRole('link', { name: /Java & DSA/ }).first().click();
+      await p.getByRole('link', { name: /Arrays/ }).first().click();
+      const problem = p.locator('main li').filter({ has: p.getByRole('link', { name: /Solve Two Sum/ }) });
+      await problem.getByRole('link', { name: /Solve Two Sum/ }).waitFor();
+      assert(!(await problem.getByRole('button', { name: 'Ask AI', exact: true }).count()), 'Ask AI was visible after disable');
+      await problem.getByRole('button', { name: 'AI history' }).click();
+      const dialog = p.getByRole('dialog', { name: 'AI Coding Mentor' });
+      await dialog.getByText('Consider a one-element example within the requirements.').waitFor();
+      assert(!(await dialog.getByRole('button', { name: /hint|ask for guidance/i }).count()), 'history allowed new guidance');
+      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    });
+  }
+
   await step('Trainer signs out and back in after a management mutation', async () => {
     const p = trainer.page;
     await p.goto(`${FE}/manage/dashboard`);

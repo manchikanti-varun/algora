@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import {
   Activity, ArrowUpRight, BookOpen, Inbox, ChartNoAxesCombined, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
-  CalendarCheck2, ClipboardCheck, PanelLeftClose, PanelLeftOpen, QrCode, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
+  CalendarCheck2, ClipboardCheck, PanelLeftClose, PanelLeftOpen, QrCode, School, Sparkles, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -262,6 +262,8 @@ export const MANAGE_NAV: NavSection[] = [
     { href: '/manage/leaderboards', label: 'Leaderboards', icon: Trophy },
   ] },
   { section: 'Settings', items: [
+    { href: '/manage/ai-preparation', label: 'AI Preparation', icon: Sparkles },
+    { href: '/manage/ai-management', label: 'AI Management', icon: SlidersHorizontal, roles: ['SUPER_ADMIN'] },
     { href: '/manage/settings', label: 'Scoring', icon: SlidersHorizontal, roles: ['SUPER_ADMIN'] },
     { href: '/manage/integration', label: 'Integrations', icon: Activity, roles: ['SUPER_ADMIN'] },
     { href: '/manage/audit', label: 'Audit Logs', icon: History, roles: ['SUPER_ADMIN'] },

@@ -24,6 +24,9 @@ import { auditRouter, collegesRouter, pendingRouter, studentsRouter } from './mo
 import { manageRequestsRouter } from './modules/student/requests';
 import { studentRouter } from './modules/student/student.routes';
 import { trainerRequestsRouter, trainersRouter } from './modules/trainers/trainers.routes';
+import { adminAi } from './modules/ai/admin.routes';
+import { staffAi } from './modules/ai/staff.routes';
+import { requireAuth } from './middleware/auth';
 import { attendanceRouter } from './modules/attendance/attendance.routes';
 
 export function createApp() {
@@ -91,6 +94,11 @@ export function createApp() {
   api.use('/student-requests', manageRequestsRouter);
   api.use('/students', studentsRouter);
   api.use('/attendance', attendanceRouter);
+  const ai = express.Router();
+  ai.use(requireAuth, (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+  ai.use('/preparation', staffAi);
+  ai.use('/management', adminAi);
+  api.use('/ai', ai);
   api.use('/audit-logs', auditRouter);
   app.use('/api/v1', api);
 

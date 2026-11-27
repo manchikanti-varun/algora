@@ -3,6 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
+import { groqFixture, groqResponse } from './ai-fixtures';
 
 (OAuth2Client.prototype as any).verifyIdToken = async ({ idToken }: { idToken: string }) => {
   const [p, sub, email, name] = idToken.split('|');
@@ -17,6 +18,16 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
     SUPER_ADMIN_EMAIL: 'admin@example.com', SESSION_SECRET: randomBytes(32).toString('hex'), FRONTEND_URL: process.env.E2E_FRONTEND_URL ?? 'http://localhost:3000',
     ALLOW_LOCAL_MONGODB: 'true',
   });
+  if (process.env.E2E_AI === '1') {
+    process.env.AI_CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('hex');
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (url === 'https://api.openai.com/v1/models') return Response.json({ data: [{ id: 'fixture-openai-model' }] });
+      if (url !== 'https://api.groq.com/openai/v1/chat/completions' && url !== 'https://api.openai.com/v1/chat/completions') return original(url, init);
+      const body = JSON.parse(String(init?.body));
+      return groqResponse(groqFixture(body.messages[0].content, JSON.parse(body.messages[1].content)));
+    };
+  }
   if (process.env.E2E_MOCK === '1') {
     // TEST ONLY: mock LeetCode provider controlled through a separate local port (never part of the app).
     Object.assign(process.env, { LEETCODE_SYNC_ENABLED: 'true', LEETCODE_MOCK_ENABLED: 'true', LEETCODE_PROVIDER_PRIORITY: 'mock', LEETCODE_STUDENT_COOLDOWN_SEC: '10', LEETCODE_SCHEDULER_ENABLED: 'false' });

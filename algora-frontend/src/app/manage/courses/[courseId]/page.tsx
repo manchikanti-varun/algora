@@ -2,7 +2,7 @@
 import { Archive, ChevronDown, ChevronUp, Download, ExternalLink, ListChecks, Pencil, Plus } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { Badge, Button, Card, Checkbox, DifficultyBadge, EmptyState, ErrorState, IconButton, Input, Menu, Modal, Notice, PageHeader, PageSkeleton, Select, StatusBadge, Tabs, Textarea, useConfirm, useToast } from '@/components/ui';
+import { Badge, Button, ButtonLink, Card, Checkbox, DifficultyBadge, EmptyState, ErrorState, IconButton, Input, Menu, Modal, Notice, PageHeader, PageSkeleton, Select, StatusBadge, Tabs, Textarea, useConfirm, useToast } from '@/components/ui';
 import { BulkProblemLookup, CatalogBrowser, type CatalogEntry } from '@/components/manage/ProblemLibrary';
 import { useApi } from '@/hooks/useApi';
 import { useTrackRecent } from '@/hooks/useRecent';
@@ -122,6 +122,7 @@ export default function Page() {
                   actions={can && (archived
                     ? <Button size="sm" variant="secondary" onClick={() => void run(() => api(`/chapters/${ch._id}`, { method: 'PATCH', body: { status: 'ACTIVE' } }), 'Chapter restored')}>Restore</Button>
                     : <>
+                      <ButtonLink size="sm" variant="ghost" href={`/manage/ai-preparation?courseId=${course._id}&chapterId=${ch._id}`}>Prepare chapter</ButtonLink>
                       <Button size="sm" variant="secondary" icon={<Plus size={15} aria-hidden />} onClick={() => setLibraryChapterId(ch._id)}>Add problems</Button>
                       <IconButton label="Move chapter up" icon={<ChevronUp size={16} aria-hidden />} disabled={idx === 0 || reordering} onClick={() => moveChapter(ch, -1)} />
                       <IconButton label="Move chapter down" icon={<ChevronDown size={16} aria-hidden />} disabled={idx === activeChapters.length - 1 || reordering} onClick={() => moveChapter(ch, 1)} />

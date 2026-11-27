@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { notFound, parse } from '../../lib/errors';
 import { objectId } from '../../lib/validate';
 import { requireAuth, requireRole } from '../../middleware/auth';
-import { BatchChapterAccess, Chapter, Problem } from '../../models';
+import { BatchChapterAccess, CatalogProblem, Chapter, Problem } from '../../models';
 import { studentContexts } from './contexts';
 import { ownRequestsRouter, submitLinkRequest, submitProfileRequest } from './requests';
 import { objectId as _oid, pagination as _pg } from '../../lib/validate';
@@ -15,12 +15,17 @@ import { buildDashboard, verifiedHistory } from '../progress/dashboard';
 import { linkView, withdrawConsent } from '../leetcode/links.service';
 import { countableEvidence, purgeStudentLeetcodeData } from '../leetcode/evidence.repository';
 import { batchCourseBoard, cachedBoard, clearBoardCache, paginate, scopeProblems, visibleContent } from '../progress/progress.service';
+import { studentAi } from '../ai/student.routes';
+import { batchAiAvailable, practice } from '../ai/context';
+import { settings } from '../ai/runtime';
+import { AiBatch, AiConversation } from '../../models/ai';
 import { studentAttendanceData } from '../attendance/attendance.service';
 
 
 export const studentRouter = Router();
 studentRouter.use(requireAuth, requireRole('STUDENT'));
 studentRouter.use('/requests', ownRequestsRouter);
+studentRouter.use('/ai', studentAi);
 
 /** Visible chapter metadata only; problems are returned from the chapter endpoint and only when visible. */
 studentRouter.get('/courses', async (req, res) => {
@@ -51,26 +56,36 @@ studentRouter.get('/chapters/:chapterId', async (req, res) => {
   const { batchCourseId } = parse(z.object({ batchCourseId: objectId }), req.query);
   const ctx = (await studentContexts(req.user!._id)).find((c) => String(c.bc._id) === batchCourseId);
   const chapter = ctx && (await Chapter.findOne({ _id: chapterId, courseId: ctx.bc.courseId, status: 'ACTIVE' }).lean());
-  const visible = chapter && (await BatchChapterAccess.exists({ batchCourseId, chapterId, isVisible: true }));
+  const visible = chapter && (await BatchChapterAccess.findOne({ batchCourseId, chapterId, isVisible: true }, 'studentAiEnabled').lean());
   // Same 404 for "does not exist", "not enrolled" and "hidden": hidden content is indistinguishable from absent.
   if (!ctx || !chapter || !visible) throw notFound('Chapter not found');
-  const [problems, evidence, scoring] = await Promise.all([
+  res.set('Cache-Control', 'no-store');
+  const [problems, evidence, scoring, aiEnabled, history] = await Promise.all([
     Problem.find({ chapterId, status: 'ACTIVE' }, 'title url slug difficulty order catalogId')
       .sort({ order: 1, _id: 1 }).populate<{ catalogId?: { problemNumber?: number; topics: string[] } | null }>('catalogId', 'problemNumber topics').lean(),
     countableEvidence(req.user!._id),
     getScoring(),
+    visible.studentAiEnabled === true ? Promise.all([
+      settings('STUDENT_MENTOR'), AiBatch.findById(String(ctx.bc.batchId)).lean(),
+    ]).then(([mentor, controls]) => mentor.enabled && batchAiAvailable(controls, String(ctx.bc.courseId))) : false,
+    AiConversation.distinct('problemId', { workload: 'STUDENT_MENTOR', userId: String(req.user!._id), batchCourseId, chapterId, expiresAt: { $gt: new Date() } }),
   ]);
+  const historyIds = new Set(history);
+  const unlinked = problems.filter((problem) => !problem.catalogId).map((problem) => problem.slug);
+  const catalogMatches = unlinked.length ? await CatalogProblem.find({ platform: 'leetcode', slug: { $in: unlinked } }, 'slug problemNumber topics').lean() : [];
+  const catalogBySlug = new Map(catalogMatches.map((item) => [item.slug, item]));
   const ev = new Map(evidence.map((e) => [e.slug, e]));
   // Navigation only between VISIBLE chapters.
   const visibleIds = (await BatchChapterAccess.find({ batchCourseId, isVisible: true }, 'chapterId').lean()).map((v) => v.chapterId);
   const siblings = await Chapter.find({ _id: { $in: visibleIds }, courseId: ctx.bc.courseId, status: 'ACTIVE' }, 'title order').sort({ order: 1 }).lean();
   const idx = siblings.findIndex((c) => String(c._id) === chapterId);
   res.json({
-    chapter: { _id: chapter._id, title: chapter.title, description: chapter.description },
+    chapter: { _id: chapter._id, title: chapter.title, description: chapter.description, studentAiEnabled: visible.studentAiEnabled === true, aiEnabled },
     course: { _id: ctx.course._id, title: ctx.course.title }, batchName: ctx.batchName,
     problems: problems.map(({ catalogId, ...p }) => {
       const e = ev.get(p.slug);
-      return { ...p, problemNumber: catalogId?.problemNumber ?? null, topics: catalogId?.topics ?? [], points: scoring[p.difficulty], verified: !!e, evidence: e ? { firstVerifiedAt: e.firstVerifiedAt ?? null, lastVerifiedAt: e.lastVerifiedAt ?? null, earliestObservedSolvedAt: e.earliestObservedSolvedAt ?? null, latestObservedSolvedAt: e.latestObservedSolvedAt ?? null } : null };
+      const metadata = catalogId ?? catalogBySlug.get(p.slug);
+      return { ...p, catalogEligible: !!metadata, hasAiHistory: historyIds.has(String(p._id)), problemNumber: metadata?.problemNumber ?? null, topics: metadata?.topics ?? [], points: scoring[p.difficulty], verified: !!e, evidence: e ? { firstVerifiedAt: e.firstVerifiedAt ?? null, lastVerifiedAt: e.lastVerifiedAt ?? null, earliestObservedSolvedAt: e.earliestObservedSolvedAt ?? null, latestObservedSolvedAt: e.latestObservedSolvedAt ?? null } : null };
     }),
     prev: idx > 0 ? { _id: siblings[idx - 1]._id, title: siblings[idx - 1].title } : null,
     next: idx >= 0 && idx < siblings.length - 1 ? { _id: siblings[idx + 1]._id, title: siblings[idx + 1].title } : null,
@@ -87,9 +102,9 @@ studentRouter.get('/dashboard', async (req, res) => {
   // Throttled activity marker used by the sync scheduler. Does not trigger a sync.
   const last = req.user!.sync?.lastActiveAt;
   if (!last || Date.now() - last.getTime() > 5 * 60_000) await User.updateOne({ _id: uid }, { $set: { 'sync.lastActiveAt': new Date() } });
-  const d = await buildDashboard(uid, batchCourseId);
+  const [d, previousPractice] = await Promise.all([buildDashboard(uid, batchCourseId), practice(req.user!)]);
   if (batchCourseId && !d.selected) throw notFound('Context not found');
-  res.json(d);
+  res.json({ ...d, previousPractice });
 });
 
 studentRouter.get('/progress', async (req, res) => {

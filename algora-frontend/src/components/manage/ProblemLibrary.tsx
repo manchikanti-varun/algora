@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { SlidersHorizontal } from 'lucide-react';
-import { Button, type Column, DataTable, DifficultyBadge, EmptyState, ErrorState, FilterChips, InlineSelect, Input, Notice, Pagination, Popover, SearchInput, Select, TableSkeleton, Textarea } from '@/components/ui';
+import { Button, ButtonLink, type Column, DataTable, DifficultyBadge, EmptyState, ErrorState, FilterChips, InlineSelect, Input, Notice, Pagination, Popover, SearchInput, Select, TableSkeleton, Textarea } from '@/components/ui';
 import { useApi, useDebounced } from '@/hooks/useApi';
 import { api, errorMessage, qs } from '@/lib/api';
 
@@ -20,7 +20,8 @@ export type CatalogEntry = {
 const DIFFICULTIES = [{ value: '', label: 'All difficulties' }, { value: 'EASY', label: 'Easy' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'HARD', label: 'Hard' }];
 const AVAILABILITY = [{ value: '', label: 'All availability' }, { value: 'false', label: 'Free' }, { value: 'true', label: 'Premium' }];
 const PAGE_SIZE = 15;
-export function CatalogBrowser({ assigned = [], selected, onSelect, onAdd }: {
+export function CatalogBrowser({ assigned = [], selected, onSelect, onAdd, preparation }: {
+  preparation?: boolean;
   assigned?: string[];
   selected?: CatalogEntry[];
   onSelect?: (entries: CatalogEntry[]) => void;
@@ -77,6 +78,8 @@ export function CatalogBrowser({ assigned = [], selected, onSelect, onAdd }: {
     { key: 'd', header: 'Difficulty', cell: (entry) => <DifficultyBadge d={entry.difficulty} /> },
     { key: 'topics', header: 'Topics', optional: true, cell: (entry) => <span className="block max-w-xs truncate text-fg-muted">{entry.topics.join(', ') || '—'}</span> },
     { key: 'a', header: 'Availability', optional: true, cell: (entry) => entry.isPremium === undefined ? 'Unknown' : entry.isPremium ? 'Premium' : 'Free' },
+    ...(preparation ? [{ key: 'prep', header: 'Preparation', cell: (entry: CatalogEntry) => <ButtonLink size="sm" variant="ghost"
+      href={`/manage/ai-preparation?library=${entry._id}`}>AI Preparation</ButtonLink> }] : []),
   ];
   return <div ref={rootRef}>
     <DataTable rows={visible} rowKey={(entry) => entry._id} columns={columns} caption="Problem library"

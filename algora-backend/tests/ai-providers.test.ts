@@ -1,0 +1,81 @@
+import { describe, expect, it } from 'vitest';
+import { buildRequest, customEndpoints, normalize, providerBase, providerFailure, providerNames, publicAddress, quotaHeaders, retryDelay } from '../src/modules/ai/providers';
+
+const choice = { choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }],
+  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
+
+describe('AI provider contracts', () => {
+  const cases = [
+    ['GROQ', 'https://api.groq.com/openai/v1/chat/completions', 'max_completion_tokens'],
+    ['OPENAI', 'https://api.openai.com/v1/chat/completions', 'max_completion_tokens'],
+    ['OPENROUTER', 'https://openrouter.ai/api/v1/chat/completions', 'max_tokens'],
+    ['DEEPSEEK', 'https://api.deepseek.com/chat/completions', 'max_tokens'],
+    ['MISTRAL', 'https://api.mistral.ai/v1/chat/completions', 'max_tokens'],
+    ['CUSTOM', `${customEndpoints[0]}/chat/completions`, 'max_tokens'],
+  ] as const;
+  it.each(cases)('%s request and completion usage', (provider, url, field) => {
+    const request = buildRequest({ provider, model: 'fixture', endpoint: provider === 'CUSTOM' ? customEndpoints[0] : undefined },
+      'example-key', 'System policy', '{"user":"data"}', 300);
+    expect(request.url).toBe(url);
+    expect(new Headers(request.headers).get('Authorization')).toBe('Bearer example-key');
+    expect(request.body).toMatchObject({ [field]: 300, response_format: { type: 'json_object' }, messages: [
+      { role: 'system', content: expect.stringContaining('System policy') }, { role: 'user', content: '{"user":"data"}' },
+    ] });
+    if (provider === 'OPENROUTER') expect(request.body).toMatchObject({ provider: { allow_fallbacks: false, require_parameters: true } });
+    expect(normalize(provider, choice)).toMatchObject({ text: '{"ok":true}', incomplete: false, input: 10, output: 5, total: 15 });
+    expect(normalize(provider, {}).total).toBeUndefined();
+  });
+
+  it('uses Gemini native instructions, API-key header and JSON mode', () => {
+    expect(buildRequest({ provider: 'GEMINI', model: 'models/gemini-fixture' }, 'example-key', 'System policy', '{}', 300)).toMatchObject({
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-fixture:generateContent',
+      headers: { 'x-goog-api-key': 'example-key' },
+      body: { systemInstruction: { parts: [{ text: expect.stringContaining('System policy') }] },
+        generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 300 } },
+    });
+    expect(normalize('GEMINI', { candidates: [{ finishReason: 'STOP', content: { parts: [{ thought: true, text: 'private' }, { text: '{"ok":true}' }] } }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 20 } }))
+      .toMatchObject({ text: '{"ok":true}', incomplete: false, input: 10, output: 5, total: 20 });
+  });
+
+  it('uses Anthropic model, Messages headers, prompts and cached input usage', () => {
+    expect(buildRequest({ provider: 'ANTHROPIC', model: 'claude-fixture' }, 'example-key', 'System policy', '{}', 300)).toMatchObject({
+      url: 'https://api.anthropic.com/v1/messages', headers: { 'x-api-key': 'example-key', 'anthropic-version': '2023-06-01' },
+      body: { model: 'claude-fixture', max_tokens: 300, system: expect.stringContaining('System policy') },
+    });
+    const schema = { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false };
+    expect(buildRequest({ provider: 'ANTHROPIC', model: 'fixture' }, 'example-key', '', '{}', 128, schema).body)
+      .toMatchObject({ output_config: { format: { type: 'json_schema', schema } } });
+    const body = { stop_reason: 'end_turn', content: [{ type: 'thinking', thinking: 'private' }, { type: 'text', text: '{"ok":true}' }],
+      usage: { input_tokens: 10, cache_creation_input_tokens: 3, cache_read_input_tokens: 2, output_tokens: 5 } };
+    expect(normalize('ANTHROPIC', body)).toMatchObject({ text: '{"ok":true}', incomplete: false, input: 15, output: 5, total: 20 });
+    expect(normalize('ANTHROPIC', { ...body, stop_reason: 'max_tokens' }).incomplete).toBe(true);
+  });
+
+  it('preserves only trustworthy quota headers and distinguishes rejection from ambiguous completion', () => {
+    expect(providerFailure(429, {}).retryable).toBe(true);
+    expect(providerFailure(503, { error: { status: 'UNAVAILABLE' } }).retryable).toBe(true);
+    expect(providerFailure(529, {}).retryable).toBe(true);
+    for (const status of [400, 401, 402, 403, 422, 500, 502, 503, 504]) expect(providerFailure(status, {}).retryable).toBe(false);
+    const headers = quotaHeaders(new Headers({ 'Retry-After': '6', 'anthropic-ratelimit-requests-reset': '2026-01-01T02:00:00Z', 'X-Private': 'discard' }));
+    expect(headers).toEqual({ 'retry-after': '6', 'anthropic-ratelimit-requests-reset': '2026-01-01T02:00:00Z' });
+    expect(retryDelay(headers)).toBe(6000);
+    expect(normalize('OPENROUTER', { ...choice, usage: { ...choice.usage, cost: 0.0001 } }).costUsd).toBe(0.0001);
+  });
+
+  it('allows only approved custom bases and rejects non-public address classes without sending a request', () => {
+    expect(providerNames).toHaveLength(8);
+    expect(providerBase({ provider: 'CUSTOM', endpoint: customEndpoints[1] + '/' })).toBe(customEndpoints[1]);
+    for (const endpoint of ['http://api.together.ai/v1', 'https://localhost/v1', 'https://api.together.ai:80/v1',
+      customEndpoints[0] + '?x=1', 'https://api.together.ai@loopback.invalid/v1', 'https://api.together.ai.other.invalid/v1']) {
+      expect(() => providerBase({ provider: 'CUSTOM', endpoint })).toThrow();
+    }
+    expect(() => providerBase({ provider: 'OPENAI', endpoint: customEndpoints[0] })).toThrow();
+    for (const address of ['127.0.0.1', '10.0.0.3', '169.254.169.254', '192.168.0.1', '100.64.0.5', '0.0.0.0', '::1', '::ffff:127.0.0.1', '224.0.0.1']) {
+      expect(publicAddress(address)).toBe(false);
+    }
+    expect(publicAddress('8.8.8.8')).toBe(true);
+    expect(buildRequest({ provider: 'CUSTOM', endpoint: customEndpoints[0], model: 'fixture', outputMode: 'PROMPT_JSON' },
+      'example-key', '', '{}', 128).body).not.toHaveProperty('response_format');
+  });
+});

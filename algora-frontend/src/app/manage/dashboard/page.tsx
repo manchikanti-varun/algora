@@ -23,6 +23,7 @@ export default function Page() {
     <PageHeader title="Overview" subtitle={`Welcome, ${user?.fullName.split(' ')[0] ?? ''}. ${admin ? 'Platform-wide summary.' : 'Summary of your batches.'}`}
       actions={<>
         <ButtonLink href="/manage/batches/new" prefetch={false} icon={<CirclePlus size={16} aria-hidden />}>New batch</ButtonLink>
+        <ButtonLink href="/manage/ai-preparation" variant="secondary" prefetch={false}>AI Preparation</ButtonLink>
         {user?.canManageCourses && <ButtonLink href="/manage/courses/new" variant="secondary" prefetch={false}>New course</ButtonLink>}
       </>} />
   );

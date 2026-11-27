@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
 import { activeCollege, collegeLabel } from '../colleges/registry';
@@ -8,8 +8,11 @@ import { normalizeRoll } from '../../lib/normalize';
 import { objectId, pagination } from '../../lib/validate';
 import { requireAuth, requireRole } from '../../middleware/auth';
 import {
-  Batch, BatchChapterAccess, BatchCourse, Chapter, Course, Enrollment, PendingEnrollment, TrainerBatchAssignment, User,
+  Batch, BatchChapterAccess, BatchCourse, CatalogProblem, Chapter, Course, Enrollment, PendingEnrollment, Problem, TrainerBatchAssignment, User,
 } from '../../models';
+import { AiBatch, AiHint } from '../../models/ai';
+import { batchAiAvailable } from '../ai/context';
+import { configuredProvider, settings } from '../ai/runtime';
 import { audit } from '../audit/audit';
 import { loadBatchFor, trainerBatchIds } from '../access';
 import { enrollByRoll } from './enrollment.service';
@@ -227,17 +230,67 @@ async function activeAssignment(batchId: Types.ObjectId, courseId: string) {
 
 batchesRouter.get('/:id/chapter-access', async (req, res) => {
   const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id));
-  const bcs = await BatchCourse.find({ batchId: batch._id }).populate('courseId', 'title').lean();
-  const out = [];
-  for (const bc of bcs) {
-    const chapters = await Chapter.find({ courseId: (bc.courseId as any)._id, status: 'ACTIVE' }).sort({ order: 1 }).lean();
-    const access = await BatchChapterAccess.find({ batchCourseId: bc._id }).lean();
-    const vis = new Map(access.map((a) => [String(a.chapterId), a]));
-    out.push({
-      batchCourseId: bc._id, status: bc.status, course: bc.courseId,
-      chapters: chapters.map((c) => ({ chapterId: c._id, title: c.title, order: c.order, isVisible: vis.get(String(c._id))?.isVisible === true, unlockedAt: vis.get(String(c._id))?.unlockedAt })),
-    });
+  res.set('Cache-Control', 'no-store');
+  const [bcs, controls, mentor] = await Promise.all([
+    BatchCourse.find({ batchId: batch._id }).populate<{ courseId: { _id: Types.ObjectId; title: string; status: string } | null }>('courseId', 'title status').lean(),
+    AiBatch.findById(String(batch._id)).lean(),
+    settings('STUDENT_MENTOR'),
+  ]);
+  const courseIds = bcs.flatMap((bc) => bc.courseId ? [bc.courseId._id] : []);
+  const providerConfigured = await configuredProvider('STUDENT_MENTOR', mentor);
+  const [chapters, access, counts, hints] = await Promise.all([
+    Chapter.find({ courseId: { $in: courseIds }, status: 'ACTIVE' }).sort({ order: 1 }).lean(),
+    BatchChapterAccess.find({ batchCourseId: { $in: bcs.map((bc) => bc._id) } }).lean(),
+    Problem.aggregate<{ _id: Types.ObjectId; count: number; catalogIds?: Types.ObjectId[]; slugs?: string[] }>([
+      { $match: { courseId: { $in: courseIds }, status: 'ACTIVE' } },
+      { $group: { _id: '$chapterId', count: { $sum: 1 },
+        ...(!providerConfigured && mentor.enabled ? { catalogIds: { $addToSet: '$catalogId' }, slugs: { $addToSet: '$slug' } } : {}),
+      } },
+    ]),
+    !providerConfigured && mentor.enabled
+      ? AiHint.find({ courseId: { $in: courseIds.map(String) }, status: 'PUBLISHED' }, 'courseId catalogId').lean() : [],
+  ]);
+  const hintsByCourse = new Map<string, Set<string>>();
+  for (const { courseId, catalogId } of hints) {
+    if (!courseId || !catalogId) continue;
+    const entries = hintsByCourse.get(courseId) ?? new Set<string>();
+    entries.add(catalogId);
+    hintsByCourse.set(courseId, entries);
   }
+  const hintCatalog = hints.length ? await CatalogProblem.find({ _id: { $in: hints.map((hint) => hint.catalogId) }, platform: 'leetcode' }, 'slug').lean() : [];
+  const hintBySlug = new Map(hintCatalog.map((item) => [item.slug, String(item._id)]));
+  const chaptersByCourse = new Map<string, typeof chapters>();
+  for (const chapter of chapters) {
+    const id = String(chapter.courseId);
+    const group = chaptersByCourse.get(id);
+    if (group) group.push(chapter);
+    else chaptersByCourse.set(id, [chapter]);
+  }
+  const byChapter = new Map(counts.map((row) => [String(row._id), row]));
+  const byAccess = new Map(access.map((row) => [`${row.batchCourseId}:${row.chapterId}`, row]));
+  const out = bcs.flatMap((bc) => {
+    const course = bc.courseId;
+    if (!course) return [];
+    const courseId = String(course._id);
+    return [{
+      batchCourseId: bc._id, status: bc.status, course,
+      chapters: (chaptersByCourse.get(courseId) ?? []).map((chapter) => {
+        const row = byAccess.get(`${bc._id}:${chapter._id}`);
+        const isVisible = row?.isVisible === true;
+        const studentAiEnabled = row?.studentAiEnabled === true;
+        const assigned = byChapter.get(String(chapter._id));
+        const courseHints = hintsByCourse.get(courseId);
+        const hasPublishedHints = courseHints && (assigned?.catalogIds?.some((id) => courseHints.has(String(id)))
+          || assigned?.slugs?.some((slug) => courseHints.has(hintBySlug.get(slug) ?? '')));
+        const aiAvailability = !isVisible ? 'CHAPTER_HIDDEN' : !studentAiEnabled ? 'CHAPTER_DISABLED'
+          : batch.status !== 'ACTIVE' || bc.status !== 'ACTIVE' || course.status !== 'PUBLISHED' ? 'CONTEXT_INACTIVE'
+          : !mentor.enabled ? 'GLOBAL_DISABLED' : !batchAiAvailable(controls, courseId) ? 'BATCH_UNAVAILABLE'
+          : providerConfigured ? 'AVAILABLE' : hasPublishedHints ? 'PUBLISHED_HINTS_ONLY' : 'NO_AI_SOURCE';
+        return { chapterId: chapter._id, title: chapter.title, order: chapter.order, isVisible, unlockedAt: row?.unlockedAt,
+          problemCount: assigned?.count ?? 0, studentAiEnabled, aiAvailability };
+      }),
+    }];
+  });
   res.json({ items: out });
 });
 
@@ -266,4 +319,47 @@ batchesRouter.post('/:id/chapter-access/bulk', async (req, res) => {
   await setVisibility(bc._id, chapters.map((c) => c._id), b.isVisible, req.user!._id);
   await audit(req, 'chapter.bulk', { type: 'Batch', id: batch._id }, { courseId: b.courseId, isVisible: b.isVisible, count: chapters.length });
   res.json({ updated: chapters.length, isVisible: b.isVisible });
+});
+
+async function setChapterAi(req: Request, batchCourseId: Types.ObjectId, courseId: string, chapterIds: Types.ObjectId[], enabled: boolean, bulk: boolean) {
+  let changed = 0;
+  for (const chapterId of chapterIds) {
+    // Return the pre-update document so audit records reflect the state this write replaced.
+    const write = () => BatchChapterAccess.findOneAndUpdate({ batchCourseId, chapterId },
+      { $set: { studentAiEnabled: enabled } }, { upsert: enabled, returnDocument: 'before' }).lean();
+    const previous = await write().catch((error: unknown) => {
+      // A concurrent visibility or AI upsert may have created the shared row first.
+      if (error instanceof Error && 'code' in error && error.code === 11000) return write();
+      throw error;
+    });
+    const previousEnabled = previous?.studentAiEnabled === true;
+    if (previousEnabled === enabled) continue;
+    changed++;
+    await audit(req, 'chapter.student_ai.update', { type: 'Batch', id: req.params.id }, {
+      batchId: req.params.id, courseId, chapterId: String(chapterId), previousEnabled, enabled, bulk,
+    });
+  }
+  return changed;
+}
+
+batchesRouter.put('/:id/courses/:courseId/chapters/:chapterId/student-ai', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const courseId = parse(objectId, req.params.courseId);
+  const chapterId = parse(objectId, req.params.chapterId);
+  const { enabled } = parse(z.object({ enabled: z.boolean() }).strict(), req.body);
+  const bc = await activeAssignment(batch._id, courseId);
+  if (!(await Chapter.exists({ _id: chapterId, courseId, status: 'ACTIVE' }))) throw notFound('Chapter not found in this course');
+  await setChapterAi(req, bc._id, courseId, [new Types.ObjectId(chapterId)], enabled, false);
+  res.json({ chapterId, enabled });
+});
+
+batchesRouter.post('/:id/chapter-access/student-ai/bulk', async (req, res) => {
+  const batch = await loadBatchFor(req.user!, parse(objectId, req.params.id), { writable: true });
+  const input = parse(z.object({ courseId: objectId, enabled: z.boolean(), chapterIds: z.array(objectId).min(1).max(500).optional(), all: z.literal(true).optional() })
+    .strict().refine((value) => !!value.chapterIds !== !!value.all, 'Provide exactly one of chapterIds or all'), req.body);
+  const bc = await activeAssignment(batch._id, input.courseId);
+  const chapters = await Chapter.find({ courseId: input.courseId, status: 'ACTIVE', ...(input.all ? {} : { _id: { $in: input.chapterIds } }) }, '_id').lean();
+  if (input.chapterIds && chapters.length !== new Set(input.chapterIds).size) throw badRequest('Some chapters do not belong to this course');
+  const updated = await setChapterAi(req, bc._id, input.courseId, chapters.map((chapter) => chapter._id), input.enabled, true);
+  res.json({ updated, enabled: input.enabled });
 });

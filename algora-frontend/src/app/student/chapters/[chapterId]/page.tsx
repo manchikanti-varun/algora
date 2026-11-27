@@ -1,15 +1,17 @@
 'use client';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { CheckCircle2, ChevronLeft, ChevronRight, Circle, ExternalLink } from 'lucide-react';
-import { Suspense, useEffect } from 'react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Circle, ExternalLink, Sparkles } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
 import { Button, ButtonLink, Card, DifficultyBadge, EmptyState, ErrorState, FilterChips, InlineSelect, PageHeader, PageSkeleton, ProgressBar, SearchInput } from '@/components/ui';
 import { useSync } from '@/components/student/SyncProvider';
 import { useApi } from '@/hooks/useApi';
 import { useUrlState } from '@/hooks/useUrlState';
-import { qs } from '@/lib/api';
-interface P { _id: string; title: string; url: string; slug: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; problemNumber: number | null; points: number; topics: string[]; verified: boolean; evidence: { firstVerifiedAt: string | null; latestObservedSolvedAt: string | null } | null }
-interface R { chapter: { _id: string; title: string; description?: string }; course: { _id: string; title: string }; batchName: string; problems: P[]; prev: { _id: string; title: string } | null; next: { _id: string; title: string } | null }
+import { api, qs } from '@/lib/api';
+const StudentMentor = dynamic(() => import('@/components/ai/StudentMentor'), { ssr: false });
+interface P { _id: string; title: string; url: string; slug: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; problemNumber: number | null; points: number; topics: string[]; verified: boolean; catalogEligible?: boolean; hasAiHistory?: boolean; evidence: { firstVerifiedAt: string | null; latestObservedSolvedAt: string | null } | null }
+interface R { chapter: { _id: string; title: string; description?: string; aiEnabled: boolean }; course: { _id: string; title: string }; batchName: string; problems: P[]; prev: { _id: string; title: string } | null; next: { _id: string; title: string } | null }
 interface Course { batchCourseId: string; chapters: { _id: string }[] }
 const shortDate = (d: string) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const DIFFS = [{ value: '', label: 'All difficulties' }, { value: 'EASY', label: 'Easy' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'HARD', label: 'Hard' }];
@@ -25,7 +27,10 @@ function NotAvailable() {
 function Inner() {
   const { chapterId } = useParams<{ chapterId: string }>();
   const router = useRouter();
-  const batchCourseId = useSearchParams().get('batchCourseId') ?? '';
+  const searchParams = useSearchParams();
+  const batchCourseId = searchParams.get('batchCourseId') ?? '';
+  const initialAi = searchParams.get('ai');
+  const [mentor, setMentor] = useState<string | null>(null);
   const { version } = useSync();
   const [f, setF, resetF] = useUrlState({ q: '', diff: '', status: '' });
   // Old links have no batchCourseId: find the course that contains this chapter.
@@ -33,6 +38,13 @@ function Inner() {
   const found = courses.data?.items.find((c) => c.chapters.some((ch) => ch._id === chapterId))?.batchCourseId;
   useEffect(() => { if (!batchCourseId && found) router.replace(`/student/chapters/${chapterId}${qs({ batchCourseId: found })}`); }, [batchCourseId, found, chapterId, router]);
   const r = useApi<R>(batchCourseId ? `/student/chapters/${chapterId}${qs({ batchCourseId, v: version })}` : null);
+  const refreshChapter = r.reload;
+  useEffect(() => {
+    if (!batchCourseId) return;
+    const onVisible = () => { if (document.visibilityState === 'visible') void refreshChapter(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [batchCourseId, refreshChapter]);
   if (!batchCourseId) {
     if (courses.error) return <ErrorState message={courses.error} retry={courses.reload} />;
     if (courses.data && !found) return <NotAvailable />;
@@ -41,6 +53,15 @@ function Inner() {
   if (r.error) return r.error === 'Chapter not found' ? <NotAvailable /> : <ErrorState message={r.error} retry={r.reload} />;
   if (!r.data) return <PageSkeleton />;
   const d = r.data;
+  const selectedProblem = d.problems.find((problem) => problem._id === (mentor || initialAi));
+  const closeMentor = () => {
+    setMentor(null);
+    if (initialAi) {
+      const params = new URLSearchParams(searchParams);
+      params.delete('ai');
+      router.replace(`/student/chapters/${chapterId}?${params}`, { scroll: false });
+    }
+  };
   const search = f.q.trim().toLowerCase();
   const shown = d.problems.filter((p) => (!f.diff || p.difficulty === f.diff) &&
     (!f.status || (f.status === 'verified') === p.verified) &&
@@ -89,13 +110,24 @@ function Inner() {
                     </div>
                     <span className="justify-self-end sm:col-start-2 sm:row-start-1"><DifficultyBadge d={p.difficulty} /></span>
                     <span className="order-4 text-xs tabular-nums text-fg-muted sm:order-none sm:col-start-3 sm:row-start-1">{p.points} pts</span>
-                    <ButtonLink external href={p.url} variant="secondary" size="sm" className="order-5 w-fit sm:order-none sm:col-start-5 sm:row-start-1" icon={<ExternalLink size={13} aria-hidden />}>Solve<span className="sr-only"> {p.title} on LeetCode (opens in a new tab)</span></ButtonLink>
+                    <div className="order-5 flex flex-wrap gap-2 sm:order-none sm:col-start-5 sm:row-start-1">
+                      <ButtonLink external href={p.url} variant="secondary" size="sm" icon={<ExternalLink size={13} aria-hidden />}
+                        onClick={() => { void api('/student/ai/practice', { method: 'PUT', body: { batchCourseId, problemId: p._id } }).catch(() => {}); }}>
+                        Solve<span className="sr-only"> {p.title} on LeetCode (opens in a new tab)</span>
+                      </ButtonLink>
+                      {d.chapter.aiEnabled && p.catalogEligible ? (
+                        <Button size="sm" variant="ghost" icon={<Sparkles size={14} aria-hidden />} onClick={() => setMentor(p._id)}>Ask AI</Button>
+                      ) : p.hasAiHistory && (
+                        <Button size="sm" variant="ghost" onClick={() => setMentor(p._id)}>AI history</Button>
+                      )}
+                    </div>
                   </li>
                 );
               })}
             </ul>
           )}
       </Card>
+      {selectedProblem && <StudentMentor key={selectedProblem._id} selection={{ batchCourseId, problemId: selectedProblem._id }} close={closeMentor} chapterAvailable={d.chapter.aiEnabled} onAvailabilityChange={refreshChapter} />}
       {(d.prev || d.next) && (
         <nav className="grid gap-3 sm:grid-cols-2" aria-label="Chapter navigation">
           {d.prev ? (

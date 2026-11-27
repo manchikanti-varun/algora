@@ -22,6 +22,13 @@ export default function Page() {
       <PageHeader title={title} docTitle="Home" subtitle={data.selected ? `${data.selected.courseTitle} · ${data.selected.batchName}` : undefined}
         actions={<ContextPicker contexts={data.contexts} value={selectedId} onChange={choose} />} />
       <ProgressNotices />
+      {data.previousPractice && <Card title="Continue practice" description={`${data.previousPractice.course} · ${data.previousPractice.chapter}`}>
+        <p className="mb-3 font-medium">{data.previousPractice.title} <DifficultyBadge d={data.previousPractice.difficulty} /></p>
+        <div className="flex flex-wrap gap-2">
+          <ButtonLink external variant="secondary" href={data.previousPractice.url}>Continue on LeetCode</ButtonLink>
+          {data.previousPractice.allowed && <ButtonLink variant="ghost" href={`/student/chapters/${data.previousPractice.chapterId}?batchCourseId=${data.previousPractice.batchCourseId}&ai=${data.previousPractice.problemId}`}>Ask AI</ButtonLink>}
+        </div>
+      </Card>}
       {!s || !bc ? (
         <Card><EmptyState icon={GraduationCap} title="You are not enrolled in a course yet"
           body="Your trainer enrolls you using your roll number. Once that is done, your course and progress appear here." /></Card>

@@ -42,6 +42,8 @@ export default function Page() {
             empty={<EmptyState title="No courses assigned" body="Assign a published course above. Students enrolled now get access automatically." />}
             columns={[
               { key: 't', header: 'Course', cell: (b) => <Link className="font-medium text-fg hover:text-accent-fg hover:underline" href={`/manage/courses/${b.courseId._id}`}>{b.courseId.title}</Link> },
+              { key: 'prep', header: 'Preparation', optional: true, cell: (b) => b.status === 'ACTIVE' &&
+                <Link className="text-accent-fg hover:underline" href={`/manage/ai-preparation?courseId=${b.courseId._id}`}>AI Preparation</Link> },
               { key: 's', header: 'Access in this batch', cell: (b) => <StatusBadge status={b.status} label={b.status === 'ACTIVE' ? 'Has access' : 'Access removed'} /> },
               { key: 'cs', header: 'Course status', optional: true, cell: (b) => <StatusBadge status={b.courseId.status} /> },
               { key: 'a', header: 'Added on', optional: true, cell: (b) => fmtDate(b.assignedAt) },

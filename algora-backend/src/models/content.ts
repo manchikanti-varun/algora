@@ -8,6 +8,7 @@ export const Course = model(
     {
       title: { type: String, required: true, trim: true },
       description: { type: String, default: '' },
+      aiLanguage: String,
       status: { type: String, enum: ['DRAFT', 'PUBLISHED', 'ARCHIVED'], default: 'DRAFT' },
       createdBy: oid('User'),
     },
@@ -92,6 +93,7 @@ const accessSchema = new Schema(
     batchCourseId: oid('BatchCourse'),
     chapterId: oid('Chapter'),
     isVisible: { type: Boolean, default: false },
+    studentAiEnabled: { type: Boolean, default: false },
     unlockedAt: Date,
     unlockedBy: oid('User', false),
   },
