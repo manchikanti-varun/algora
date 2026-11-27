@@ -15,6 +15,7 @@ import { buildDashboard, verifiedHistory } from '../progress/dashboard';
 import { linkView, withdrawConsent } from '../leetcode/links.service';
 import { countableEvidence, purgeStudentLeetcodeData } from '../leetcode/evidence.repository';
 import { batchCourseBoard, cachedBoard, clearBoardCache, paginate, scopeProblems, visibleContent } from '../progress/progress.service';
+import { studentAttendanceData } from '../attendance/attendance.service';
 
 
 export const studentRouter = Router();
@@ -117,6 +118,25 @@ studentRouter.get('/leaderboard', async (req, res) => {
     top3: board.rows.slice(0, 3).map(strip), items: paginate(board.rows, q.page, q.pageSize).map(strip), me: me && strip(me),
     note: 'Rankings use verified accepted submissions only. Students whose sync is incomplete may rank lower than their real LeetCode activity.',
   });
+});
+
+/**
+ * Attendance QR. The payload is exactly the approved roll number (plain text) so any standard scanner returns it
+ * verbatim. A pending roll-number change request does not affect this value: only an approved change updates it.
+ * Students can read their own attendance only; there is no student-side attendance submission endpoint.
+ */
+studentRouter.get('/attendance/qr', async (req, res) => {
+  const u = await User.findById(req.user!._id, 'rollNumber fullName').lean();
+  if (!u?.rollNumber) throw notFound('Your roll number has not been assigned yet. Ask your trainer.');
+  res.json({ rollNumber: u.rollNumber, payload: u.rollNumber, studentName: u.fullName });
+});
+
+studentRouter.get('/attendance', async (req, res) => {
+  const f = parse(z.object({
+    batchId: _oid.optional(), from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    sessionType: z.enum(['MORNING', 'AFTERNOON']).optional(), status: z.enum(['PRESENT', 'ABSENT']).optional(),
+  }).partial(), req.query);
+  res.json(await studentAttendanceData(String(req.user!._id), f));
 });
 
 studentRouter.get('/profile', async (req, res) => {

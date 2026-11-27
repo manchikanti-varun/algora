@@ -23,6 +23,7 @@ import { auditRouter, collegesRouter, pendingRouter, studentsRouter } from './mo
 import { manageRequestsRouter } from './modules/student/requests';
 import { studentRouter } from './modules/student/student.routes';
 import { trainerRequestsRouter, trainersRouter } from './modules/trainers/trainers.routes';
+import { attendanceRouter } from './modules/attendance/attendance.routes';
 
 export function createApp() {
   const app = express();
@@ -87,6 +88,7 @@ export function createApp() {
   api.use('/colleges', collegesRouter);
   api.use('/student-requests', manageRequestsRouter);
   api.use('/students', studentsRouter);
+  api.use('/attendance', attendanceRouter);
   api.use('/audit-logs', auditRouter);
   app.use('/api/v1', api);
 

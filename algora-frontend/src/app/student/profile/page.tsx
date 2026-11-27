@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button, Card, Checkbox, Combobox, DescriptionList, ErrorState, fmtDate, Input, Modal, Notice, PageHeader, PageSkeleton, StatusBadge, Textarea, useConfirm, useToast } from '@/components/ui';
 import { RequestList } from '@/components/student/RequestList';
+import { AttendanceQr } from '@/components/attendance/AttendanceQr';
 import { loadPublicColleges } from '@/lib/options';
 import { useSync, type LinkView } from '@/components/student/SyncProvider';
 import { setTheme, useTheme, type Theme } from '@/components/ThemePicker';
@@ -90,6 +91,7 @@ export default function Page() {
       <Card title="Academic information" actions={<Button variant="secondary" size="sm" onClick={openRequest}>Request changes</Button>}>
         <DescriptionList cols={2} items={[{ label: 'Roll number', value: p.data.rollNumber }, { label: 'College', value: p.data.college ?? '—' }]} />
       </Card>
+      {p.data.rollNumber && <AttendanceQr studentName={[p.data.firstName, p.data.lastName].filter(Boolean).join(' ') || 'Student'} rollNumber={p.data.rollNumber} />}
       <Modal open={showProfile} onClose={() => setShowProfile(false)} title="Request a change" description="Your trainer or a Super Admin reviews every request before it is applied.">
         <form onSubmit={saveProfile} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">

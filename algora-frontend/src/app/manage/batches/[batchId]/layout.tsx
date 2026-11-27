@@ -20,7 +20,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const sub = path.startsWith(base) ? path.slice(base.length) : '';
   const tabs = [
     { href: base, label: 'Overview', exact: true }, { href: `${base}/courses`, label: 'Courses' }, { href: `${base}/visibility`, label: 'Chapter Access' },
-    { href: `${base}/students`, label: 'Students' }, { href: `${base}/analytics`, label: 'Analytics' }, { href: `${base}/settings`, label: 'Settings' },
+    { href: `${base}/students`, label: 'Students' }, { href: `${base}/attendance`, label: 'Attendance' }, { href: `${base}/analytics`, label: 'Analytics' }, { href: `${base}/settings`, label: 'Settings' },
   ];
   const subtitle = [batch.college, batch.startDate && `${fmtDate(batch.startDate)} – ${fmtDate(batch.endDate)}`].filter(Boolean).join(' · ') || undefined;
   return (

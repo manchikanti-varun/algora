@@ -10,6 +10,9 @@ const S: Record<string, Def> = {
   COMPLETED: { label: 'Completed', tone: 'info' }, ARCHIVED: { label: 'Archived', tone: 'neutral' }, INACTIVE: { label: 'Inactive', tone: 'neutral' },
   MERGED: { label: 'Merged', tone: 'neutral' }, CONSENT_WITHDRAWN: { label: 'Consent withdrawn', tone: 'warning' },
   SUSPENDED: { label: 'Suspended', tone: 'danger' }, REVOKED: { label: 'Revoked', tone: 'danger' },
+  // attendance
+  FINALIZED: { label: 'Finalized', tone: 'success' }, PRESENT: { label: 'Present', tone: 'success' }, ABSENT: { label: 'Absent', tone: 'danger' },
+  MORNING: { label: 'Morning', tone: 'info' }, AFTERNOON: { label: 'Afternoon', tone: 'info' },
   // trainer requests and enrollment reservations
   PENDING_APPROVAL: { label: 'Awaiting approval', tone: 'warning' }, APPROVED: { label: 'Approved', tone: 'success' }, REJECTED: { label: 'Rejected', tone: 'danger' },
   PENDING: { label: 'Pending', tone: 'warning' }, CLAIMED: { label: 'Claimed', tone: 'success' }, CANCELLED: { label: 'Cancelled', tone: 'neutral' },
@@ -59,6 +62,10 @@ const AUDIT: Record<string, string> = {
   'student.status': 'Student account status changed',
   'trainer.permissions': 'Trainer permissions updated', 'trainer.suspend': 'Trainer suspended', 'trainer.reactivate': 'Trainer reactivated',
   'trainer_request.submit': 'Trainer access requested', 'trainer_request.approve': 'Trainer request approved', 'trainer_request.reject': 'Trainer request rejected',
+  'attendance.session.create': 'Attendance draft created', 'attendance.session.update': 'Attendance draft updated',
+  'attendance.session.finalize': 'Attendance finalized', 'attendance.session.correct': 'Attendance corrected',
+  'attendance.session.import': 'Attendance scans imported', 'attendance.session.cancel': 'Attendance session cancelled',
+  'attendance.report.export': 'Attendance report exported', 'attendance.reconcile': 'Attendance summaries reconciled',
 };
 export const auditLabel = (action: string) => AUDIT[action] ?? humanize(action);
 /** Groups for the audit filter (action prefixes the backend supports). */
@@ -68,4 +75,5 @@ export const AUDIT_GROUPS = [
   { value: 'chapter.', label: 'Chapters' }, { value: 'problem.', label: 'Problems' }, { value: 'catalog.', label: 'Problem library' },
   { value: 'college.', label: 'Colleges' }, { value: 'settings.', label: 'Scoring' }, { value: 'integration.', label: 'Integrations' },
   { value: 'report.', label: 'Reports' }, { value: 'pending.', label: 'Reserved enrollments' },
+  { value: 'attendance.', label: 'Attendance' },
 ];

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import {
   Activity, ArrowUpRight, BookOpen, Inbox, ChartNoAxesCombined, FileChartColumn, GraduationCap, History, House, LayoutDashboard, LibraryBig, LogOut, Menu as MenuIcon,
-  PanelLeftClose, PanelLeftOpen, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
+  CalendarCheck2, ClipboardCheck, PanelLeftClose, PanelLeftOpen, School, Search, SlidersHorizontal, Trophy, UserRound, UserRoundCog, UsersRound, X, type LucideIcon,
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -168,6 +168,7 @@ export const STUDENT_NAV: NavItem[] = [
   { href: '/student/courses', label: 'My Learning', icon: BookOpen, match: ['/student/chapters'] },
   { href: '/student/progress', label: 'Progress', icon: ChartNoAxesCombined },
   { href: '/student/leaderboard', label: 'Leaderboard', icon: Trophy },
+  { href: '/student/attendance', label: 'Attendance', icon: CalendarCheck2 },
 ];
 export function StudentShell({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   const ok = useGuard(['STUDENT'], '/login');
@@ -202,7 +203,7 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
       </main>
       {/* Phones and small tablets: bottom tab bar, every destination visible without scrolling. */}
       <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-        <ul className="grid grid-cols-4">
+        <ul className="grid grid-cols-5">
           {STUDENT_NAV.map((n) => {
             const on = isActive(path, n, home);
             return <li key={n.href}><Link href={n.href} aria-current={on ? 'page' : undefined}
@@ -220,6 +221,7 @@ export const MANAGE_NAV: NavSection[] = [
   { section: 'Workspace', items: [
     { href: '/manage/dashboard', label: 'Overview', icon: LayoutDashboard },
     { href: '/manage/batches', label: 'Batches', icon: UsersRound },
+    { href: '/manage/attendance', label: 'Attendance', icon: ClipboardCheck },
     { href: '/manage/courses', label: 'Courses', icon: BookOpen },
     { href: '/manage/problem-library', label: 'Problem Library', icon: LibraryBig },
   ] },

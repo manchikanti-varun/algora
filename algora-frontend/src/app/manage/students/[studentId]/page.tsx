@@ -7,6 +7,7 @@ import { useApi } from '@/hooks/useApi';
 import { useTrackRecent } from '@/hooks/useRecent';
 import { api, errorMessage } from '@/lib/api';
 import { isAdmin, useAuth } from '@/lib/auth';
+import { StudentAttendancePanel } from '@/components/attendance/StudentAttendancePanel';
 import type { PerfRow } from '@/components/manage/types';
 
 interface Detail {
@@ -59,6 +60,10 @@ export default function Page() {
         <StatCard label="LeetCode account" value={link.current?.username ?? '—'} hint={<StatusBadge status={link.state} />} />
       </Grid>
       {s.sync?.possibleGap && <Notice tone="warn" title="Incomplete submission history">Some accepted submissions between updates may not have been seen.</Notice>}
+
+      <Card title="Attendance" description="Finalized attendance only. Sessions that were never recorded do not count as absences.">
+        <StudentAttendancePanel studentId={s._id} compact />
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">

@@ -21,6 +21,10 @@ export const loadActiveColleges = async (q: string): Promise<Option[]> =>
   (await api<Paged<{ _id: string; name: string; code?: string | null }>>(`/colleges${qs({ q, status: 'ACTIVE', pageSize: 25 })}`)).items
     .map((c) => ({ value: c._id, label: c.code ? `${c.name} [${c.code}]` : c.name }));
 
+export const loadStudents = async (q: string): Promise<Option[]> =>
+  (await api<Paged<{ _id: string; fullName: string; rollNumber: string }>>(`/students${qs({ q, pageSize: 25 })}`)).items
+    .map((s) => ({ value: s._id, label: s.fullName, detail: s.rollNumber }));
+
 /** Canonical colleges from the public registry endpoint, used before a session exists (registration, access requests). */
 export const loadPublicColleges = async (q: string): Promise<Option[]> =>
   (await api<Paged<{ _id: string; name: string; code?: string }>>(`/auth/colleges${qs({ q })}`)).items
