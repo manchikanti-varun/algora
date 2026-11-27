@@ -10,7 +10,7 @@ import { AiBatch, AiProvider, AiSettings, AiUsage } from '../../models/ai';
 import { audit } from '../audit/audit';
 import { toXlsx } from '../analytics/analytics.routes';
 import { toCsv } from '../../lib/csv';
-import { limitsSchema, providerLimits, workloads, type Workload } from './policy';
+import { defaults, groqModelFor, limitsSchema, providerLimits, workloads, type Workload } from './policy';
 import { budgetSnapshots, completion, currentBudgets, eligible, encrypt, encryptionReady, limited, listProviderModels, settings, todayStart, unavailable, workloadBudgets } from './runtime';
 
 import { customEndpoints, discoverModels, ProviderFailure, providerBase, providerIdentity, providerName, providerNames, type ProviderDiagnostics } from './providers';
@@ -33,6 +33,11 @@ const configFields = z.object({
     outputPerMillion: z.number().nonnegative().max(10000) }).strict().refine((v) => v.inputPerMillion > 0 || v.outputPerMillion > 0).nullable().optional(),
   limits: providerLimits.partial().optional(), apiKey: z.string().trim().regex(/^[!-~]{8,512}$/),
 }).strict();
+const createConfigFields = configFields.partial().extend({
+  workload: workloadSchema,
+}).strict().refine((value) => /^[!-~]{8,512}$/.test(value.apiKey ?? ''), {
+  message: 'Enter a valid Groq API key.',
+});
 type Provider = Awaited<ReturnType<typeof getProvider>>;
 async function getProvider(id: string) {
   const doc = await AiProvider.findById(id).lean();
@@ -42,7 +47,7 @@ async function getProvider(id: string) {
 function publicConfig(row: Provider) {
   const { _id, workload, name, model, organization, project, quotaGroup, masked, plan, version, limits, archivedAt, lastTest, createdAt, updatedAt,
     endpoint, enabled, backup, priority, independent, quotaScope, paidApproved, outputMode, timeoutMs, inputLimit, outputLimit, spending, circuitUntil, circuitReason } = row;
-  return { _id, workload, name, model, organization, project, quotaGroup, masked, plan, version, limits, archivedAt, lastTest, createdAt, updatedAt,
+  return { id: String(_id), _id, workload, name, model, organization, project, quotaGroup, masked, plan, version, limits, archivedAt, lastTest, createdAt, updatedAt,
     provider: providerName(row), endpoint, enabled: enabled !== false, backup: !!backup, priority: priority ?? 100, independent: !!independent,
     quotaScope: quotaScope ?? 'UNKNOWN', paidApproved: !!paidApproved, outputMode, timeoutMs: timeoutMs ?? 12000, inputLimit, outputLimit, spending,
     circuitUntil, circuitReason };
@@ -97,11 +102,13 @@ const discoveryFields = z.object({
 /** Discover models before saving (using the key being entered) or with an existing encrypted credential. */
 adminAi.post('/providers/discover', async (req, res) => {
   const input = parse(discoveryFields, req.body);
+  if (input.provider && input.provider !== 'GROQ') throw badRequest('Only the Groq provider is supported.');
+  if (input.endpoint != null) throw badRequest('Groq uses the fixed official API endpoint.');
   if (!(await takeToken(`ai:models:${req.user!._id}`, 4, 4, true))) throw limited('Wait before requesting more provider model catalogs.');
   let models;
-  let provider = input.provider;
+  let provider: string = 'GROQ';
   if (input.apiKey) {
-    const options = { provider: input.provider!, endpoint: input.provider === 'CUSTOM' ? input.endpoint ?? null : null, timeoutMs: 12_000 };
+    const options = { provider: 'GROQ' as const, endpoint: null, timeoutMs: 12_000 };
     providerBase(options);
     try { models = await discoverModels(options, input.apiKey); }
     catch (error) { throw error instanceof AppError ? error : unavailable('The provider model catalog could not be reached.'); }
@@ -122,10 +129,38 @@ adminAi.post('/providers/:id/models', async (req, res) => {
   res.json({ items: models });
 });
 adminAi.post('/providers', async (req, res) => {
-  const { apiKey, workload, ...fields } = parse(configFields.extend({ workload: workloadSchema }), req.body);
-  providerBase(fields);
-  const encrypted = encrypt(apiKey, workload, fields);
+  const input = parse(createConfigFields, req.body);
+  const { apiKey, workload, ...supplied } = input;
+  if (!apiKey) throw badRequest('Enter a valid Groq API key.');
+  if (supplied.provider !== undefined && supplied.provider !== 'GROQ') throw badRequest('Only the Groq provider is supported.');
+  if (supplied.endpoint != null) throw badRequest('Groq uses the fixed official API endpoint.');
+  if (supplied.model !== undefined && supplied.model !== groqModelFor(workload)) throw badRequest(`Invalid model for ${workload}. Use ${groqModelFor(workload)}.`);
   const result = await withLease(`ai:configs:${workload}`, 15_000, async () => {
+    const existing = await AiProvider.find({ workload, archivedAt: null }, 'name slot').lean();
+    let index = existing.length + 1;
+    const used = new Set(existing.map((row) => row.name));
+    const prefix = workload === 'STUDENT_MENTOR' ? 'Student Key' : 'Staff Key';
+    while (used.has(`${prefix} ${index}`)) index++;
+    const fields = {
+      ...supplied,
+      name: supplied.name?.trim() || `${prefix} ${index}`,
+      provider: 'GROQ' as const,
+      endpoint: null,
+      model: groqModelFor(workload),
+      quotaGroup: supplied.quotaGroup ?? (workload === 'STUDENT_MENTOR' ? 'student-groq' : 'staff-groq'),
+      plan: supplied.plan ?? 'FREE',
+      enabled: supplied.enabled ?? true,
+      backup: supplied.backup ?? false,
+      independent: supplied.independent ?? false,
+      priority: supplied.priority ?? 100,
+      quotaScope: supplied.quotaScope ?? 'UNKNOWN',
+      timeoutMs: supplied.timeoutMs ?? 12000,
+      inputLimit: supplied.inputLimit ?? 131072,
+      outputLimit: supplied.outputLimit ?? 65536,
+      limits: providerLimits.parse({ ...defaults(workload), ...supplied.limits }),
+    };
+    providerBase(fields);
+    const encrypted = encrypt(apiKey, workload, fields);
     const slots = new Set(await AiProvider.distinct('slot', { workload, archivedAt: null }));
     const max = 10;
     const slot = Array.from({ length: max }, (_, i) => i).find((i) => !slots.has(i));
@@ -142,14 +177,17 @@ adminAi.patch('/providers/:id', async (req, res) => {
   const { apiKey, ...fields } = parse(configFields.partial(), req.body);
   const old = await getProvider(id);
   const workload = parse(workloadSchema, old.workload);
+  if (fields.provider !== undefined && fields.provider !== 'GROQ') throw badRequest('Only the Groq provider is supported.');
+  if (fields.endpoint !== undefined && fields.endpoint !== null) throw badRequest('Groq uses the fixed official API endpoint.');
+  if (fields.model !== undefined && fields.model !== groqModelFor(workload)) throw badRequest(`Invalid model for ${workload}. Use ${groqModelFor(workload)}.`);
   const result = await withLease(`ai:configs:${workload}`, 15_000, async () => {
     const current = await getProvider(id);
-    const next = { ...current, ...fields };
+    const next = { ...current, ...fields, provider: 'GROQ', endpoint: null, model: groqModelFor(workload) };
     if (providerIdentity(current) !== providerIdentity(next) && !apiKey) throw badRequest('Replacing the provider or endpoint requires a new API key.');
     const invalidateTest = !!apiKey || current.model !== next.model || current.outputMode !== next.outputMode || current.outputLimit !== next.outputLimit;
     const version = (current.version ?? 0) + 1;
     const row = await AiProvider.findOneAndUpdate({ _id: id, archivedAt: null }, {
-      $set: { ...fields, version,
+      $set: { ...fields, provider: 'GROQ', endpoint: null, model: groqModelFor(workload), version,
         ...(apiKey ? { encrypted: encrypt(apiKey, workload, next), masked: `••••${apiKey.slice(-4)}` } : {}),
         ...(!invalidateTest && current.lastTest ? { lastTest: { ...current.lastTest, version } } : {}),
       },
@@ -203,6 +241,7 @@ adminAi.delete('/providers/:id', async (req, res) => {
 });
 adminAi.post('/providers/:id/test', async (req, res) => {
   const id = parse(objectId, req.params.id);
+  const testInput = parse(z.object({ autoActivate: z.boolean().optional() }).strict().default({}), req.body);
   const row = await getProvider(id);
   const workload = parse(workloadSchema, row.workload);
   const started = Date.now();
@@ -219,6 +258,12 @@ adminAi.post('/providers/:id/test', async (req, res) => {
     quota = result.quota;
     testedProvider = result.provider;
     testedModel = result.model;
+    if (testInput.autoActivate) {
+      const control = await settings(workload);
+      if (!control.activeId && eligible(row, control, true)) {
+        await AiSettings.updateOne({ _id: workload }, { $set: { activeId: id, servingId: id } }, { upsert: true });
+      }
+    }
   } catch (error) {
     status = error instanceof Error && 'code' in error ? String(error.code) : 'UNAVAILABLE';
     // Sanitized diagnostics are for the Super Admin only. Student and staff routes never receive them.

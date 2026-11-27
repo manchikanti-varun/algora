@@ -718,16 +718,12 @@ try {
       const p = admin.page;
       await p.goto(`${FE}/manage/ai-management`);
       await p.getByRole('heading', { name: 'AI Management', level: 1 }).waitFor();
-      for (const [view, config, limits] of [['Student AI', 'Student fixture', 'Student limits'], ['Staff AI', 'Staff fixture', 'Staff limits']]) {
+      for (const [view, config, limits] of [['Student AI', 'Student Key 1', 'Student limits'], ['Staff AI', 'Staff Key 1', 'Staff limits']]) {
         await p.getByRole('button', { name: view, exact: true }).click();
         await p.getByRole('button', { name: 'Add configuration' }).click();
-        // Basic fields only: the quota group is derived and Advanced settings stay collapsed.
-        await p.getByLabel('Display name').fill(config);
-        await p.getByLabel('Model ID').fill('fixture-model');
-        await p.getByLabel('API key', { exact: true }).fill(`gsk_fixture_${config.startsWith('Staff') ? 's'.repeat(25) : 'm'.repeat(25)}`);
-        await p.getByRole('button', { name: 'Save configuration' }).click();
+        await p.getByLabel('Groq API key', { exact: true }).fill(`gsk_fixture_${config.startsWith('Staff') ? 's'.repeat(25) : 'm'.repeat(25)}`);
+        await p.getByRole('button', { name: 'Save and test', exact: true }).click();
         const card = p.locator('section').filter({ has: p.getByRole('heading', { name: config, exact: true }) });
-        await card.getByRole('button', { name: 'Activate', exact: true }).click();
         await card.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
         await card.getByRole('button', { name: 'Test connection' }).click();
         await card.getByText(/^SUCCESS · \d+ ms$/).waitFor();
@@ -773,18 +769,9 @@ try {
       await p.goto(`${FE}/manage/ai-management`);
       await p.getByRole('button', { name: 'Student AI', exact: true }).click();
       await p.getByRole('button', { name: 'Add configuration' }).click();
-      await p.getByLabel('Display name').fill('OpenAI fixture');
-      await p.getByLabel('Provider', { exact: true }).selectOption({ label: 'Approved OpenAI-compatible endpoint' });
-      await p.getByLabel('Approved API base URL', { exact: true }).waitFor();
-      await p.getByLabel('Provider', { exact: true }).selectOption({ label: 'OpenAI' });
-      await p.getByLabel('Model ID').fill('fixture-openai-model');
-      await p.locator('summary').filter({ hasText: 'Advanced settings' }).click();
-      await p.getByLabel('Shared quota group').fill('openai-fixture');
-      await p.getByLabel('Confirmed quota scope').selectOption('PROJECT');
-      await p.getByRole('checkbox', { name: /verified independent quota/ }).check();
-      await p.getByLabel('API key', { exact: true }).fill(`fixture_key_${'o'.repeat(22)}`);
-      await p.getByRole('button', { name: 'Save and test connection' }).click();
-      const provider = p.locator('section').filter({ has: p.getByRole('heading', { name: 'OpenAI fixture', exact: true }) });
+      await p.getByLabel('Groq API key', { exact: true }).fill(`fixture_key_${'o'.repeat(22)}`);
+      await p.getByRole('button', { name: 'Save and test', exact: true }).click();
+      const provider = p.locator('section').filter({ has: p.getByRole('heading', { name: 'Student Key 2', exact: true }) });
       await provider.getByText(/^SUCCESS · \d+ ms$/).waitFor();
       await provider.getByRole('button', { name: 'Activate', exact: true }).click();
       await provider.getByRole('button', { name: 'Deactivate', exact: true }).waitFor();
@@ -792,15 +779,14 @@ try {
       await p.getByRole('button', { name: 'Save routing policy' }).click();
       await p.getByText('Provider policy saved', { exact: true }).waitFor();
       await provider.getByRole('button', { name: 'Edit configuration' }).click();
-      await p.getByRole('button', { name: 'Discover models' }).click();
-      await p.locator('datalist option[value="fixture-openai-model"]').waitFor({ state: 'attached' });
       await p.locator('summary').filter({ hasText: 'Advanced settings' }).click();
-      assert(await p.getByLabel('Shared quota group').inputValue() === 'openai-fixture', 'advanced quota group was not preserved');
-      assert(await p.getByLabel('Confirmed quota scope').inputValue() === 'PROJECT', 'advanced quota scope was not preserved');
-      assert(await p.getByRole('checkbox', { name: /verified independent quota/ }).isChecked(), 'advanced independent flag was not preserved');
-      await p.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await p.getByLabel('Shared quota group').fill('student-groq-2');
+      await p.getByLabel('Confirmed quota scope').selectOption('PROJECT');
+      await p.getByRole('checkbox', { name: /verified independent quota/ }).check();
+      await p.getByRole('button', { name: 'Save configuration', exact: true }).click();
+      await provider.getByText(/^SUCCESS · \d+ ms$/).waitFor();
       await p.getByRole('button', { name: 'Failover history' }).click();
-      await p.getByText(/OpenAI fixture ·/).first().waitFor();
+      await p.getByText(/Student Key 2 ·/).first().waitFor();
     });
     await step('Staff prepares a problem, reviews and publishes a separate student hint', async () => {
       const p = admin.page;

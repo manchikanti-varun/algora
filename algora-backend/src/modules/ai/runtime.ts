@@ -6,7 +6,7 @@ import { acquireLease, maybeTransaction, releaseLease, supportsTransactions } fr
 import { AiCounter, AiProvider, AiSettings, AiUsage } from '../../models/ai';
 import { audit } from '../audit/audit';
 import { discoverModels, invokeProvider, normalize, outputBudget, providerFailure, providerIdentity, providerName, providerFamily, ProviderFailure, type ProviderDiagnostics, quotaHeaders, retryDelay, type ProviderOptions } from './providers';
-import { defaults, limitsSchema, providerLimits, type Workload } from './policy';
+import { defaults, groqModelFor, limitsSchema, providerLimits, type Workload } from './policy';
 
 export const unavailable = (message = 'AI is unavailable. You can continue without AI or ask your trainer.') => new AppError(503, 'AI_UNAVAILABLE', message);
 export const limited = (message = 'The AI allowance for this window has been used. Try again later.') => new AppError(429, 'AI_LIMIT', message);
@@ -88,6 +88,8 @@ type WorkloadSettings = Awaited<ReturnType<typeof settings>>;
 const loadConfig = (id: string, workload: Workload) => AiProvider.findOne({ _id: id, workload, archivedAt: null }).lean().exec();
 
 export function eligible(config: Config, workload: WorkloadSettings, test = false) {
+  const configWorkload = config.workload as Workload;
+  if (providerName(config) !== 'GROQ' || config.model !== groqModelFor(configWorkload)) return false;
   if (!config.encrypted || !config.model || !config.quotaGroup || config.archivedAt || (!test && config.enabled === false)) return false;
   if (config.plan === 'PAID' && !(workload.paidAllowed && config.paidApproved)) return false;
   if (config.plan !== 'PAID' && providerName(config) === 'OPENROUTER' && !config.model.endsWith(':free')) return false;
@@ -123,7 +125,6 @@ function candidateOrder(primary: Config, rows: Config[], config: WorkloadSetting
   if (config.mode === 'MANUAL') return [primary];
   const backups = rows.filter((row) => String(row._id) !== id && row.backup && row.independent && primary.independent
       && row.quotaScope && row.quotaScope !== 'UNKNOWN' && primary.quotaScope && primary.quotaScope !== 'UNKNOWN'
-      && row.quotaGroup !== primary.quotaGroup && providerFamily(row) !== providerFamily(primary)
       && (row.plan ?? 'FREE') === (primary.plan ?? 'FREE') && eligible(row, config))
     .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100) || String(a._id).localeCompare(String(b._id)));
   const sticky = config.recovery === 'STICKY' && backups.find((row) => String(row._id) === config.servingId);
@@ -159,21 +160,14 @@ export async function completion<T>(workload: Workload, attribution: Attribution
   let backupUsed = 0;
   let previousId: string | undefined;
   let failure: ProviderFailure | undefined;
-  const visitedFamilies = new Set<string>();
-  const visitedGroups = new Set<string>();
   try {
     leases.push(await acquireSlot('ai:global:slot', 12));
     leases.push(await acquireSlot(`ai:${workload}:slot`, config.limits.concurrency));
     logical = await createLogical(attribution, workload, logicalId);
     for (const provider of candidates) {
       const id = String(provider._id);
-      const family = providerFamily(provider);
-      const group = provider.quotaGroup!;
-      if (visitedFamilies.has(family) || visitedGroups.has(group)) continue;
       if (used >= (config.mode === 'AUTO' && !test ? config.maxBackups + 1 : 1)) break;
       if (id !== primaryId && backupUsed >= config.maxBackups) break;
-      visitedFamilies.add(family);
-      visitedGroups.add(group);
       const reason = failure?.code;
       try {
         const base = test ? Math.min(64, provider.outputLimit ?? 64) : Math.min(config.limits.output, provider.outputLimit ?? config.limits.output);
@@ -281,10 +275,12 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
   const reservedSpend = estimatedMicros(inputEstimate, output);
   try {
     counters = await reserve([
-      { prefix: `actor:${workload}:${attribution.userId}`, window: minuteMs, requests: limits.minute },
-      { prefix: `attempt:${workload}:${attribution.userId}`, window: dayMs, requests: workload === 'STUDENT_MENTOR' ? limits.daily * 3 : limits.daily },
-      { prefix: `work:${workload}`, window: minuteMs, requests: limits.requestsMinute, tokens: limits.tokensMinute },
-      { prefix: `work:${workload}`, window: dayMs, requests: limits.requestsDay, tokens: limits.tokensDay },
+      ...(test ? [] : [
+        { prefix: `actor:${workload}:${attribution.userId}`, window: minuteMs, requests: limits.minute },
+        { prefix: `attempt:${workload}:${attribution.userId}`, window: dayMs, requests: workload === 'STUDENT_MENTOR' ? limits.daily * 3 : limits.daily },
+        { prefix: `work:${workload}`, window: minuteMs, requests: limits.requestsMinute, tokens: limits.tokensMinute },
+        { prefix: `work:${workload}`, window: dayMs, requests: limits.requestsDay, tokens: limits.tokensDay },
+      ]),
       ...(workload === 'STAFF_PREPARATION' && !test ? [{
         prefix: `staff:${attribution.userId}:${attribution.action === 'STAFF_FOLLOWUP' ? 'chat' : 'generation'}`, window: dayMs,
         requests: attribution.action === 'STAFF_FOLLOWUP' ? limits.conversationDay : limits.generationDay,

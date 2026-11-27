@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 export const workloads = ['STUDENT_MENTOR', 'STAFF_PREPARATION'] as const;
 export type Workload = typeof workloads[number];
+export const GROQ_STUDENT_MODEL = 'openai/gpt-oss-20b';
+export const GROQ_STAFF_MODEL = 'openai/gpt-oss-120b';
+export const groqModelFor = (workload: Workload) =>
+  workload === 'STUDENT_MENTOR' ? GROQ_STUDENT_MODEL : GROQ_STAFF_MODEL;
 export const languages = ['Java', 'Python', 'C++', 'JavaScript', 'TypeScript', 'C', 'C#', 'Go', 'Kotlin', 'Rust'] as const;
 export const modes = ['Hint', 'Get started', 'Debug my code', 'Failing tests', 'Compilation error', 'Runtime error', 'Time limit', 'Memory limit', 'Explain a concept', 'Review my attempt'] as const;
 const number = (max: number) => z.number().int().min(1).max(max);
