@@ -1,27 +1,66 @@
 'use client';
 import { QrCode } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import QRCode from 'qrcode';
-import { Button, Card, Modal } from '@/components/ui';
+import { Button, Card, ErrorState, Modal } from '@/components/ui';
+import { useApi } from '@/hooks/useApi';
 
 /**
  * Student attendance QR. The payload is exactly the approved roll number, generated locally in the browser; no student
  * information is sent to any QR service. The code is always black on white (independent of the app theme) with a quiet
  * zone, so it scans reliably from a phone.
  */
-export function AttendanceQr({ studentName, rollNumber }: { studentName: string; rollNumber: string }) {
+function useAttendanceQr(rollNumber: string) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let live = true;
-    const payload = rollNumber;
-    QRCode.toDataURL(payload, { errorCorrectionLevel: 'M', margin: 4, width: 640, color: { dark: '#000000', light: '#ffffff' } })
+    QRCode.toDataURL(rollNumber, { errorCorrectionLevel: 'M', margin: 4, width: 640, color: { dark: '#000000', light: '#ffffff' } })
       .then((url) => { if (live) setDataUrl(url); })
       .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, [rollNumber]);
+
+  return { dataUrl, failed };
+}
+
+function AttendanceQrDialog({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+  return <Modal open={open} onClose={onClose} title="Attendance QR code" description="Show this code to your trainer to scan." wide>{children}</Modal>;
+}
+
+function EnlargedQr({ dataUrl, failed, rollNumber }: { dataUrl: string | null; failed: boolean; rollNumber: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3">
+      {dataUrl ? (
+        <div className="max-w-full rounded-xl border border-line bg-white p-3">
+          <img src={dataUrl} alt={`Attendance QR code for roll number ${rollNumber}`} width={640} height={640}
+            className="h-auto w-[min(35rem,calc(100dvh-12rem))] max-w-full" />
+        </div>
+      ) : <p role="status" className="text-sm text-fg-muted">{failed ? 'QR image could not be generated.' : 'Generating QR code…'}</p>}
+      <p className="text-sm font-semibold tabular-nums text-fg">{rollNumber}</p>
+    </div>
+  );
+}
+
+function ApprovedQr({ rollNumber }: { rollNumber: string }) {
+  return <EnlargedQr rollNumber={rollNumber} {...useAttendanceQr(rollNumber)} />;
+}
+
+function CurrentAttendanceQr() {
+  const { data, error, reload } = useApi<{ rollNumber: string }>('/student/attendance/qr');
+  if (error) return <ErrorState message={error} retry={reload} />;
+  if (!data) return <p role="status" className="text-sm text-fg-muted">Loading attendance QR…</p>;
+  return <ApprovedQr key={data.rollNumber} rollNumber={data.rollNumber} />;
+}
+
+export function StudentAttendanceQrDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return <AttendanceQrDialog open={open} onClose={onClose}>{open && <CurrentAttendanceQr />}</AttendanceQrDialog>;
+}
+
+export function AttendanceQr({ studentName, rollNumber }: { studentName: string; rollNumber: string }) {
+  const { dataUrl, failed } = useAttendanceQr(rollNumber);
+  const [open, setOpen] = useState(false);
 
   return (
     <Card title="Attendance QR code" description="Show this code to your trainer when attendance is taken.">
@@ -43,15 +82,9 @@ export function AttendanceQr({ studentName, rollNumber }: { studentName: string;
           {failed && <p className="text-xs text-danger-fg">The QR image could not be generated. Your roll number is {rollNumber}.</p>}
         </div>
       </div>
-      <Modal open={open} onClose={() => setOpen(false)} title="Attendance QR code" description="Have your trainer scan this code, or show it at the attendance desk.">
-        <div className="flex flex-col items-center gap-3">
-          <div className="rounded-xl border border-line bg-white p-4">
-            {dataUrl && <img src={dataUrl} alt={`Attendance QR code for roll number ${rollNumber}`} width={320} height={320} className="h-80 w-80 max-w-full" />}
-          </div>
-          <p className="text-sm font-semibold tabular-nums text-fg">{rollNumber}</p>
-          <p className="max-w-sm text-center text-[13px] text-fg-muted">{studentName} · {rollNumber}</p>
-        </div>
-      </Modal>
+      <AttendanceQrDialog open={open} onClose={() => setOpen(false)}>
+        <EnlargedQr dataUrl={dataUrl} failed={failed} rollNumber={rollNumber} />
+      </AttendanceQrDialog>
     </Card>
   );
 }

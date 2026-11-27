@@ -10,6 +10,7 @@ import { errorMessage } from '@/lib/api';
 import { useAuth, type Role, type SessionUser } from '@/lib/auth';
 import { cx, EmptyState, Menu, PageSkeleton, useToast, type MenuItem } from './ui';
 import { themeMenuItems, useTheme } from './ThemePicker';
+import { StudentAttendanceQrDialog } from './attendance/AttendanceQr';
 import { BrandMark } from './BrandMark';
 import { CommandPalette } from './manage/CommandPalette';
 
@@ -185,6 +186,7 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
   const path = usePathname();
   const router = useRouter();
   const toast = useToast();
+  const [qrOpen, setQrOpen] = useState(false);
   if (!ok || !user) return <div className="mx-auto max-w-6xl p-8"><PageSkeleton /></div>;
   const home = '/student/dashboard';
   const signOut = async () => {
@@ -213,13 +215,14 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
             {aside}
             <AccountMenu user={user} onSignOut={signOut} extra={[
               { label: 'Profile', href: '/student/profile', icon: <UserRound size={15} aria-hidden /> },
-              { label: 'Attendance QR', href: '/student/profile#attendance-qr', icon: <QrCode size={15} aria-hidden /> },
+              { label: 'Attendance QR', onSelect: () => setQrOpen(true), icon: <QrCode size={15} aria-hidden /> },
               { label: 'My Requests', href: '/student/profile#my-requests', icon: <Inbox size={15} aria-hidden /> },
               { label: 'Connected Accounts', href: '/student/profile#connected-accounts', icon: <ArrowUpRight size={15} aria-hidden /> },
             ]} />
           </div>
         </div>
       </header>
+      <StudentAttendanceQrDialog open={qrOpen} onClose={() => setQrOpen(false)} />
       <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-6 lg:pb-10 md:pt-8">
         <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
       </main>

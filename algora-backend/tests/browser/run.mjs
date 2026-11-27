@@ -437,15 +437,13 @@ try {
     for (const raw of ['LEETCODE_', 'SYNC_', 'statusDetail', 'provider']) assert(!(await p.locator('body').innerText()).includes(raw), `technical text "${raw}" on the profile`);
     await shot(p, '08-profile');
   });
-  await step('Attendance QR shortcut opens Profile, and the enlarged image decodes to the approved roll number', async () => {
+  await step('Attendance QR opens a large dialog without leaving Attendance', async () => {
     const p = student.page;
     await p.goto(`${FE}/student/attendance`);
     await menu(p, p, 'Account menu', 'Attendance QR');
-    await p.waitForURL('**/student/profile#attendance-qr');
-    const card = p.locator('#attendance-qr');
-    await card.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).waitFor();
-    await card.getByRole('button', { name: 'View QR code' }).click();
-    const dlg = p.locator('dialog[open]');
+    const dlg = p.getByRole('dialog', { name: 'Attendance QR code' });
+    await dlg.waitFor();
+    assert(new URL(p.url()).pathname === '/student/attendance', 'QR menu action changed pages');
     const image = dlg.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' });
     await image.waitFor();
     const src = await image.getAttribute('src');
