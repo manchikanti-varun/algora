@@ -1,7 +1,7 @@
 'use client';
 import { Suspense, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Button, Card, Checkbox, DifficultyBadge, ErrorState, Grid, Notice, PageHeader, Select, StatCard, Textarea, useToast } from '@/components/ui';
+import { Badge, Button, Card, Checkbox, DifficultyBadge, ErrorState, Grid, Notice, PageHeader, Select, StatCard, Textarea, useToast } from '@/components/ui';
 import { useApi } from '@/hooks/useApi';
 import { api, download, errorMessage, qs } from '@/lib/api';
 
@@ -68,7 +68,8 @@ function Workspace() {
   const canGenerate = doc?.enabled && !busy;
   return (
     <div className="space-y-5">
-      <PageHeader title="AI Preparation" subtitle="Prepare assigned problems and chapter teaching guides." />
+      <PageHeader title="AI Teaching Preparation" subtitle="Generate complete problem preparation and chapter teaching guides with GPT-OSS 120B."
+        actions={doc && <Badge tone={doc.enabled ? 'success' : 'neutral'} dot>{doc.enabled ? 'Generation available' : 'Generation unavailable'}</Badge>} />
       <div className="print:hidden"><Card>
         <div className="grid gap-3 sm:grid-cols-3">
           {!library && <>
@@ -89,8 +90,13 @@ function Workspace() {
         {course && !library && doc?.canEdit && <Button size="sm" variant="ghost" onClick={() => void api(`${base}/courses/${course}/language`, {
           method: 'PUT', body: { language: lang },
         }).then(() => { toast.success('Course language saved'); void courses.reload(); }).catch((e) => toast.error(errorMessage(e)))}>Set as course language</Button>}
-        <Textarea label="Known constraints or teaching notes for generation (optional)" rows={2} maxLength={2400} value={notes} onChange={(e) => setNotes(e.target.value)}
-          hint="Relevant excerpts are sent to configured AI providers when you request generation. Remove confidential or personal information." />
+        <details className="mt-3 rounded-lg border border-line">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-fg">Optional teaching notes</summary>
+          <div className="border-t border-line p-3">
+            <Textarea label="Known constraints or excerpts" rows={3} maxLength={2400} value={notes} onChange={(e) => setNotes(e.target.value)}
+              hint="Relevant excerpts are sent to the configured Groq provider. Remove confidential or personal information." />
+          </div>
+        </details>
       </Card></div>
       {(courses.error || chapters.error || view.error) && <ErrorState message={courses.error ?? chapters.error ?? view.error!} retry={() => void (view.error ? view.reload() : chapters.error ? chapters.reload() : courses.reload())} />}
       {library && <Card title="Problem Library preparation" actions={<Button size="sm" onClick={() => void generate('problem', library)} loading={busy}>Prepare problem</Button>}>
@@ -115,14 +121,14 @@ function Workspace() {
           </Grid>
           <p className="mt-3 text-sm text-fg-muted">Teaching guide {label(doc.guide.status)}{doc.guide.updatedAt ? ` · ${new Date(doc.guide.updatedAt).toLocaleString()}` : ''}</p>
           <div className="mt-3 flex flex-wrap gap-2">
+            <Button onClick={() => void generate('chapter')} disabled={!canGenerate}>Generate Complete Chapter Preparation</Button>
             <Button variant="secondary" onClick={() => select()}>View chapter guide</Button>
-            <Button disabled={!canGenerate} onClick={() => void generate('chapter')}>Prepare chapter</Button>
             <Button variant="secondary" disabled={!canGenerate} onClick={() => void generate('remaining')}>Prepare remaining</Button>
             <Button variant="secondary" disabled={!canGenerate || !picked.length} onClick={() => void generate('selected')}>Prepare selected</Button>
             <Button variant="secondary" disabled={!canGenerate} onClick={() => void generate('refresh')}>Refresh outdated</Button>
             <Button variant="ghost" onClick={() => void download(`${base}/export${qs({ chapterId: chapter, language: lang })}`).catch((e) => toast.error(errorMessage(e)))}>Export chapter</Button>
           </div>
-          {!doc.enabled && <p className="mt-2 text-sm text-fg-muted">Generation is unavailable. Saved preparation remains accessible.</p>}
+          {!doc.enabled && <Notice tone="warn">Generation is unavailable because the Staff workload is disabled or no eligible Groq configuration is active. Saved preparation remains accessible.</Notice>}
         </Card>
         {!!doc.jobs.length && <Card title="Generation progress" actions={<Button size="sm" variant="ghost" onClick={() => void view.reload()}>Refresh progress</Button>}>
           <ul className="space-y-2">{doc.jobs.map((job) => <li key={job._id} className="text-sm">

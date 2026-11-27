@@ -10,7 +10,7 @@ import { audit } from '../audit/audit';
 import { staffChapter, staffCourse, staffCourses } from './context';
 import { fallback, languages, safeGuidance, staffPrompt } from './policy';
 import { cleanQuestion, compatible, enqueue, libraryContext, preparationWorkload as workload, readMaterial, saveMaterial, target } from './preparation';
-import { completion, settings } from './runtime';
+import { completion, configuredProvider, settings } from './runtime';
 
 const language = z.enum(languages).default('Java');
 const languageQuery = z.object({ language });
@@ -57,8 +57,9 @@ staffAi.get('/chapters/:chapterId', async (req, res) => {
   };
   const config = await settings(workload);
   const jobs = await AiJob.find({ chapterId, language: lang }, 'status tasks createdAt active').sort({ createdAt: -1 }).limit(8).lean();
+  const providerConfigured = await configuredProvider(workload, config);
   res.json({ ...ctx, guide: prep(0), problems: ctx.problems.map((p, i) => ({ ...p, ...prep(i + 1) })), jobs,
-    canEdit: canManageCourses(req.user!), enabled: config.enabled && !!config.activeId });
+    canEdit: canManageCourses(req.user!), enabled: config.enabled && providerConfigured });
 });
 staffAi.get('/material', async (req, res) => {
   const context = parse(identify, req.query);

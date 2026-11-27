@@ -20,7 +20,7 @@ interface Selection { batchCourseId: string; problemId: string }
 interface MentorProps { selection: Selection; chapterAvailable: boolean; onAvailabilityChange: () => Promise<void> }
 
 export default function StudentMentor({ close, ...props }: MentorProps & { close: () => void }) {
-  return <Modal open onClose={close} title="AI Coding Mentor" wide><Mentor {...props} /></Modal>;
+  return <Modal open onClose={close} title="Algora AI Mentor" wide><Mentor {...props} /></Modal>;
 }
 
 function Mentor({ selection, chapterAvailable, onAvailabilityChange }: MentorProps) {
@@ -104,6 +104,16 @@ function Mentor({ selection, chapterAvailable, onAvailabilityChange }: MentorPro
       </div>
       {!enabled ? <Notice tone="info">Ask AI is unavailable. You can read your previous conversations.</Notice> :
         !guide.provider && <Notice tone="info">The AI provider is unavailable. Published hints may still be available.</Notice>}
+      {enabled && shown.length === 0 && <div className="rounded-xl border border-line bg-subtle px-4 py-5 text-center">
+        <p className="font-medium text-fg">Work through the problem step by step</p>
+        <p className="mt-1 text-sm text-fg-muted">Choose a quick action or ask a specific guiding question.</p>
+      </div>}
+      {enabled && shown.length === 0 && <div className="flex flex-wrap gap-2">
+        {[
+          ['Give me a hint', 'Hint'], ['Help me get started', 'Get started'], ['Debug my code', 'Debug my code'],
+          ['Explain failed tests', 'Failing tests'], ['Explain a concept', 'Explain a concept'], ['Improve my approach', 'Review my attempt'],
+        ].map(([label, nextMode]) => <Button key={nextMode} size="sm" variant="secondary" onClick={() => change('mode', nextMode)}>{label}</Button>)}
+      </div>}
       <div className="flex flex-wrap items-end gap-2">
         <Select label="Conversation" value={conversationId ?? ''} disabled={busy} onChange={(event) => setSelected(event.target.value)}
           options={[{ value: '', label: enabled ? 'New conversation' : 'Select a conversation' }, ...(conversations.data?.items ?? []).map((item) => ({ value: item._id, label: `${item.language} · ${new Date(item.updatedAt!).toLocaleString()}` }))]} />

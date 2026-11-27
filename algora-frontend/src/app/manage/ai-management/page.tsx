@@ -1,9 +1,10 @@
 'use client';
 import { useState, type FormEvent } from 'react';
-import { BarList, Button, Card, Checkbox, DescriptionList, ErrorState, Grid, Input, Notice, PageHeader, Select, StatCard, useConfirm, useToast } from '@/components/ui';
+import { Badge, BarList, Button, Card, Checkbox, DescriptionList, ErrorState, Grid, Input, Notice, PageHeader, Select, StatCard, useConfirm, useToast } from '@/components/ui';
 import { ProviderConfigForm, type ProviderBudgetView as Budget, type ProviderConfig as Config } from '@/components/ai/ProviderConfigForm';
 import { useApi } from '@/hooks/useApi';
 import { api, download, errorMessage, qs } from '@/lib/api';
+import { BrainCircuit, GraduationCap, Settings2 } from 'lucide-react';
 
 const base = '/ai/management';
 const workloads = ['STUDENT_MENTOR', 'STAFF_PREPARATION'] as const;
@@ -58,27 +59,11 @@ export default function Page() {
     </div>
     {settings.data && !settings.data.encryptionReady && <Notice tone="warn">Railway credential encryption is missing or invalid. Provider requests are unavailable.</Notice>}
     {(settings.error || providers.error || usage.error) && <ErrorState message={settings.error ?? providers.error ?? usage.error!} retry={refresh} />}
-    {tab === 'overview' && workloads.map((workload) => {
-      const control = settings.data?.workloads.find((w) => w.workload === workload);
-      const active = providers.data?.items.find((config) => config._id === control?.activeId);
-      const serving = providers.data?.items.find((item) => item._id === control?.servingId && item.eligible) ?? active;
-      const backups = (providers.data?.items ?? []).filter((item) => item.workload === workload && item.backup && item.eligible && !item.active)
-        .sort((a, b) => a.priority - b.priority);
-      const current = usage.data?.providers.find((row) => row._id === serving?._id);
-      const metric = usage.data?.workloads.find((row) => row._id === workload);
-      return <Card key={workload} title={label(workload)}
-        description={control?.enabled ? active && settings.data?.encryptionReady ? `${active.name} · ${active.model}` : 'Configuration missing or unavailable' : 'Disabled'}>
-        <p className="mb-3 text-sm text-fg-muted">{control?.mode === 'AUTO' ? 'Automatic failover' : 'Manual selection'} · Primary {active?.name ?? 'Unavailable'} ·
-          Last serving {serving ? `${names[serving.provider]} · ${serving.model}` : 'Unavailable'}</p>
-        <p className="mb-3 text-sm text-fg-muted">Backup priority: {backups.length
-          ? backups.map((item) => `${item.name} (${names[item.provider]} · ${item.model})`).join(' → ') : 'None available'}.</p>
-        {control?.budget && <p className="mb-3 text-sm text-fg-muted">Remaining workload budget today {num(Math.max(0, control.limits.requestsDay - control.budget.requests))} requests and {num(Math.max(0, control.limits.tokensDay - control.budget.tokens))} tokens.</p>}
-        {current?.lastStatus === 'RATE_LIMITED' && <Notice tone="warn">The provider rate-limited the most recent request.</Notice>}
-        {current?.lastStatus === 'FAILED' && <Notice tone="warn">The last provider request failed{current.lastFailure ? ` (${current.lastFailure})` : ''}. Check the configuration and observed quotas.</Notice>}
-        {metric ? <Metrics row={metric} /> : <p className="text-sm text-fg-muted">No usage recorded today.</p>}
-        {current && <Quota item={current} />}
-      </Card>;
-    })}
+    {tab === 'overview' && <div className="grid gap-4 lg:grid-cols-2">
+      {workloads.map((workload) => <WorkloadOverview key={workload} workload={workload} control={settings.data?.workloads.find((w) => w.workload === workload)}
+        items={providers.data?.items ?? []} usage={usage.data} encryption={!!settings.data?.encryptionReady}
+        setTab={setTab} refresh={refresh} />)}
+    </div>}
     {(tab === 'student' || tab === 'staff') && <Providers key={tab} workload={tab === 'student' ? workloads[0] : workloads[1]}
       items={providers.data?.items ?? []} usage={usage.data} refresh={refresh} encryption={!!settings.data?.encryptionReady}
       controls={settings.data?.workloads.find((item) => item.workload === (tab === 'student' ? workloads[0] : workloads[1]))}
@@ -116,35 +101,58 @@ export default function Page() {
   </div>;
 }
 
-function Metrics({ row }: { row: Metric }) {
-  const tokens = (value: number) => row.outbound > 0 && row.unknownTokens >= row.outbound ? 'Unavailable' : num(value);
-  return <Grid>
-    <StatCard label="Logical requests" value={num(row.requests)} />
-    <StatCard label="Provider attempts" value={num(row.outbound)} />
-    <StatCard label="Failover attempts" value={num(row.backupAttempts)} />
-    <StatCard label="Known or estimated spend" value={row.knownCost ? `$${row.costUsd?.toFixed(4)}` : 'Unavailable'} />
-    <StatCard label="Local responses" value={num(row.local)} />
-    <StatCard label="Successful" value={num(row.success)} />
-    <StatCard label="Failed" value={num(row.failed)} />
-    <StatCard label="Rate-limited" value={num(row.rateLimited)} />
-    <StatCard label="Reported input tokens" value={tokens(row.input)} />
-    <StatCard label="Reported output tokens" value={tokens(row.output)} />
-    <StatCard label="Reported total tokens" value={tokens(row.total)} hint={row.unknownTokens ? `${row.unknownTokens} attempts with unknown usage` : undefined} />
-    <StatCard label="Average latency" value={row.averageLatency == null ? 'Unavailable' : `${Math.round(row.averageLatency)} ms`} />
-    {row.uniqueUsers != null && <StatCard label="Unique users" value={num(row.uniqueUsers)} />}
-    <StatCard label="Success rate" value={row.success + row.failed ? `${Math.round(row.success / (row.success + row.failed) * 100)}%` : 'Unavailable'} />
-  </Grid>;
+function WorkloadOverview({ workload, control, items, usage, encryption, setTab, refresh }: {
+  workload: Workload; control?: Settings; items: Config[]; usage?: Usage | null; encryption: boolean;
+  setTab: (tab: string) => void; refresh: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const active = items.find((item) => item._id === control?.activeId);
+  const eligible = active?.eligible === true;
+  const metric = usage?.workloads.find((row) => row._id === workload);
+  const model = workload === 'STUDENT_MENTOR' ? 'openai/gpt-oss-20b' : 'openai/gpt-oss-120b';
+  const status = !control?.enabled ? 'Connected but disabled'
+    : !active ? 'Not configured'
+    : !eligible ? 'Connection failed'
+    : 'Enabled and ready';
+  async function toggle() {
+    if (!control || busy) return;
+    setBusy(true);
+    try {
+      await api(`${base}/settings/${workload}`, { method: 'PATCH', body: { enabled: !control.enabled } });
+      await refresh();
+      toast.success(control.enabled ? `${label(workload)} disabled` : `${label(workload)} enabled`);
+    } catch (error) { toast.error(errorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  return <Card title={<span className="flex items-center gap-2">{workload === 'STUDENT_MENTOR' ? <GraduationCap size={18} aria-hidden /> : <BrainCircuit size={18} aria-hidden />}{label(workload)}</span>}
+    actions={<Badge tone={control?.enabled ? 'success' : 'neutral'} dot>{control?.enabled ? 'Enabled' : 'Disabled'}</Badge>}>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-fg">{status}</p>
+          <p className="mt-1 text-xs text-fg-muted">Groq · {model}</p>
+        </div>
+        <Button size="sm" loading={busy} disabled={!encryption || !control}
+          variant={control?.enabled ? 'secondary' : 'primary'} onClick={() => void toggle()}>
+          {control?.enabled ? 'Disable workload' : 'Enable workload'}
+        </Button>
+      </div>
+      {!encryption && <Notice tone="warn">Credential encryption is unavailable. Configure the Railway encryption key before activating AI.</Notice>}
+      {control && !active && <Notice tone="info">Add a Groq API key to configure this workload.</Notice>}
+      <Grid cols={3}>
+        <StatCard label="Active configuration" value={active?.name ?? 'None'} />
+        <StatCard label="Today's requests" value={num(metric?.outbound)} />
+        <StatCard label="Today's tokens" value={metric ? num(metric.total) : '0'} />
+      </Grid>
+      {control?.budget && <p className="text-xs text-fg-muted">Remaining application allowance: {num(Math.max(0, control.limits.requestsDay - control.budget.requests))} requests · {num(Math.max(0, control.limits.tokensDay - control.budget.tokens))} tokens.</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" icon={<Settings2 size={14} aria-hidden />} onClick={() => setTab(workload === 'STUDENT_MENTOR' ? 'student' : 'staff')}>Manage API keys</Button>
+      </div>
+    </div>
+  </Card>;
 }
-function Quota({ item }: { item: ProviderMetric }) {
-  const values = Object.entries(item.quota ?? {});
-  return <details className="mt-3 text-sm text-fg-muted">
-    <summary className="cursor-pointer">Last observed provider quota · {values.length ? date(item.lastObserved) : 'Unavailable'}</summary>
-    <dl className="mt-2 grid gap-1">
-      {values.map(([header, value]) => <div key={header} className="flex flex-wrap gap-x-2"><dt>{header}</dt><dd>{value}</dd></div>)}
-    </dl>
-    <p>Provider-wide credits are unavailable unless reported. Application budgets are shown separately.</p>
-  </details>;
-}
+
 function List({ rows }: { rows: (Metric & { name: string })[] }) {
   return rows.length ? <ul className="divide-y divide-line">{rows.map((row) => <li key={row.name} className="py-2 text-sm">
     <strong>{row.name}</strong> · {num(row.outbound)} sent · {num(row.local)} local · {num(row.success)} successful · {num(row.failed)} failed · {num(row.rateLimited)} rate-limited · {num(row.total)} reported tokens
@@ -221,6 +229,18 @@ function Providers({ workload, items, usage, refresh, encryption, controls, prov
   }
   const saved = items.filter((item) => item.workload === workload);
   return <div className="space-y-3">
+    {controls && <Card title={`${label(workload)} availability`}
+      actions={<Badge tone={controls.enabled ? 'success' : 'neutral'} dot>{controls.enabled ? 'Enabled' : 'Disabled'}</Badge>}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-fg-muted">{controls.enabled
+          ? saved.some((item) => item.active && item.eligible) ? 'Enabled and ready for eligible requests.' : 'Enabled, but no eligible primary is configured.'
+          : 'Disabled. Saved configurations remain available for testing and editing.'}</p>
+        <Button size="sm" loading={busy} variant={controls.enabled ? 'secondary' : 'primary'}
+          onClick={() => void api(`${base}/settings/${workload}`, { method: 'PATCH', body: { enabled: !controls.enabled } })
+            .then(() => { toast.success(`${label(workload)} ${controls.enabled ? 'disabled' : 'enabled'}`); void refresh(); })
+            .catch((err) => toast.error(errorMessage(err)))}>{controls.enabled ? 'Disable workload' : 'Enable workload'}</Button>
+      </div>
+    </Card>}
     <WorkloadSummary workload={workload} controls={controls} items={saved} usage={usage} />
     {controls && <Switching key={JSON.stringify([controls.mode, controls.recovery, controls.maxBackups, controls.paidAllowed])} settings={controls} refresh={refresh} />}
     <Card title={`${label(workload)} configurations`} description="Up to 10 independent encrypted configurations. Student AI and Staff AI are configured separately."

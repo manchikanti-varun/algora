@@ -835,7 +835,7 @@ try {
       await practiceSaved;
       await external.close();
       await problem.getByRole('button', { name: 'Ask AI', exact: true }).click();
-      const dialog = p.getByRole('dialog', { name: 'AI Coding Mentor' });
+      const dialog = p.getByRole('dialog', { name: 'Algora AI Mentor' });
       await dialog.getByRole('heading', { name: /Two Sum/ }).waitFor();
       const consent = dialog.getByRole('checkbox', { name: /content may be sent to configured AI providers/ });
       await consent.check();
@@ -874,7 +874,7 @@ try {
       await problem.getByRole('link', { name: /Solve Two Sum/ }).waitFor();
       assert(!(await problem.getByRole('button', { name: 'Ask AI', exact: true }).count()), 'Ask AI was visible after disable');
       await problem.getByRole('button', { name: 'AI history' }).click();
-      const dialog = p.getByRole('dialog', { name: 'AI Coding Mentor' });
+      const dialog = p.getByRole('dialog', { name: 'Algora AI Mentor' });
       await dialog.getByText('Consider a one-element example within the requirements.').waitFor();
       assert(!(await dialog.getByRole('button', { name: /hint|ask for guidance/i }).count()), 'history allowed new guidance');
       await dialog.getByRole('button', { name: 'Close', exact: true }).click();

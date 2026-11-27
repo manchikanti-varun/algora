@@ -11,7 +11,7 @@ import { useUrlState } from '@/hooks/useUrlState';
 import { api, qs } from '@/lib/api';
 const StudentMentor = dynamic(() => import('@/components/ai/StudentMentor'), { ssr: false });
 interface P { _id: string; title: string; url: string; slug: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD'; problemNumber: number | null; points: number; topics: string[]; verified: boolean; catalogEligible?: boolean; hasAiHistory?: boolean; evidence: { firstVerifiedAt: string | null; latestObservedSolvedAt: string | null } | null }
-interface R { chapter: { _id: string; title: string; description?: string; aiEnabled: boolean }; course: { _id: string; title: string }; batchName: string; problems: P[]; prev: { _id: string; title: string } | null; next: { _id: string; title: string } | null }
+interface R { chapter: { _id: string; title: string; description?: string; studentAiEnabled: boolean; aiEnabled: boolean }; course: { _id: string; title: string }; batchName: string; problems: P[]; prev: { _id: string; title: string } | null; next: { _id: string; title: string } | null }
 interface Course { batchCourseId: string; chapters: { _id: string }[] }
 const shortDate = (d: string) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const DIFFS = [{ value: '', label: 'All difficulties' }, { value: 'EASY', label: 'Easy' }, { value: 'MEDIUM', label: 'Medium' }, { value: 'HARD', label: 'Hard' }];
@@ -85,7 +85,7 @@ function Inner() {
         )} />
       <Card flush footer={<p className="text-xs text-fg-subtle">A problem is verified after Algora sees an accepted submission from your LeetCode account.</p>}>
         <div className="space-y-2 border-b border-line px-4 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_180px_180px]">
             <SearchInput label="Search problems" placeholder="Search problems" value={f.q} onChange={(v) => setF({ q: v })} />
             <InlineSelect label="Difficulty" value={f.diff} onChange={(v) => setF({ diff: v })} options={DIFFS} />
             <InlineSelect label="Status" value={f.status} onChange={(v) => setF({ status: v })} options={STATUSES} />
@@ -117,6 +117,8 @@ function Inner() {
                       </ButtonLink>
                       {d.chapter.aiEnabled && p.catalogEligible ? (
                         <Button size="sm" variant="ghost" icon={<Sparkles size={14} aria-hidden />} onClick={() => setMentor(p._id)}>Ask AI</Button>
+                      ) : d.chapter.studentAiEnabled ? (
+                        <Button size="sm" variant="ghost" disabled title="AI is currently unavailable">Ask AI unavailable</Button>
                       ) : p.hasAiHistory && (
                         <Button size="sm" variant="ghost" onClick={() => setMentor(p._id)}>AI history</Button>
                       )}

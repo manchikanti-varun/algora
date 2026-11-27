@@ -17,7 +17,7 @@ import { countableEvidence, purgeStudentLeetcodeData } from '../leetcode/evidenc
 import { batchCourseBoard, cachedBoard, clearBoardCache, paginate, scopeProblems, visibleContent } from '../progress/progress.service';
 import { studentAi } from '../ai/student.routes';
 import { batchAiAvailable, practice } from '../ai/context';
-import { settings } from '../ai/runtime';
+import { configuredProvider, settings } from '../ai/runtime';
 import { AiBatch, AiConversation } from '../../models/ai';
 import { studentAttendanceData } from '../attendance/attendance.service';
 
@@ -67,7 +67,8 @@ studentRouter.get('/chapters/:chapterId', async (req, res) => {
     getScoring(),
     visible.studentAiEnabled === true ? Promise.all([
       settings('STUDENT_MENTOR'), AiBatch.findById(String(ctx.bc.batchId)).lean(),
-    ]).then(([mentor, controls]) => mentor.enabled && batchAiAvailable(controls, String(ctx.bc.courseId))) : false,
+    ]).then(async ([mentor, controls]) =>
+      mentor.enabled && batchAiAvailable(controls, String(ctx.bc.courseId)) && await configuredProvider('STUDENT_MENTOR', mentor)) : false,
     AiConversation.distinct('problemId', { workload: 'STUDENT_MENTOR', userId: String(req.user!._id), batchCourseId, chapterId, expiresAt: { $gt: new Date() } }),
   ]);
   const historyIds = new Set(history);
