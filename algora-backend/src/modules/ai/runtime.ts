@@ -333,7 +333,9 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
     catch { throw new AppError(502, 'AI_OUTPUT', 'The provider returned an invalid response.'); }
     if (provider.circuitUntil) await AiProvider.updateOne({ ...currentVersion, circuitUntil: provider.circuitUntil }, { $unset: { circuitUntil: 1, circuitReason: 1 } });
     status = 'SUCCESS';
-    return { content, model: provider.model, provider: name, configId: id, configVersion: provider.version };
+    // Connection tests surface the provider's reported quota headers to the administrator. Normal
+    // student and staff responses never include provider metadata.
+    return { content, model: provider.model, provider: name, configId: id, configVersion: provider.version, ...(test ? { quota } : {}) };
   } catch (error) {
     const safe = error instanceof AppError ? error : new ProviderFailure(503, 'AI_PROVIDER_UNCERTAIN', 'The provider did not confirm whether it completed the request.');
     errorCode = safe.code;
@@ -386,6 +388,36 @@ export async function currentBudgets(provider: Config, config: WorkloadSettings)
     quotaCooldownUntil: [pause?.expiresAt, unknownPause?.expiresAt].filter((date): date is Date => !!date && +date > now)
       .sort((a, b) => +b - +a)[0],
   };
+}
+
+/** Budget snapshots for every configuration in one query, used by the administrator list view. */
+export async function budgetSnapshots(rows: Config[], configs: Map<Workload, WorkloadSettings>) {
+  const now = Date.now();
+  const keys = new Set<string>();
+  for (const row of rows) {
+    keys.add(counterId(`config:${row._id}`, minuteMs, now));
+    keys.add(counterId(`config:${row._id}`, dayMs, now));
+    keys.add(counterId(`spend:${row._id}`, dayMs, now));
+    keys.add(`groq:${row.quotaGroup}:pause`);
+    keys.add(`ai-provider-unknown:${providerFamily(row)}:pause`);
+  }
+  const found = await AiCounter.find({ _id: { $in: [...keys] } }, 'requests tokens expiresAt').lean();
+  const counters = new Map(found.map((row) => [row._id, row]));
+  return new Map(rows.map((row) => {
+    const config = configs.get(row.workload as Workload);
+    const caps = providerLimits.parse({ ...(config?.limits ?? defaults(row.workload as Workload)), ...row.limits });
+    const minute = counters.get(counterId(`config:${row._id}`, minuteMs, now));
+    const day = counters.get(counterId(`config:${row._id}`, dayMs, now));
+    const spend = counters.get(counterId(`spend:${row._id}`, dayMs, now));
+    const pause = counters.get(`groq:${row.quotaGroup}:pause`);
+    const unknownPause = counters.get(`ai-provider-unknown:${providerFamily(row)}:pause`);
+    return [String(row._id), {
+      configured: caps, minute: { requests: minute?.requests ?? 0, tokens: minute?.tokens ?? 0 },
+      day: { requests: day?.requests ?? 0, tokens: day?.tokens ?? 0, estimatedUsd: (spend?.tokens ?? 0) / 1_000_000 },
+      quotaCooldownUntil: [pause?.expiresAt, unknownPause?.expiresAt].filter((date): date is Date => !!date && +date > now)
+        .sort((a, b) => +b - +a)[0],
+    }] as const;
+  }));
 }
 
 export type Limits = z.infer<typeof limitsSchema>;

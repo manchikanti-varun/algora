@@ -1,6 +1,7 @@
 'use client';
 import { useState, type FormEvent } from 'react';
-import { BarList, Button, Card, Checkbox, ErrorState, Grid, Input, Notice, PageHeader, Select, StatCard, useConfirm, useToast } from '@/components/ui';
+import { BarList, Button, Card, Checkbox, DescriptionList, ErrorState, Grid, Input, Notice, PageHeader, Select, StatCard, useConfirm, useToast } from '@/components/ui';
+import { ProviderConfigForm, type ProviderBudgetView as Budget, type ProviderConfig as Config } from '@/components/ai/ProviderConfigForm';
 import { useApi } from '@/hooks/useApi';
 import { api, download, errorMessage, qs } from '@/lib/api';
 
@@ -25,20 +26,10 @@ const limitLabels: Record<string, string> = {
   generationDay: 'Staff generation requests per person per day', conversationDay: 'Staff follow-ups per person per day',
   history: 'Conversation turns sent', retention: 'Conversation retention days', chapterSize: 'Maximum problems per job',
 };
-const providerFields = ['requestsDay', 'requestsMinute', 'tokensDay', 'tokensMinute'];
 interface Settings {
   workload: Workload; enabled: boolean; activeId?: string; servingId?: string; limits: Record<string, number>;
   mode: 'MANUAL' | 'AUTO'; recovery: 'COOLDOWN' | 'STICKY'; maxBackups: number; paidAllowed: boolean; budget?: { requests: number; tokens: number };
 }
-interface Config {
-  _id: string; workload: Workload; name: string; model: string; organization?: string; project?: string; quotaGroup: string;
-  masked: string; plan: string; version: number; active: boolean; limits?: Record<string, number>; lastTest?: { status: string; latency: number };
-  provider: string; endpoint?: string; eligible: boolean; enabled: boolean; backup: boolean; independent: boolean; priority: number;
-  quotaScope: string; paidApproved: boolean; outputMode?: string; timeoutMs: number; inputLimit?: number; outputLimit?: number;
-  spending?: { dailyUsd: number; inputPerMillion: number; outputPerMillion: number }; circuitUntil?: string;
-}
-interface Budget { configured: Record<string, number>; day: { requests: number; tokens: number; estimatedUsd: number };
-  minute: { requests: number; tokens: number }; quotaCooldownUntil?: string }
 interface Metric { requests: number; outbound: number; local: number; success: number; failed: number; rateLimited: number; input: number; output: number; total: number; unknownTokens: number; averageLatency?: number; uniqueUsers?: number; backupAttempts?: number; costUsd?: number; knownCost?: number }
 interface ProviderMetric extends Metric { _id: string; quota?: Record<string, string>; lastObserved?: string; lastSuccess?: string; lastFailureAt?: string; lastStatus?: string; lastFailure?: string }
 interface Usage {
@@ -61,7 +52,7 @@ export default function Page() {
   return <div className="space-y-5">
     <PageHeader title="AI Management" subtitle="Configure AI providers, workload budgets and practice access." />
     <div role="group" aria-label="AI Management views" className="flex flex-wrap gap-2">
-      {Object.entries({ overview: 'Overview', student: 'Student AI configurations', staff: 'Staff AI configuration', usage: 'Usage analytics',
+      {Object.entries({ overview: 'Overview', student: 'Student AI', staff: 'Staff AI', usage: 'Usage analytics',
         'student-limits': 'Student limits', 'staff-limits': 'Staff limits', failover: 'Failover history', batches: 'Batch controls', education: 'Educational settings' }).map(([key, name]) =>
         <Button key={key} size="sm" variant={tab === key ? 'primary' : 'secondary'} aria-pressed={tab === key} onClick={() => setTab(key)}>{name}</Button>)}
     </div>
@@ -160,6 +151,59 @@ function List({ rows }: { rows: (Metric & { name: string })[] }) {
   </li>)}</ul> : <p className="text-sm text-fg-muted">No matching activity.</p>;
 }
 
+function WorkloadSummary({ workload, controls, items, usage }: {
+  workload: Workload; controls?: Settings; items: Config[]; usage?: Usage | null;
+}) {
+  const active = items.find((item) => item._id === controls?.activeId);
+  const serving = items.find((item) => item._id === controls?.servingId && item.eligible) ?? active;
+  const backups = items.filter((item) => item.backup && item.eligible && !item.active).sort((a, b) => a.priority - b.priority);
+  const metric = usage?.workloads.find((row) => row._id === workload);
+  const remaining = controls?.budget ? {
+    requests: Math.max(0, controls.limits.requestsDay - controls.budget.requests),
+    tokens: Math.max(0, controls.limits.tokensDay - controls.budget.tokens),
+  } : undefined;
+  return <Card title={`${label(workload)} status`} description="Provider configuration and application budgets are independent for each workload.">
+    <DescriptionList cols={3} items={[
+      { label: 'Workload', value: controls?.enabled ? 'Enabled' : 'Disabled' },
+      { label: 'Active provider', value: active ? `${names[active.provider] ?? active.provider} · ${active.model}` : 'None' },
+      { label: 'Routing', value: controls?.mode === 'AUTO' ? 'Automatic failover' : 'Manual selection' },
+      { label: 'Serving', value: serving ? serving.name : 'Unavailable' },
+      { label: 'Saved configurations', value: `${items.length} of 10` },
+      { label: 'Eligible backups', value: backups.length ? `${backups.length} · ${backups.map((entry) => entry.name).join(' → ')}` : 'None' },
+      { label: 'Today requests', value: num(metric?.outbound) },
+      { label: 'Today tokens', value: metric ? (metric.outbound > 0 && metric.unknownTokens >= metric.outbound ? 'Unavailable' : num(metric.total)) : '0' },
+      { label: 'Remaining app budget', value: remaining ? `${num(remaining.requests)} requests · ${num(remaining.tokens)} tokens` : 'Unavailable' },
+    ]} />
+  </Card>;
+}
+
+function ObservedQuota({ quota, observed }: { quota?: Record<string, string>; observed?: string }) {
+  const values = Object.entries(quota ?? {});
+  if (!values.length) return <p className="text-sm text-fg-muted">Provider-reported allowance: Unavailable. Run Test connection to capture headers when the provider reports them.</p>;
+  return <details className="text-sm text-fg-muted">
+    <summary className="cursor-pointer">Provider-reported allowance ({values.length} headers) · {date(observed)}</summary>
+    <dl className="mt-2 grid gap-1">
+      {values.map(([header, value]) => <div key={header} className="flex flex-wrap gap-x-2"><dt>{header}</dt><dd>{value}</dd></div>)}
+    </dl>
+    <p>Provider-defined limits and remaining allowance only. Application budgets are shown separately.</p>
+  </details>;
+}
+
+function tokenValue(row: ProviderMetric | undefined, field: 'input' | 'output' | 'total') {
+  if (!row) return 'Unavailable';
+  return row.outbound > 0 && row.unknownTokens >= row.outbound ? 'Unavailable' : num(row[field]);
+}
+
+/** Mirrors the backend eligibility rules so the card can explain why activation is unavailable. */
+function eligibility(item: Config, controls?: Settings) {
+  if (!item.enabled) return 'Disabled';
+  if (item.eligible) return 'Enabled · Eligible';
+  if (item.plan === 'PAID' && (!item.paidApproved || !controls?.paidAllowed)) return 'Enabled · Paid use not approved';
+  if (item.plan !== 'PAID' && item.provider === 'OPENROUTER' && !item.model.endsWith(':free')) return 'Enabled · Free plan needs a :free model';
+  if (item.provider !== 'GROQ' && !(item.lastTest?.status === 'SUCCESS' && item.lastTest.version === item.version)) return 'Enabled · Test this version before activation';
+  return 'Enabled · Needs attention';
+}
+
 function Providers({ workload, items, usage, refresh, encryption, controls, providerOptions, endpoints }: {
   workload: Workload; items: Config[]; usage?: Usage | null; refresh: () => Promise<void>; encryption: boolean;
   controls?: Settings; providerOptions: string[]; endpoints: string[];
@@ -169,48 +213,77 @@ function Providers({ workload, items, usage, refresh, encryption, controls, prov
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
   const toast = useToast();
-  async function action(path: string, method = 'POST', body?: unknown) {
+  async function action(path: string, method = 'POST', body?: unknown, success = 'Configuration updated') {
     setBusy(true);
-    try { await api(`${base}/providers${path}`, { method, body }); toast.success('Configuration updated'); }
+    try { await api(`${base}/providers${path}`, { method, body }); toast.success(success); }
     catch (err) { toast.error(errorMessage(err)); }
     finally { await refresh(); setBusy(false); }
   }
+  const saved = items.filter((item) => item.workload === workload);
   return <div className="space-y-3">
+    <WorkloadSummary workload={workload} controls={controls} items={saved} usage={usage} />
     {controls && <Switching key={JSON.stringify([controls.mode, controls.recovery, controls.maxBackups, controls.paidAllowed])} settings={controls} refresh={refresh} />}
-    <Card title={`${label(workload)} configurations`} description="Use authorized provider accounts. Give credentials sharing an underlying quota the same quota group."
-      actions={<Button disabled={!encryption || busy || items.filter((entry) => entry.workload === workload).length >= 10} onClick={() => setEdit('new')}>Add configuration</Button>}>
-      <Button variant="secondary" disabled={busy} onClick={() => void action(`/deactivate/${workload}`)}>Deactivate all</Button>
+    <Card title={`${label(workload)} configurations`} description="Up to 10 independent encrypted configurations. Student AI and Staff AI are configured separately."
+      actions={<Button disabled={!encryption || busy || saved.length >= 10} onClick={() => setEdit('new')}>Add configuration</Button>}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-fg-muted">{saved.length} of 10 saved · {saved.filter((item) => item.enabled).length} enabled</span>
+        <Button variant="secondary" disabled={busy} onClick={() => void action(`/deactivate/${workload}`, 'POST', undefined, 'Active configuration cleared')}>Deactivate all</Button>
+      </div>
     </Card>
-    {items.filter((item) => item.workload === workload).map((item) => {
+    {saved.map((item) => {
       const history = usage?.history.find((row) => row._id === item._id);
       const today = usage?.providers.find((row) => row._id === item._id);
+      const quota = history?.quota ?? item.lastTest?.quota;
+      const remainingRequests = item.budget ? Math.max(0, item.budget.configured.requestsDay - item.budget.day.requests) : undefined;
+      const remainingTokens = item.budget ? Math.max(0, item.budget.configured.tokensDay - item.budget.day.tokens) : undefined;
       return <Card title={item.name} key={item._id}
-        description={`${item.active ? 'Primary' : item.backup ? 'Backup' : 'Inactive'} · ${names[item.provider]} · ${item.model} · ${item.masked} · ${item.plan}`}>
-        <p className="text-sm text-fg-muted">{item.enabled ? item.eligible ? 'Enabled · Eligible' : 'Enabled · Ineligible' : 'Disabled'} · Priority {item.priority} · Quota group {item.quotaGroup} ({item.quotaScope.toLowerCase()}) ·
-          Version {item.version} · Connection {item.lastTest ? `${item.lastTest.status} (${item.lastTest.latency} ms)` : 'Untested'}</p>
-        {item.circuitUntil && <p className="text-sm text-fg-muted">Recovery probe eligible after {date(item.circuitUntil)}</p>}
-        {history && <>
-          <p className="my-2 text-sm">Lifetime {num(history.outbound)} sent · Today {num(today?.outbound)} sent · {num(history.success)} successful · {num(history.failed)} failed · {num(history.rateLimited)} rate-limited</p>
-          <p className="text-sm">{num(history.input)} input · {num(history.output)} output · {num(history.total)} reported total · {num(history.unknownTokens)} with unknown usage</p>
-          <p className="text-sm text-fg-muted">{history.averageLatency != null && `Average ${Math.round(history.averageLatency)} ms · `}Last success {date(history.lastSuccess)} · Last failure {date(history.lastFailureAt)} · Last observed {date(history.lastObserved)}</p>
-          <p className="text-sm text-fg-muted">Known or estimated spend {history.knownCost ? `$${history.costUsd?.toFixed(4)}` : 'Unavailable'}</p>
-          <Quota item={history} />
-        </>}
+        description={`${item.active ? 'Primary' : item.backup ? 'Backup' : 'Inactive'} · ${names[item.provider] ?? item.provider} · ${item.model} · ${item.masked} · ${item.plan === 'PAID' ? 'Paid' : 'Free'}`}>
+        <DescriptionList cols={4} items={[
+          { label: 'Status', value: eligibility(item, controls) },
+          { label: 'Connection', value: item.lastTest ? `${item.lastTest.status} · ${item.lastTest.latency} ms` : 'Untested' },
+          { label: 'Today', value: `${num(today?.outbound)} provider attempts` },
+          { label: 'Last success', value: history?.lastSuccess ? date(history.lastSuccess) : 'Unavailable' },
+          { label: 'Input tokens', value: tokenValue(history, 'input') },
+          { label: 'Output tokens', value: tokenValue(history, 'output') },
+          { label: 'Total tokens', value: tokenValue(history, 'total') },
+          { label: 'Remaining configuration budget', value: remainingRequests == null ? 'Unavailable' : `${num(remainingRequests)} requests · ${num(remainingTokens)} tokens` },
+        ]} />
+        <div className="mt-3"><ObservedQuota quota={quota} observed={history?.lastObserved ?? item.lastTest?.at} /></div>
+        {(item.circuitUntil || item.budget?.quotaCooldownUntil) && <p className="mt-2 text-sm text-warning-fg">
+          Provider cooling down until {date(item.circuitUntil ?? item.budget?.quotaCooldownUntil)}
+        </p>}
+        <details className="mt-3 text-sm">
+          <summary className="cursor-pointer text-fg-muted">Technical details and lifetime usage</summary>
+          <div className="mt-2 space-y-1 text-fg-muted">
+            <p>Priority {item.priority} · Quota group {item.quotaGroup} ({item.quotaScope.toLowerCase()}) · Version {item.version} · {item.timeoutMs} ms timeout</p>
+            {item.circuitUntil && <p>Recovery probe eligible after {date(item.circuitUntil)}</p>}
+            {history ? <>
+              <p>Lifetime {num(history.outbound)} sent · {num(history.success)} successful · {num(history.failed)} failed · {num(history.rateLimited)} rate-limited</p>
+              <p>{num(history.input)} input · {num(history.output)} output · {num(history.total)} reported total · {num(history.unknownTokens)} with unknown usage</p>
+              <p>{history.averageLatency != null && `Average ${Math.round(history.averageLatency)} ms · `}Last failure {date(history.lastFailureAt)} · Last observed {date(history.lastObserved)}</p>
+              <p>Known or estimated spend {history.knownCost ? `$${history.costUsd?.toFixed(4)}` : 'Unavailable'}</p>
+            </> : <p>No provider usage recorded yet.</p>}
+          </div>
+        </details>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEdit(item)}>Edit configuration</Button>
           <Button size="sm" variant="secondary" disabled={busy || !encryption || (item.plan === 'PAID' && (!item.paidApproved || !controls?.paidAllowed))}
-            onClick={() => void action(`/${item._id}/test`)}>Test connection</Button>
+            onClick={() => void action(`/${item._id}/test`, 'POST', undefined, 'Connection tested')}>Test connection</Button>
           {!item.active || controls?.servingId !== item._id ? <Button size="sm" disabled={busy || !encryption || !item.eligible}
-            onClick={() => void action(`/${item._id}/activate`)}>{item.active ? 'Restore primary' : 'Activate'}</Button> : null}
-          {item.active && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action(`/deactivate/${workload}`)}>Deactivate</Button>}
-          <Button size="sm" variant="secondary" onClick={() => setBudget(budget === item._id ? undefined : item._id)}>{budget === item._id ? 'Hide budget' : 'View application budget'}</Button>
+            onClick={() => void action(`/${item._id}/activate`, 'POST', undefined, 'Primary configuration activated')}>{item.active ? 'Restore primary' : 'Activate'}</Button> : null}
+          {item.active && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void action(`/deactivate/${workload}`, 'POST', undefined, 'Active configuration cleared')}>Deactivate</Button>}
+          <Button size="sm" variant="secondary" disabled={busy}
+            onClick={() => void action(`/${item._id}`, 'PATCH', { enabled: !item.enabled }, item.enabled ? 'Configuration disabled' : 'Configuration enabled')}>
+            {item.enabled ? 'Disable' : 'Enable'}
+          </Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => setBudget(budget === item._id ? undefined : item._id)}>{budget === item._id ? 'Hide budget' : 'View application budget'}</Button>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void confirm({ title: 'Archive this configuration?', body: 'The stored credential is removed. Usage history remains available.', confirmLabel: 'Archive', danger: true })
-            .then((ok) => { if (ok) void action(`/${item._id}`, 'DELETE'); })}>Archive</Button>
+            .then((ok) => { if (ok) void action(`/${item._id}`, 'DELETE', undefined, 'Configuration archived'); })}>Archive</Button>
         </div>
         {budget === item._id && <ProviderBudget id={item._id} spending={item.spending?.dailyUsd} />}
       </Card>;
     })}
-    {edit && <ProviderForm key={edit === 'new' ? 'new' : edit._id} workload={workload} current={edit === 'new' ? undefined : edit}
+    {edit && <ProviderConfigForm key={edit === 'new' ? 'new' : edit._id} workload={workload} current={edit === 'new' ? undefined : edit}
       providerOptions={providerOptions} endpoints={endpoints} close={() => setEdit(null)} refresh={refresh} />}
   </div>;
 }
@@ -273,100 +346,6 @@ function FailoverHistory({ items }: { items: Config[] }) {
   </Card>;
 }
 
-function ProviderForm({ workload, current, providerOptions, endpoints, close, refresh }: {
-  workload: Workload; current?: Config; providerOptions: string[]; endpoints: string[]; close: () => void; refresh: () => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [provider, setProvider] = useState(current?.provider ?? 'GROQ');
-  const [plan, setPlan] = useState(current?.plan ?? 'FREE');
-  const [model, setModel] = useState(current?.model ?? '');
-  const [models, setModels] = useState<{ id: string; inputLimit?: number; outputLimit?: number }[]>([]);
-  const [discovering, setDiscovering] = useState(false);
-  const toast = useToast();
-  const discovered = models.find((entry) => entry.id === model);
-  async function discover() {
-    if (!current) return;
-    setDiscovering(true);
-    try {
-      const result = await api<{ items: typeof models }>(`${base}/providers/${current._id}/models`, { method: 'POST' });
-      setModels(result.items);
-      if (!result.items.length) toast.info('No models were returned by this provider.');
-    } catch (error) { toast.error(errorMessage(error)); }
-    finally { setDiscovering(false); }
-  }
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const test = (event.nativeEvent as SubmitEvent).submitter?.getAttribute('value') === 'test';
-    const form = new FormData(event.currentTarget);
-    const { name, apiKey, organization, project, quotaGroup, quotaScope } = Object.fromEntries(form);
-    const limits = Object.fromEntries(providerFields.filter((field) => form.get(field)).map((field) => [field, Number(form.get(field))]));
-    const number = (field: string) => form.get(field) ? Number(form.get(field)) : null;
-    const configuredSpend = number('dailyUsd');
-    const spending = configuredSpend === null ? null : { dailyUsd: configuredSpend,
-      inputPerMillion: number('inputPerMillion') ?? 0, outputPerMillion: number('outputPerMillion') ?? 0 };
-    setBusy(true);
-    try {
-      const saved = await api<{ _id: string }>(`${base}/providers${current ? `/${current._id}` : ''}`, { method: current ? 'PATCH' : 'POST',
-        body: { name, provider, model, ...(apiKey ? { apiKey } : {}), organization, project, quotaGroup, quotaScope, plan, limits,
-          enabled: form.has('enabled'), backup: form.has('backup'), independent: form.has('independent'), paidApproved: form.has('paidApproved'),
-          priority: number('priority'), timeoutMs: number('timeoutMs'), inputLimit: number('inputLimit'), outputLimit: number('outputLimit'), spending,
-          endpoint: provider === 'CUSTOM' ? form.get('endpoint') : null, outputMode: ['CUSTOM', 'ANTHROPIC'].includes(provider) ? form.get('outputMode') : null, ...(current ? {} : { workload }) } });
-      close();
-      if (test) await api(`${base}/providers/${saved._id}/test`, { method: 'POST' });
-      toast.success(test ? 'Configuration saved and tested' : 'Configuration saved');
-    } catch (error) { toast.error(errorMessage(error)); }
-    finally { await refresh(); setBusy(false); }
-  }
-  return <Card title={current ? 'Edit provider configuration' : 'Add provider configuration'}>
-    <form onSubmit={save} className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Input name="name" label="Display name" defaultValue={current?.name} required maxLength={80} />
-        <Select label="Provider" value={provider} onChange={(event) => { setProvider(event.target.value); setModel(''); setModels([]); }}
-          options={providerOptions.map((key) => ({ value: key, label: names[key] ?? key }))} />
-        <Input name="model" label="Model ID" value={model} onChange={(event) => setModel(event.target.value)} list={models.length ? 'provider-models' : undefined} required maxLength={160} />
-        {models.length > 0 && <datalist id="provider-models">{models.map((entry) => <option key={entry.id} value={entry.id} />)}</datalist>}
-        {current && current.provider === provider && <Button variant="secondary" loading={discovering} onClick={() => void discover()}>Discover saved provider models</Button>}
-        {discovered && <p className="text-sm text-fg-muted">Published input limit {discovered.inputLimit ?? 'Unavailable'} · Output limit {discovered.outputLimit ?? 'Unavailable'}</p>}
-        {provider === 'CUSTOM' && <>
-          <Select name="endpoint" label="Approved API base URL" defaultValue={current?.endpoint ?? endpoints[0]} required
-            options={endpoints.map((value) => ({ value, label: value }))} />
-        </>}
-        {['CUSTOM', 'ANTHROPIC'].includes(provider) && <Select name="outputMode" label="Output capability" defaultValue={current?.outputMode ?? 'JSON_OBJECT'}
-          options={[{ value: 'JSON_OBJECT', label: provider === 'ANTHROPIC' ? 'Native JSON schema' : 'Native JSON object mode' },
-            { value: 'PROMPT_JSON', label: 'Prompted JSON with validation' }]} />}
-        <Input name="quotaGroup" label="Shared quota group" defaultValue={current?.quotaGroup} required maxLength={50} />
-        <Select name="quotaScope" label="Confirmed quota scope" defaultValue={current?.quotaScope ?? 'UNKNOWN'}
-          options={['UNKNOWN', 'ORGANIZATION', 'PROJECT', 'MODEL', 'ACCOUNT'].map((value) => ({ value, label: value.toLowerCase() }))} />
-        <Select name="plan" label="Plan" value={plan} onChange={(event) => setPlan(event.target.value)}
-          options={[{ value: 'FREE', label: 'Free' }, { value: 'PAID', label: 'Paid' }]} />
-        <Input name="organization" label="Organization label" defaultValue={current?.organization} maxLength={80} />
-        <Input name="project" label="Project label" defaultValue={current?.project} maxLength={80} />
-        <Input name="apiKey" type="password" autoComplete="new-password" label={current ? 'Replacement API key (optional)' : 'API key'} required={!current || current.provider !== provider} />
-        <Input name="priority" label="Backup priority" type="number" min={1} max={100} defaultValue={current?.priority ?? 100} required />
-        <Input name="timeoutMs" label="Timeout (milliseconds)" type="number" min={1000} max={25000} defaultValue={current?.timeoutMs ?? 12000} required />
-        <Input name="inputLimit" label="Model input limit (optional)" type="number" min={100} defaultValue={current?.inputLimit} />
-        <Input name="outputLimit" label="Model output limit (optional)" type="number" min={64} defaultValue={current?.outputLimit} />
-        {providerFields.map((field) => <Input key={field} name={field} label={limitLabels[field].replace('Workload', 'Configuration')} type="number" min={1} defaultValue={current?.limits?.[field]} />)}
-      </div>
-      <Checkbox name="enabled" label="Enable configuration" defaultChecked={current?.enabled ?? true} />
-      <Checkbox name="backup" label="Allow as a backup for this workload" defaultChecked={current?.backup} />
-      <Checkbox name="independent" label="I verified independent quota and authorization for automatic switching" defaultChecked={current?.independent} />
-      {plan === 'PAID' && <Checkbox name="paidApproved" label="Approve this configuration for paid use" defaultChecked={current?.paidApproved} />}
-      <details><summary className="cursor-pointer font-medium">Optional application spending estimate</summary>
-        <div className="mt-2 grid gap-3 sm:grid-cols-3">
-          <Input name="dailyUsd" label="Estimated daily USD cap" type="number" min={0.01} step="any" defaultValue={current?.spending?.dailyUsd} />
-          <Input name="inputPerMillion" label="USD per million input tokens" type="number" min={0} step="any" defaultValue={current?.spending?.inputPerMillion} />
-          <Input name="outputPerMillion" label="USD per million output tokens" type="number" min={0} step="any" defaultValue={current?.spending?.outputPerMillion} />
-        </div>
-      </details>
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" loading={busy}>Save configuration</Button>
-        <Button type="submit" value="test" variant="secondary" disabled={busy}>Save and test connection</Button>
-        <Button variant="ghost" onClick={close}>Cancel</Button>
-      </div>
-    </form>
-  </Card>;
-}
 
 function Limits({ item, education, refresh }: { item: Settings; education: boolean; refresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);

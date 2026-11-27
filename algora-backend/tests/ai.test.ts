@@ -29,6 +29,10 @@ beforeEach(async () => {
   simulate = (system, data) => groqResponse(groqFixture(system, data));
   const original = globalThis.fetch;
   vi.stubGlobal('fetch', async (url: string, options?: RequestInit) => {
+    if (url === 'https://api.groq.com/openai/v1/models' || url === 'https://api.openai.com/v1/models') {
+      return new Response(JSON.stringify({ data: [{ id: 'fixture-model' }, { id: 'fixture-second', context_length: 8192, outputTokenLimit: 1024 }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (url === 'https://api.anthropic.com/v1/messages') {
       const body = JSON.parse(String(options?.body));
       outgoing.push({ url, credential: new Headers(options?.headers).get('x-api-key'), system: body.system,
@@ -429,6 +433,111 @@ describe('AI integration', () => {
     expect(outgoing).toHaveLength(1);
     expect((await AiUsage.findOne({ outbound: true }).lean())?.total).toBeUndefined();
     expect(await AiCounter.countDocuments({ requests: { $gt: 1 } })).toBe(0);
+  });
+});
+
+describe('simplified provider configuration', () => {
+  it('creates basic configurations for both workloads with safe defaults and keeps them independent', async () => {
+    const admin = await login(tok('admin-simple', 'admin@example.com'));
+    const create = (workload: typeof studentWork | typeof staffWork, suffix: string) => admin.call('post', `${manage}/providers`, {
+      name: `Basic ${suffix}`, model: 'fixture-model', apiKey: key(suffix), workload, quotaGroup: 'groq',
+    });
+    const student = await create(studentWork, 's');
+    const staff = await create(staffWork, 't');
+    expect(student.status).toBe(201);
+    expect(staff.status).toBe(201);
+    for (const row of [student.body, staff.body]) {
+      expect(row).toMatchObject({ provider: 'GROQ', plan: 'FREE', enabled: true, priority: 100, timeoutMs: 12000,
+        quotaScope: 'UNKNOWN', backup: false, independent: false, paidApproved: false, quotaGroup: 'groq' });
+    }
+    expect(student.body.workload).toBe(studentWork);
+    expect(staff.body.workload).toBe(staffWork);
+
+    expect((await admin.call('post', `${manage}/providers/${student.body._id}/test`)).status).toBe(200);
+    expect((await admin.call('post', `${manage}/providers/${staff.body._id}/test`)).status).toBe(200);
+    expect((await admin.call('post', `${manage}/providers/${student.body._id}/activate`)).status).toBe(204);
+    let settings = await AiSettings.find().lean();
+    expect(settings.find((row) => row._id === studentWork)?.activeId).toBe(student.body._id);
+    expect(settings.find((row) => row._id === staffWork)?.activeId).toBeUndefined();
+
+    // Disabling the Student primary must not touch the Staff workload or its configuration.
+    expect((await admin.call('patch', `${manage}/providers/${student.body._id}`, { enabled: false })).status).toBe(200);
+    settings = await AiSettings.find().lean();
+    expect(settings.find((row) => row._id === studentWork)?.activeId).toBeUndefined();
+    expect(settings.find((row) => row._id === staffWork)?.enabled).toBeUndefined();
+    expect((await AiProvider.findById(staff.body._id).lean())?.enabled).not.toBe(false);
+  });
+
+  it('discovers models with an entered key or a saved credential and never stores the ad-hoc key', async () => {
+    const admin = await login(tok('admin-discover', 'admin@example.com'));
+    const discovered = await admin.call('post', `${manage}/providers/discover`, { provider: 'GROQ', apiKey: key('d') });
+    expect(discovered.status).toBe(200);
+    expect(discovered.body.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'fixture-model' }),
+      expect.objectContaining({ id: 'fixture-second', inputLimit: 8192, outputLimit: 1024 }),
+    ]));
+    expect(await AiProvider.countDocuments()).toBe(0);
+
+    const saved = await admin.call('post', `${manage}/providers`, { name: 'Saved discovery', model: 'fixture-model',
+      apiKey: key('e'), workload: studentWork, quotaGroup: 'groq' });
+    expect(saved.status).toBe(201);
+    const viaSaved = await admin.call('post', `${manage}/providers/discover`, { configId: saved.body._id });
+    expect(viaSaved.status).toBe(200);
+    expect(viaSaved.body.items[0].id).toBe('fixture-model');
+    const savedStaff = await admin.call('post', `${manage}/providers`, { name: 'Staff discovery', model: 'fixture-model',
+      apiKey: key('h'), workload: staffWork, quotaGroup: 'groq' });
+    expect(savedStaff.status).toBe(201);
+    const viaStaff = await admin.call('post', `${manage}/providers/discover`, { configId: savedStaff.body._id });
+    expect(viaStaff.status).toBe(200);
+    expect(viaStaff.body.items.map((row: { id: string }) => row.id)).toContain('fixture-model');
+
+    expect((await admin.call('post', `${manage}/providers/discover`, { apiKey: key('g') })).status).toBe(400);
+    const denied = await admin.call('post', `${manage}/providers/discover`, { provider: 'CUSTOM', endpoint: 'https://unapproved.invalid/v1', apiKey: key('f') });
+    expect(denied.status).toBe(400);
+
+    await User.create({ googleSub: 'discover-trainer', email: 'discover-trainer@example.com', role: 'TRAINER', fullName: 'Discover Trainer' });
+    const trainer = await login(tok('discover-trainer', 'discover-trainer@example.com'));
+    expect((await trainer.call('post', `${manage}/providers/discover`, { provider: 'GROQ', apiKey: key('t') })).status).toBe(403);
+    await User.create({ googleSub: 'discover-student', email: 'discover-student@example.com', role: 'STUDENT', fullName: 'Discover Student', rollNumber: '22AG1A0999' });
+    const student = await login(tok('discover-student', 'discover-student@example.com'));
+    expect((await student.call('post', `${manage}/providers/discover`, { provider: 'GROQ', apiKey: key('u') })).status).toBe(403);
+  });
+
+  it('returns provider metadata and observed quota from a connection test without activating', async () => {
+    const admin = await login(tok('admin-quota', 'admin@example.com'));
+    const saved = await admin.call('post', `${manage}/providers`, { name: 'Quota fixture', model: 'fixture-model',
+      apiKey: key('q'), workload: studentWork, quotaGroup: 'groq' });
+    expect(saved.status).toBe(201);
+    const tested = await admin.call('post', `${manage}/providers/${saved.body._id}/test`);
+    expect(tested.status).toBe(200);
+    expect(tested.body).toMatchObject({ status: 'SUCCESS', provider: 'GROQ', model: 'fixture-model',
+      quota: { 'x-ratelimit-remaining-requests': '950', 'x-ratelimit-reset-tokens': '6.5s' } });
+    expect(tested.body.latency).toBeGreaterThanOrEqual(0);
+    expect((await AiProvider.findById(saved.body._id).lean())?.lastTest).toMatchObject({ status: 'SUCCESS',
+      quota: { 'x-ratelimit-remaining-requests': '950' } });
+    expect((await AiSettings.findById(studentWork).lean())?.activeId).toBeUndefined();
+  });
+
+  it('preserves advanced settings when enabling or disabling and exposes application budgets', async () => {
+    const admin = await login(tok('admin-advanced', 'admin@example.com'));
+    const saved = await admin.call('post', `${manage}/providers`, { name: 'Advanced fixture', model: 'fixture-model',
+      apiKey: key('a'), workload: studentWork, quotaGroup: 'groq', priority: 7, timeoutMs: 9000, inputLimit: 4096, outputLimit: 512,
+      quotaScope: 'PROJECT', backup: true, independent: true,
+      limits: { requestsDay: 50, requestsMinute: 5, tokensDay: 5000, tokensMinute: 500 } });
+    expect(saved.status).toBe(201);
+    expect((await admin.call('post', `${manage}/providers/${saved.body._id}/test`)).status).toBe(200);
+    expect((await admin.call('post', `${manage}/providers/${saved.body._id}/activate`)).status).toBe(204);
+
+    const listed = await admin.call('get', `${manage}/providers`);
+    const item = listed.body.items.find((row: { _id: string }) => row._id === saved.body._id);
+    expect(item.budget).toMatchObject({ configured: { requestsDay: 50, requestsMinute: 5, tokensDay: 5000, tokensMinute: 500 } });
+
+    const disabled = await admin.call('patch', `${manage}/providers/${saved.body._id}`, { enabled: false });
+    expect(disabled.status).toBe(200);
+    expect(disabled.body).toMatchObject({ enabled: false, priority: 7, timeoutMs: 9000, inputLimit: 4096, outputLimit: 512,
+      quotaScope: 'PROJECT', backup: true, independent: true,
+      limits: { requestsDay: 50, requestsMinute: 5, tokensDay: 5000, tokensMinute: 500 } });
+    expect((await AiSettings.findById(studentWork).lean())?.activeId).toBeUndefined();
   });
 });
 

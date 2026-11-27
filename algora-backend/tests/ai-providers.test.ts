@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRequest, customEndpoints, normalize, providerBase, providerFailure, providerNames, publicAddress, quotaHeaders, retryDelay } from '../src/modules/ai/providers';
+import { buildRequest, customEndpoints, discoverModels, normalize, providerBase, providerFailure, providerNames, publicAddress, quotaHeaders, retryDelay } from '../src/modules/ai/providers';
 
 const choice = { choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }],
   usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
@@ -77,5 +77,25 @@ describe('AI provider contracts', () => {
     expect(publicAddress('8.8.8.8')).toBe(true);
     expect(buildRequest({ provider: 'CUSTOM', endpoint: customEndpoints[0], model: 'fixture', outputMode: 'PROMPT_JSON' },
       'example-key', '', '{}', 128).body).not.toHaveProperty('response_format');
+  });
+
+  it('discovers bounded model metadata and keeps Gemini generation models only', async () => {
+    const original = globalThis.fetch;
+    try {
+      globalThis.fetch = (async (url: string | URL | Request) => {
+        if (String(url).includes('generativelanguage')) return Response.json({ models: [
+          { name: 'models/gemini-fixture', supportedGenerationMethods: ['generateContent'], inputTokenLimit: 1000, outputTokenLimit: 100 },
+          { name: 'models/embedding-fixture', supportedGenerationMethods: ['embedContent'] },
+        ] });
+        return Response.json({ data: [
+          { id: 'fixture-model', context_length: 8192, outputTokenLimit: 512 },
+          { id: 'invalid model id!' },
+        ] });
+      }) as typeof fetch;
+      await expect(discoverModels({ provider: 'GROQ' }, 'example-key'))
+        .resolves.toEqual([{ id: 'fixture-model', inputLimit: 8192, outputLimit: 512 }]);
+      await expect(discoverModels({ provider: 'GEMINI' }, 'example-key'))
+        .resolves.toEqual([{ id: 'gemini-fixture', inputLimit: 1000, outputLimit: 100 }]);
+    } finally { globalThis.fetch = original; }
   });
 });

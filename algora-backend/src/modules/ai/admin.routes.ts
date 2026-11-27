@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { badRequest, conflict, notFound, parse } from '../../lib/errors';
+import { AppError, badRequest, conflict, notFound, parse } from '../../lib/errors';
 import { takeToken } from '../../lib/ratelimit';
 import { withLease } from '../../lib/lease';
 import { objectId } from '../../lib/validate';
@@ -11,9 +11,9 @@ import { audit } from '../audit/audit';
 import { toXlsx } from '../analytics/analytics.routes';
 import { toCsv } from '../../lib/csv';
 import { limitsSchema, providerLimits, workloads, type Workload } from './policy';
-import { completion, currentBudgets, eligible, encrypt, encryptionReady, limited, listProviderModels, settings, todayStart, workloadBudgets } from './runtime';
+import { budgetSnapshots, completion, currentBudgets, eligible, encrypt, encryptionReady, limited, listProviderModels, settings, todayStart, unavailable, workloadBudgets } from './runtime';
 
-import { customEndpoints, providerBase, providerIdentity, providerName, providerNames } from './providers';
+import { customEndpoints, discoverModels, providerBase, providerIdentity, providerName, providerNames } from './providers';
 
 const workloadSchema = z.enum(workloads);
 const configFields = z.object({
@@ -71,9 +71,10 @@ adminAi.patch('/settings/:workload', async (req, res) => {
 adminAi.get('/providers', async (_req, res) => {
   const rows = await AiProvider.find({ archivedAt: null }).sort({ priority: 1, createdAt: 1 }).limit(20).lean();
   const controls = new Map(await Promise.all(workloads.map(async (workload) => [workload, await settings(workload)] as const)));
+  const budgets = await budgetSnapshots(rows, controls);
   res.json({ items: rows.map((row) => {
     const config = controls.get(row.workload as Workload)!;
-    return { ...publicConfig(row), active: config.activeId === String(row._id), eligible: eligible(row, config) };
+    return { ...publicConfig(row), active: config.activeId === String(row._id), eligible: eligible(row, config), budget: budgets.get(String(row._id)) };
   }) });
 });
 adminAi.get('/providers/:id/budget', async (req, res) => {
@@ -84,6 +85,33 @@ adminAi.get('/failover-history', async (_req, res) => {
   const items = await AuditLog.find({ action: { $in: ['ai.provider.automatic_switch', 'ai.provider.backup_attempt', 'ai.credential.activate', 'ai.credential.deactivate'] } },
     'action actorId targetId metadata createdAt').sort({ createdAt: -1 }).limit(100).lean();
   res.json({ items });
+});
+const discoveryFields = z.object({
+  provider: z.enum(providerNames).optional(),
+  endpoint: z.string().trim().max(120).nullable().optional(),
+  apiKey: z.string().trim().regex(/^[!-~]{8,512}$/).optional(),
+  configId: objectId.optional(),
+}).strict().refine((value) => !!value.configId || (!!value.apiKey && !!value.provider), {
+  message: 'Enter an API key and provider, or choose a saved configuration.',
+});
+/** Discover models before saving (using the key being entered) or with an existing encrypted credential. */
+adminAi.post('/providers/discover', async (req, res) => {
+  const input = parse(discoveryFields, req.body);
+  if (!(await takeToken(`ai:models:${req.user!._id}`, 4, 4, true))) throw limited('Wait before requesting more provider model catalogs.');
+  let models;
+  let provider = input.provider;
+  if (input.apiKey) {
+    const options = { provider: input.provider!, endpoint: input.provider === 'CUSTOM' ? input.endpoint ?? null : null, timeoutMs: 12_000 };
+    providerBase(options);
+    try { models = await discoverModels(options, input.apiKey); }
+    catch (error) { throw error instanceof AppError ? error : unavailable('The provider model catalog could not be reached.'); }
+  } else {
+    const row = await getProvider(input.configId!);
+    provider = providerName(row);
+    models = await listProviderModels(row, parse(workloadSchema, row.workload));
+  }
+  await audit(req, 'ai.credential.models', { type: 'AiProvider', id: input.configId ?? 'discovery' }, { count: models.length, provider });
+  res.json({ items: models });
 });
 adminAi.post('/providers/:id/models', async (req, res) => {
   const id = parse(objectId, req.params.id);
@@ -179,18 +207,28 @@ adminAi.post('/providers/:id/test', async (req, res) => {
   const workload = parse(workloadSchema, row.workload);
   const started = Date.now();
   let status = 'SUCCESS';
+  let latency = 0;
+  let quota: Record<string, string> | undefined;
+  let testedProvider: string | undefined;
+  let testedModel: string | null | undefined;
   try {
     const schema = z.object({ ok: z.literal(true) }).strict();
-    await completion(workload, { userId: String(req.user!._id), role: req.user!.role, action: 'CONNECTION_TEST' },
+    const result = await completion(workload, { userId: String(req.user!._id), role: req.user!.role, action: 'CONNECTION_TEST' },
       'Return the JSON object {"ok":true}.', { test: true }, (value) => schema.parse(value), id, undefined, schema);
+    quota = result.quota;
+    testedProvider = result.provider;
+    testedModel = result.model;
   } catch (error) {
     status = error instanceof Error && 'code' in error ? String(error.code) : 'UNAVAILABLE';
     throw error;
   } finally {
-    await AiProvider.updateOne({ _id: id, version: row.version }, { $set: { lastTest: { status, latency: Date.now() - started, at: new Date(), version: row.version } } });
+    latency = Date.now() - started;
+    await AiProvider.updateOne({ _id: id, version: row.version }, { $set: { lastTest: {
+      status, latency, at: new Date(), version: row.version, ...(quota ? { quota } : {}),
+    } } });
     await audit(req, 'ai.credential.test', { type: 'AiProvider', id }, { status });
   }
-  res.json({ status, latency: Date.now() - started });
+  res.json({ status, latency, provider: testedProvider ?? providerName(row), model: testedModel ?? row.model, quota });
 });
 
 adminAi.get('/batches', async (_req, res) => {
