@@ -26,6 +26,13 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
 export const requireRole = (...roles: Role[]): RequestHandler => (req, _res, next) =>
   roles.includes(req.user!.role as Role) ? next() : next(forbidden());
 
+/** Credential bootstrap accepts only JSON from the configured browser origin. */
+export const credentialOriginProtection: RequestHandler = (req, _res, next) => {
+  if (req.headers.origin !== env.FRONTEND_ORIGIN) return next(new AppError(403, 'BAD_ORIGIN', 'Origin not allowed'));
+  if (!req.is('application/json')) return next(new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected application/json'));
+  next();
+};
+
 /** Origin check for every unsafe request, plus a session-bound CSRF token for authenticated ones. */
 export const csrfProtection: RequestHandler = (req, _res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();

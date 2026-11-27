@@ -1,5 +1,6 @@
 // TEST HARNESS ONLY: real app + real google.ts, but OAuth2Client.verifyIdToken is stubbed (no Google network).
 // Token format: "tok|sub|email|name". Never imported by src/.
+import { randomBytes } from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 
@@ -13,7 +14,8 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
   const mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   Object.assign(process.env, {
     NODE_ENV: process.env.E2E_NODE_ENV ?? 'development', PORT: '5100', MONGODB_URI: mongod.getUri(), GOOGLE_CLIENT_ID: 'e2e',
-    SUPER_ADMIN_EMAIL: 'admin@example.com', SESSION_SECRET: 'y'.repeat(40), FRONTEND_URL: 'http://localhost:3000',
+    SUPER_ADMIN_EMAIL: 'admin@example.com', SESSION_SECRET: randomBytes(32).toString('hex'), FRONTEND_URL: process.env.E2E_FRONTEND_URL ?? 'http://localhost:3000',
+    ALLOW_LOCAL_MONGODB: 'true',
   });
   if (process.env.E2E_MOCK === '1') {
     // TEST ONLY: mock LeetCode provider controlled through a separate local port (never part of the app).

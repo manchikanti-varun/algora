@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { errorMessage } from '@/lib/api';
 import { useAuth, type Role, type SessionUser } from '@/lib/auth';
-import { cx, EmptyState, Menu, PageSkeleton, type MenuItem } from './ui';
+import { cx, EmptyState, Menu, PageSkeleton, useToast, type MenuItem } from './ui';
 import { themeMenuItems, useTheme } from './ThemePicker';
 import { BrandMark } from './BrandMark';
 import { CommandPalette } from './manage/CommandPalette';
@@ -80,6 +81,7 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
   }, [ok]);
+  const toast = useToast();
   if (!ok || !user) return <div className="mx-auto max-w-6xl p-8"><PageSkeleton /></div>;
   const home = '/manage/dashboard';
   const sections = nav.map((s) => ({ ...s, items: s.items.filter((i) => !i.roles || i.roles.includes(user.role)) })).filter((s) => s.items.length);
@@ -91,7 +93,14 @@ export function ManageShell({ nav, children }: { nav: NavSection[]; children: Re
     ...(user.canManageCourses ? [{ href: '/manage/courses/new', label: 'Create course' }] : []),
     { href: '/manage/batches/new', label: 'Create batch' },
   ];
-  const signOut = async () => { await logout(); router.replace('/trainer/login'); };
+  const signOut = async () => {
+    try {
+      await logout();
+      router.replace('/trainer/login');
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
   const narrow = collapsed && !open;
   const sidebar = (
     <nav aria-label="Main" className="flex h-full flex-col">
@@ -175,9 +184,17 @@ export function StudentShell({ children, aside }: { children: ReactNode; aside?:
   const { user, logout } = useAuth();
   const path = usePathname();
   const router = useRouter();
+  const toast = useToast();
   if (!ok || !user) return <div className="mx-auto max-w-6xl p-8"><PageSkeleton /></div>;
   const home = '/student/dashboard';
-  const signOut = async () => { await logout(); router.replace('/login'); };
+  const signOut = async () => {
+    try {
+      await logout();
+      router.replace('/login');
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
+  };
   return (
     <div className="min-h-screen bg-canvas text-fg">
       <a href="#main" className="sr-only z-[70] rounded-md bg-surface px-3 py-2 text-sm focus:not-sr-only focus:fixed focus:left-3 focus:top-3">Skip to content</a>

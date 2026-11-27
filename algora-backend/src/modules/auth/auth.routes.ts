@@ -11,6 +11,10 @@ import { College, User } from '../../models';
 import { clearSessionCookie, csrfTokenFor, SESSION_COOKIE, setSessionCookie, signSession, verifySession } from './session';
 
 export const authRouter = Router();
+authRouter.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 function startSession(res: any, user: any) {
   const token = signSession(String(user._id), user.sessionVersion ?? 0);

@@ -35,11 +35,13 @@ export const qs = (q?: Query) => {
   return s ? `?${s}` : '';
 };
 
+const credentialPaths = new Set(['/auth/google', '/auth/register/student', '/trainer-requests']);
+
 async function request(path: string, init: { method?: string; body?: unknown; raw?: boolean } = {}) {
   const method = init.method ?? 'GET';
   const headers: Record<string, string> = {};
   if (init.body !== undefined) headers['content-type'] = 'application/json';
-  if (method !== 'GET' && csrfToken) headers['x-csrf-token'] = csrfToken;
+  if (method !== 'GET' && csrfToken && !(method === 'POST' && credentialPaths.has(path))) headers['x-csrf-token'] = csrfToken;
   return fetch(`/api/v1${path}`, { method, headers, credentials: 'same-origin', body: init.body !== undefined ? JSON.stringify(init.body) : undefined });
 }
 

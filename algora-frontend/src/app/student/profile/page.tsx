@@ -23,13 +23,13 @@ export default function Page() {
   const [busy, setBusy] = useState<string | null>(null);
   const [newName, setNewName] = useState(''); const [consent, setConsent] = useState(false);
   const [collegeId, setCollegeId] = useState('');
-  const ready = !!p.data && !!l.data;
+  const ready = !!p.data && !l.loading;
   // The account menu links to #connected-accounts; the sections only exist after loading.
   useEffect(() => { if (ready && window.location.hash) document.getElementById(window.location.hash.slice(1))?.scrollIntoView(); }, [ready]);
-  if (p.error || l.error) return <ErrorState message={(p.error ?? l.error)!} retry={() => { void p.reload(); void l.reload(); }} />;
-  if (!p.data || !l.data) return <PageSkeleton />;
+  if (p.error) return <ErrorState message={p.error} retry={p.reload} />;
+  if (!p.data) return <PageSkeleton />;
   const link = l.data;
-  const connected = link.state === 'LINKED' && !!link.current;
+  const connected = link?.state === 'LINKED' && !!link.current;
   const reloadAll = async () => { await Promise.all([l.reload(), refresh()]); };
   async function saveProfile(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); setBusy('profile');
@@ -91,7 +91,9 @@ export default function Page() {
       <Card title="Academic information" actions={<Button variant="secondary" size="sm" onClick={openRequest}>Request changes</Button>}>
         <DescriptionList cols={2} items={[{ label: 'Roll number', value: p.data.rollNumber }, { label: 'College', value: p.data.college ?? '—' }]} />
       </Card>
-      {p.data.rollNumber && <AttendanceQr studentName={[p.data.firstName, p.data.lastName].filter(Boolean).join(' ') || 'Student'} rollNumber={p.data.rollNumber} />}
+      {p.data.rollNumber ? <AttendanceQr key={p.data.rollNumber} studentName={[p.data.firstName, p.data.lastName].filter(Boolean).join(' ') || 'Student'} rollNumber={p.data.rollNumber} /> : (
+        <Card title="Attendance QR code" description="Ask your trainer to verify your approved roll number." />
+      )}
       <Modal open={showProfile} onClose={() => setShowProfile(false)} title="Request a change" description="Your trainer or a Super Admin reviews every request before it is applied.">
         <form onSubmit={saveProfile} className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -106,28 +108,32 @@ export default function Page() {
           <Button type="submit" loading={busy === 'profile'}>Submit request</Button>
         </form>
       </Modal>
-      <Card id="connected-accounts" className="scroll-mt-20" title="Connected accounts" description="Algora verifies your problems from accepted submissions on your LeetCode account.">
-        <div className="space-y-4 text-sm">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="font-medium text-fg">LeetCode</span>
-            <StatusBadge status={link.state === 'LINKED' ? 'LINKED' : link.state === 'CONSENT_WITHDRAWN' ? 'CONSENT_WITHDRAWN' : 'UNLINKED'} />
-            {connected && link.current && (
-              <span className="inline-flex flex-wrap items-center gap-x-2 text-fg-muted">
-                <a className="inline-flex items-center gap-1 font-medium text-accent-fg hover:underline" href={`https://leetcode.com/u/${link.current.username}/`} target="_blank" rel="noopener noreferrer">
-                  {link.current.username}<ExternalLink size={13} aria-hidden /><span className="sr-only"> (opens LeetCode in a new tab)</span>
-                </a>
-                {link.current.linkedAt && <span>since {fmtDate(link.current.linkedAt)}</span>}
-              </span>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" onClick={() => setShowLink(true)}>{connected ? 'Request username change' : 'Request connection'}</Button>
-            {connected && <Button variant="secondary" onClick={() => void stopReading()}>Stop reading submissions</Button>}
-            {link.current && <Button variant="ghost" onClick={() => void disconnect()}>Request disconnection</Button>}
-          </div>
-          {link.state === 'CONSENT_WITHDRAWN' && <Notice tone="info" title="You have stopped sharing submissions">Algora is not reading this account. Verified problems stay counted. Submit a connection request if you want to share again.</Notice>}
-        </div>
-      </Card>
+      <section id="connected-accounts" className="scroll-mt-20">
+        {l.error ? <ErrorState message={l.error} retry={l.reload} /> : !link ? <PageSkeleton /> : (
+          <Card title="Connected accounts" description="Algora verifies your problems from accepted submissions on your LeetCode account.">
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-medium text-fg">LeetCode</span>
+                <StatusBadge status={link.state === 'LINKED' ? 'LINKED' : link.state === 'CONSENT_WITHDRAWN' ? 'CONSENT_WITHDRAWN' : 'UNLINKED'} />
+                {connected && link.current && (
+                  <span className="inline-flex flex-wrap items-center gap-x-2 text-fg-muted">
+                    <a className="inline-flex items-center gap-1 font-medium text-accent-fg hover:underline" href={`https://leetcode.com/u/${link.current.username}/`} target="_blank" rel="noopener noreferrer">
+                      {link.current.username}<ExternalLink size={13} aria-hidden /><span className="sr-only"> (opens LeetCode in a new tab)</span>
+                    </a>
+                    {link.current.linkedAt && <span>since {fmtDate(link.current.linkedAt)}</span>}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" onClick={() => setShowLink(true)}>{connected ? 'Request username change' : 'Request connection'}</Button>
+                {connected && <Button variant="secondary" onClick={() => void stopReading()}>Stop reading submissions</Button>}
+                {link.current && <Button variant="ghost" onClick={() => void disconnect()}>Request disconnection</Button>}
+              </div>
+              {link.state === 'CONSENT_WITHDRAWN' && <Notice tone="info" title="You have stopped sharing submissions">Algora is not reading this account. Verified problems stay counted. Submit a connection request if you want to share again.</Notice>}
+            </div>
+          </Card>
+        )}
+      </section>
       <Modal open={showLink} onClose={() => setShowLink(false)} title={connected ? 'Request a username change' : 'Request a LeetCode connection'}
         description={connected ? `Current account: ${link.current?.username}. Verified problems stay with the current account after an approved change.` : 'Your trainer or a Super Admin can review this request.'}>
         <form onSubmit={saveUsername} className="space-y-3">
@@ -153,7 +159,7 @@ export default function Page() {
       </Card>
       <Card id="privacy-and-data" title="Privacy and data">
         <div className="space-y-3 text-sm text-fg-muted">
-          <p>{link.consentedAt ? `You agreed to Algora reading your LeetCode submissions on ${fmtDate(link.consentedAt)}. ` : ''}Algora reads only public accepted submissions, to verify your problems.</p>
+          <p>{link?.consentedAt ? `You agreed to Algora reading your LeetCode submissions on ${fmtDate(link.consentedAt)}. ` : ''}Algora reads only public accepted submissions, to verify your problems.</p>
           <p>If you withdraw consent, your LeetCode account is disconnected and your verified problems are permanently deleted. Algora keeps a record that you connected and consented.</p>
           <Button variant="danger" size="sm" onClick={() => void deleteData()}>Withdraw consent and delete my data</Button>
         </div>

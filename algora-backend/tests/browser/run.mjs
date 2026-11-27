@@ -5,11 +5,18 @@
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import { once } from 'node:events';
 import jsQR from 'jsqr';
 import { PNG } from 'pngjs';
 import { chromium } from 'playwright';
 
-const FE = 'http://localhost:3000';
+const tls = process.env.E2E_TLS_CERT && {
+  cert: fs.readFileSync(process.env.E2E_TLS_CERT),
+  key: fs.readFileSync(process.env.E2E_TLS_KEY),
+};
+const FE = tls ? 'https://localhost:3000' : 'http://localhost:3000';
 const SHOTS = '../docs/screenshots';
 const results = [];
 let failed = 0;
@@ -33,7 +40,7 @@ function start(cmd, args, cwd, env, ready) {
 }
 
 async function persona(browser, idToken) {
-  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: !!tls, viewport: { width: 1360, height: 900 } });
   await ctx.addInitScript((t) => {
     window.__idToken = t;
     window.google = { accounts: { id: {
@@ -54,8 +61,22 @@ const pickOption = async (page, label, query, option) => { const box = page.getB
 const noOverflow = async (page, what) => assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${what} overflows horizontally`);
 const MOBILE = { width: 375, height: 812 };
 
-const be = await start('npx', ['tsx', 'tests/e2e-server.ts'], '.', { E2E_NODE_ENV: 'test', LOG_IN_TESTS: '1' }, 'listening on :5100');
-const fe = await start('npx', ['next', 'start', '-p', '3000'], '../algora-frontend', {}, 'Ready');
+const be = await start('npx', ['tsx', 'tests/e2e-server.ts'], '.', {
+  E2E_NODE_ENV: tls ? 'production' : 'test', E2E_FRONTEND_URL: FE, LOG_IN_TESTS: '1',
+}, 'listening on :5100');
+const fe = await start('npx', ['next', 'start', '-p', tls ? '3100' : '3000'], '../algora-frontend', {}, 'Ready');
+const edge = tls ? https.createServer(tls, (req, res) => {
+  const upstream = http.request({
+    hostname: '127.0.0.1', port: 3100, method: req.method, path: req.url,
+    headers: { ...req.headers, 'x-forwarded-proto': 'https', 'x-forwarded-for': req.socket.remoteAddress },
+  }, (reply) => {
+    res.writeHead(reply.statusCode, reply.headers);
+    reply.pipe(res);
+  });
+  upstream.on('error', () => { res.writeHead(502); res.end(); });
+  req.pipe(upstream);
+}).listen(3000) : null;
+if (edge) await once(edge, 'listening');
 const browser = await chromium.launch();
 let claimCode = '';
 try {
@@ -76,7 +97,7 @@ try {
   });
   await step('Session cookie is HttpOnly, SameSite=Lax, not readable by JS', async () => {
     const c = (await admin.ctx.cookies()).find((x) => x.name === 'algora_session');
-    assert(c && c.httpOnly && c.sameSite === 'Lax', JSON.stringify(c));
+    assert(c && c.httpOnly && c.sameSite === 'Lax' && c.path === '/' && c.secure === (new URL(FE).protocol === 'https:'), 'unexpected session cookie attributes');
     assert(!(await admin.page.evaluate(() => document.cookie)).includes('algora_session'), 'cookie visible to JS');
   });
   await step('Super Admin subsequent login in a fresh browser', async () => {
@@ -430,6 +451,26 @@ try {
     assert(decoded && decoded.data === 'AB12CD34EF', `decoded QR payload=${decoded?.data}`);
     await dlg.getByRole('button', { name: 'Close', exact: true }).click();
   });
+  await step('Profile QR survives LeetCode failure on mobile in light and dark themes', async () => {
+    const p = student.page;
+    const path = '**/api/v1/student/leetcode';
+    await p.route(path, (route) => route.fulfill({ status: 503, json: { error: { message: 'Connected accounts temporarily unavailable' } } }));
+    await p.setViewportSize(MOBILE);
+    try {
+      await p.goto(`${FE}/student/profile`);
+      await p.getByText('Connected accounts temporarily unavailable').first().waitFor();
+      const qr = p.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' });
+      for (const theme of ['Light', 'Dark']) {
+        await p.getByText(theme, { exact: true }).last().click();
+        await qr.waitFor();
+        assert(await qr.evaluate((img) => img.complete && img.naturalWidth > 0 && getComputedStyle(img.parentElement).backgroundColor === 'rgb(255, 255, 255)'), 'QR failed to render on white');
+        await noOverflow(p, 'mobile QR profile');
+      }
+    } finally {
+      await p.unroute(path);
+      await p.setViewportSize({ width: 1360, height: 900 });
+    }
+  });
   await step('Student Attendance destination shows only this student, with no recording controls', async () => {
     const p = student.page;
     await p.getByRole('navigation', { name: 'Main' }).first().getByRole('link', { name: 'Attendance' }).click();
@@ -437,6 +478,7 @@ try {
     await p.getByRole('heading', { name: 'Attendance', level: 1 }).waitFor();
     await p.getByText('AB12CD34EF', { exact: true }).first().waitFor();
     await p.getByText('Not recorded').first().waitFor();
+    await p.getByText('No attendance has been recorded for you in this period.', { exact: false }).waitFor();
     for (const forbidden of [/Upload/i, /Record attendance/i, /Finalize/i, /Mark present/i]) assert(!(await p.getByRole('button', { name: forbidden }).count()), `student sees ${forbidden}`);
   });
   await step('Leaderboard page explains verification is unavailable', async () => {
@@ -565,10 +607,12 @@ try {
     await p.locator('#personal-information').getByRole('button', { name: 'Request changes' }).click();
     const dialog = p.locator('dialog[open]');
     await dialog.getByLabel('Mobile number').fill('9876543219');
-    await dialog.getByLabel('Reason for the change').fill('Updated phone number');
+    await dialog.getByLabel('Roll number').fill('22ag1a0501');
+    await dialog.getByLabel('Reason for the change').fill('Corrected phone number and roll number');
     await dialog.getByRole('button', { name: 'Submit request' }).click();
     await p.getByRole('table', { name: 'My requests' }).getByText('Pending', { exact: true }).waitFor();
     await p.locator('#personal-information').getByText('9876543210', { exact: true }).waitFor();
+    await p.getByRole('img', { name: 'Attendance QR code for roll number AB12CD34EF' }).waitFor();
 
     const t = trainer.page;
     await t.goto(`${FE}/manage/requests`);
@@ -578,6 +622,10 @@ try {
     await p.reload();
     await p.locator('#personal-information').getByText('9876543219', { exact: true }).waitFor();
     await p.getByRole('table', { name: 'My requests' }).getByText('Approved', { exact: true }).waitFor();
+    await p.getByRole('img', { name: 'Attendance QR code for roll number 22AG1A0501' }).waitFor();
+    const [download] = await Promise.all([p.waitForEvent('download'), p.getByRole('button', { name: 'Download PNG' }).click()]);
+    const png = PNG.sync.read(fs.readFileSync(await download.path()));
+    assert(jsQR(new Uint8ClampedArray(png.data), png.width, png.height)?.data === '22AG1A0501', 'QR did not reflect the approved correction');
   });
 
   await step('Production CSS resolves semantic surfaces, focus, borders and primary actions across roles and widths', async () => {
@@ -656,6 +704,16 @@ try {
       await page.setViewportSize({ width: 1360, height: 900 });
     }
   });
+  await step('Trainer signs out and back in after a management mutation', async () => {
+    const p = trainer.page;
+    await p.goto(`${FE}/manage/dashboard`);
+    await p.getByRole('heading', { name: 'Overview' }).waitFor();
+    await signOut(p);
+    await p.waitForURL('**/trainer/login');
+    await p.getByRole('button', { name: 'Mock Google sign-in' }).click();
+    await p.waitForURL('**/manage/dashboard');
+    assert(await p.evaluate(async () => (await (await fetch('/api/v1/auth/me')).json()).user?.role) === 'TRAINER', 'trainer session did not rehydrate');
+  });
   await step('Suspending the trainer invalidates their session: next navigation signs them out', async () => {
     const p = admin.page;
     await p.goto(`${FE}/manage/trainers`);
@@ -668,18 +726,42 @@ try {
     const r = await trainer.page.evaluate(async () => (await fetch('/api/v1/auth/me')).status);
     assert(r === 401, `me=${r}`);
   });
-  await step('Tampered session cookie is treated as expired', async () => {
+  await step('Student can sign in again with a tampered session cookie', async () => {
     const c = (await student.ctx.cookies()).find((x) => x.name === 'algora_session');
     await student.ctx.addCookies([{ ...c, value: c.value.slice(0, -3) + 'AAA' }]);
     await student.page.goto(`${FE}/student/dashboard`);
     await student.page.waitForURL('**/login**');
+    await student.page.getByRole('button', { name: 'Mock Google sign-in' }).click();
+    await student.page.waitForURL('**/student/dashboard');
+    await student.page.goto(`${FE}/student/profile`);
+    await student.page.getByRole('img', { name: /Attendance QR code for roll number/ }).waitFor();
   });
-  await step('Logout clears the session', async () => {
+  await step('Logout, repeat sign-in and account switch update other tabs', async () => {
     const p = admin.page;
     await p.goto(`${FE}/manage/dashboard`);
-    await signOut(p);
-    await p.waitForURL('**/trainer/login');
-    assert((await p.evaluate(async () => (await fetch('/api/v1/auth/me')).status)) === 401, 'still signed in');
+    const tab = await admin.ctx.newPage();
+    try {
+      await tab.goto(`${FE}/manage/dashboard`);
+      await tab.getByRole('heading', { name: 'Overview' }).waitFor();
+      await signOut(p);
+      await p.waitForURL('**/trainer/login');
+      await tab.waitForURL('**/trainer/login**');
+      assert((await p.evaluate(async () => (await fetch('/api/v1/auth/me')).status)) === 401, 'still signed in');
+      await p.getByRole('button', { name: 'Mock Google sign-in' }).click();
+      await p.waitForURL('**/manage/dashboard');
+      await tab.waitForURL('**/manage/dashboard');
+      assert((await tab.evaluate(async () => Boolean((await (await fetch('/api/v1/auth/me')).json()).csrfToken))), 'other tab did not rehydrate');
+      await signOut(p);
+      await p.waitForURL('**/trainer/login');
+      await tab.waitForURL('**/trainer/login**');
+      await p.evaluate((credential) => { window.__idToken = credential; }, STUDENT);
+      await p.getByRole('button', { name: 'Mock Google sign-in' }).click();
+      await p.waitForURL('**/student/dashboard');
+      await tab.waitForURL('**/student/dashboard');
+      assert(await tab.evaluate(async () => (await (await fetch('/api/v1/auth/me')).json()).user?.role) === 'STUDENT', 'other tab kept the previous account');
+    } finally {
+      await tab.close();
+    }
   });
   await step('Mobile layout: management sidebar collapses behind a menu button', async () => {
     const m = await persona(browser, ADMIN);
@@ -716,6 +798,7 @@ try {
   });
 } finally {
   await browser.close();
+  edge?.close();
   be.kill(); fe.kill();
   console.log(results.join('\n'));
   console.log(`\n${results.length - failed} passed, ${failed} failed`);

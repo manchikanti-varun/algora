@@ -11,7 +11,7 @@ import { requestLogger } from './lib/logger';
 
 /** Set by server.ts once start-up work has completed. */
 export const readiness = { startupDone: process.env.NODE_ENV === 'test' };
-import { csrfProtection } from './middleware/auth';
+import { credentialOriginProtection, csrfProtection } from './middleware/auth';
 import { authRouter } from './modules/auth/auth.routes';
 import { batchesRouter } from './modules/batches/batches.routes';
 import { chaptersRouter, coursesRouter, problemsRouter } from './modules/courses/courses.routes';
@@ -70,7 +70,7 @@ export function createApp() {
     if (error) return next(error);
     credentialInstance(req, res, next);
   }) : (publicRead(req) ? sessionReads : ordinary)(req, res, next));
-  api.use(csrfProtection);
+  api.use((req, res, next) => (credentials(req) ? credentialOriginProtection : csrfProtection)(req, res, next));
   api.use('/auth', authRouter);
   api.use('/trainer-requests', trainerRequestsRouter);
   api.use('/trainers', trainersRouter);

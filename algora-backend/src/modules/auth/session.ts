@@ -13,10 +13,10 @@ const hmac = (data: string, label: string) => hmacWith(env.SESSION_SECRET, data,
 const verifies = (sig: string, data: string, label: string) =>
   safeEqual(sig, hmac(data, label)) || (!!env.SESSION_SECRET_PREVIOUS && safeEqual(sig, hmacWith(env.SESSION_SECRET_PREVIOUS, data, label)));
 
-interface Payload { uid: string; sv: number; exp: number }
+interface Payload { uid: string; sv: number; exp: number; nonce?: string }
 
 export function signSession(uid: string, sv: number): string {
-  const body = Buffer.from(JSON.stringify({ uid, sv, exp: Date.now() + TTL_MS } satisfies Payload)).toString('base64url');
+  const body = Buffer.from(JSON.stringify({ uid, sv, exp: Date.now() + TTL_MS, nonce: crypto.randomUUID() } satisfies Payload)).toString('base64url');
   return `${body}.${hmac(body, 'session')}`;
 }
 

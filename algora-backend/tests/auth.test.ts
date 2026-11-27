@@ -1,6 +1,7 @@
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { User, Enrollment, PendingEnrollment, Batch } from '../src/models';
+import { SESSION_COOKIE, signSession } from '../src/modules/auth/session';
 import { reconcileSuperAdmin } from '../src/modules/auth/superAdmin';
 import { sha256 } from '../src/lib/normalize';
 import { app, login, resetDb, startDb, stopDb, studentBody, tok } from './helpers';
@@ -72,6 +73,51 @@ describe('Sessions and CSRF', () => {
     expect((await post('/auth/google', { idToken: 'garbage-garbage-garbage-1' })).status).toBe(401);
     expect((await request(app).get('/api/v1/auth/me')).status).toBe(401);
   });
+  it('bootstraps with a stale cookie and binds the returned token to the new session', async () => {
+    const a = await login(ADMIN);
+    await User.updateOne({ _id: a.res.body.user.id }, { $inc: { sessionVersion: 1 } });
+    const me = (cookie: string) => request(app).get('/api/v1/auth/me').set('Cookie', cookie);
+    expect((await me(a.cookie!)).status).toBe(401);
+
+    const b = await post('/auth/google', { idToken: ADMIN }).set('Cookie', a.cookie!);
+    expect(b.status).toBe(200);
+    const cookie = b.headers['set-cookie'][0].split(';')[0];
+    expect(b.body.csrfToken).not.toBe(a.csrf);
+    expect((await me(cookie)).body.csrfToken).toBe(b.body.csrfToken);
+
+    const stale = await post('/auth/logout', {}).set('Cookie', cookie).set('X-CSRF-Token', a.csrf!);
+    expect(stale.status).toBe(403);
+    expect(stale.body.error.code).toBe('BAD_CSRF');
+    expect((await post('/auth/logout', {}).set('Cookie', cookie).set('X-CSRF-Token', b.body.csrfToken)).status).toBe(204);
+    expect((await me(cookie)).status).toBe(401);
+  });
+
+  it('replaces an expired cookie and still verifies the Google credential', async () => {
+    const a = await login(ADMIN);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now - 8 * 86_400_000);
+    let cookie: string;
+    try { cookie = `${SESSION_COOKIE}=${signSession(a.res.body.user.id, 0)}`; }
+    finally { clock.mockRestore(); }
+    expect((await request(app).get('/api/v1/auth/me').set('Cookie', cookie)).status).toBe(401);
+    expect((await post('/auth/google', { idToken: 'invalid-google-credential' }).set('Cookie', cookie)).status).toBe(401);
+    expect((await post('/auth/google', { idToken: ADMIN }).set('Cookie', cookie)).status).toBe(200);
+  });
+
+  it('requires the configured origin and JSON for credential bootstrap even with an existing cookie', async () => {
+    const a = await login(ADMIN);
+    const attempt = () => request(app).post('/api/v1/auth/google').set('Cookie', a.cookie!);
+    for (const origin of [null, 'null', 'https://other.example']) {
+      const r = await (origin === null ? attempt() : attempt().set('Origin', origin)).send({ idToken: ADMIN });
+      expect(r.status).toBe(403);
+      expect(r.body.error.code).toBe('BAD_ORIGIN');
+      expect(r.headers['set-cookie']).toBeUndefined();
+    }
+    const form = await attempt().set('Origin', env.FRONTEND_ORIGIN).type('form').send({ idToken: ADMIN });
+    expect(form.status).toBe(415);
+    expect(form.headers['set-cookie']).toBeUndefined();
+  });
+
   it('rejects unsafe requests without CSRF token or from a foreign origin', async () => {
     const a = await login(ADMIN);
     const noCsrf = await request(app).patch('/api/v1/trainers/507f1f77bcf86cd799439011/suspend').set('Origin', 'http://localhost:3000').set('Cookie', a.cookie!);

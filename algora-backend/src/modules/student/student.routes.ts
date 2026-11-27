@@ -126,6 +126,7 @@ studentRouter.get('/leaderboard', async (req, res) => {
  * Students can read their own attendance only; there is no student-side attendance submission endpoint.
  */
 studentRouter.get('/attendance/qr', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const u = await User.findById(req.user!._id, 'rollNumber fullName').lean();
   if (!u?.rollNumber) throw notFound('Your roll number has not been assigned yet. Ask your trainer.');
   res.json({ rollNumber: u.rollNumber, payload: u.rollNumber, studentName: u.fullName });
@@ -140,6 +141,7 @@ studentRouter.get('/attendance', async (req, res) => {
 });
 
 studentRouter.get('/profile', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const u = await User.findById(req.user!._id, 'firstName lastName email rollNumber mobile leetcodeUsername collegeId').populate('collegeId', 'name code').lean();
   res.json({ ...u, college: collegeLabel(u?.collegeId as any), collegeId: (u?.collegeId as { _id?: unknown } | null)?._id });
 });
