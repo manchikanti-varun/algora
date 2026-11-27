@@ -5,7 +5,7 @@ import { AppError, conflict } from '../../lib/errors';
 import { acquireLease, maybeTransaction, releaseLease, supportsTransactions } from '../../lib/lease';
 import { AiCounter, AiProvider, AiSettings, AiUsage } from '../../models/ai';
 import { audit } from '../audit/audit';
-import { discoverModels, invokeProvider, normalize, providerFailure, providerIdentity, providerName, providerFamily, ProviderFailure, quotaHeaders, retryDelay, type ProviderOptions } from './providers';
+import { discoverModels, invokeProvider, normalize, outputBudget, providerFailure, providerIdentity, providerName, providerFamily, ProviderFailure, type ProviderDiagnostics, quotaHeaders, retryDelay, type ProviderOptions } from './providers';
 import { defaults, limitsSchema, providerLimits, type Workload } from './policy';
 
 export const unavailable = (message = 'AI is unavailable. You can continue without AI or ask your trainer.') => new AppError(503, 'AI_UNAVAILABLE', message);
@@ -176,7 +176,8 @@ export async function completion<T>(workload: Workload, attribution: Attribution
       visitedGroups.add(group);
       const reason = failure?.code;
       try {
-        const output = test ? Math.min(64, provider.outputLimit ?? 64) : Math.min(config.limits.output, provider.outputLimit ?? config.limits.output);
+        const base = test ? Math.min(64, provider.outputLimit ?? 64) : Math.min(config.limits.output, provider.outputLimit ?? config.limits.output);
+        const output = outputBudget(provider, base, provider.outputLimit);
         const schema = providerName(provider) === 'ANTHROPIC' && provider.outputMode !== 'PROMPT_JSON' && outputSchema
           ? grammarSchema(z.toJSONSchema(outputSchema)) : undefined;
         const estimate = inputEstimate + (schema ? Buffer.byteLength(JSON.stringify(schema)) : 0);
@@ -272,6 +273,7 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
   let quota: Record<string, string> | undefined;
   let usage: ReturnType<typeof normalize> | undefined;
   let errorCode: string | undefined;
+  let diagnostics: ProviderDiagnostics | undefined;
   let status = 'REJECTED';
   let outbound = false;
   const spending = provider.spending as { dailyUsd: number; inputPerMillion: number; outputPerMillion: number } | undefined;
@@ -310,11 +312,12 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
     outbound = true;
     sent();
     status = 'FAILED';
-    const reply = await invokeProvider(provider, secret, system, payload, output, schema);
+    const reply = await invokeProvider(provider, secret, system, payload, output, schema, test);
     providerStatus = reply.status;
     quota = quotaHeaders(reply.headers);
     if (reply.status < 200 || reply.status >= 300) {
-      const failure = providerFailure(reply.status, reply.body);
+      const failure = providerFailure(reply.status, reply.body, { provider: name, model: provider.model, headers: reply.headers });
+      diagnostics = failure.diagnostics;
       if (reply.status === 429) {
         status = 'RATE_LIMITED';
         const expiresAt = new Date(Date.now() + Math.min(86400000, retryDelay(quota)));
@@ -327,10 +330,15 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
       throw failure;
     }
     usage = normalize(name, reply.body);
-    if (usage.incomplete || !usage.text || usage.text.length > 100_000) throw new AppError(502, 'AI_OUTPUT', 'The provider returned an incomplete response.');
+    const outputFailure = (message: string) => new ProviderFailure(502, 'AI_OUTPUT', message, false, {
+      provider: name, model: provider.model ?? undefined, httpStatus: reply.status, finishReason: usage?.finish,
+      requestId: reply.headers.get('x-request-id')?.match(/^[\w.:-]{1,100}$/)?.[0],
+      suggestion: usage?.finish === 'length' ? 'The output budget was used up (reasoning models spend it before answering). Increase the configuration output limit.'
+        : 'The provider returned content that is not the required JSON. Check the model and output capability.' });
+    if (usage.incomplete || !usage.text || usage.text.length > 100_000) throw outputFailure('The provider returned an incomplete response.');
     let content: T;
     try { content = validate(JSON.parse(usage.text)); }
-    catch { throw new AppError(502, 'AI_OUTPUT', 'The provider returned an invalid response.'); }
+    catch { throw outputFailure('The provider returned an invalid response.'); }
     if (provider.circuitUntil) await AiProvider.updateOne({ ...currentVersion, circuitUntil: provider.circuitUntil }, { $unset: { circuitUntil: 1, circuitReason: 1 } });
     status = 'SUCCESS';
     // Connection tests surface the provider's reported quota headers to the administrator. Normal
@@ -339,6 +347,7 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
   } catch (error) {
     const safe = error instanceof AppError ? error : new ProviderFailure(503, 'AI_PROVIDER_UNCERTAIN', 'The provider did not confirm whether it completed the request.');
     errorCode = safe.code;
+    if (safe instanceof ProviderFailure && safe.diagnostics) diagnostics = safe.diagnostics;
     if (counters && !outbound) await refund(counters, reserved);
     if (outbound && safe.code === 'AI_PROVIDER_UNCERTAIN') {
       await AiProvider.updateOne(currentVersion, { $max: { circuitUntil: new Date(Date.now() + 60_000) }, $set: { circuitReason: safe.code } });
@@ -355,7 +364,8 @@ async function attempt<T>(a: Attempt, validate: (value: unknown) => T) {
       const amount = observedMicros ?? estimated;
       await event.updateOne({ status, input: usage?.input, output: usage?.output, total: usage?.total, quota, providerStatus,
         costUsd: amount === undefined ? undefined : amount / 1_000_000, costEstimated: observedMicros === undefined && estimated !== undefined,
-        failure: errorCode, latency: Date.now() - started, finishedAt: new Date() });
+        failure: errorCode, providerCode: diagnostics?.providerCode, providerParam: diagnostics?.rejectedParameter, providerRequestId: diagnostics?.requestId,
+        latency: Date.now() - started, finishedAt: new Date() });
       const actual = usage?.total;
       if (actual !== undefined) await AiCounter.updateMany({ _id: { $in: counters!.token } }, { $inc: { tokens: actual - reserved } });
       if (amount !== undefined && reservedSpend !== undefined) await AiCounter.updateMany(

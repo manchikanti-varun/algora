@@ -31,7 +31,7 @@ const usage = new Schema({
   ...scope, role: String, collegeId: String, action: String, referenceId: String, requestKey: String,
   configId: String, configVersion: Number, model: String, status: String, outbound: Boolean, local: Boolean,
   provider: String, logicalId: String, recordKind: String, attempt: Number, failoverReason: String, costUsd: Number, costEstimated: Boolean,
-  providerStatus: Number, failure: String, input: Number, output: Number, total: Number, latency: Number,
+  providerStatus: Number, failure: String, providerCode: String, providerParam: String, providerRequestId: String, input: Number, output: Number, total: Number, latency: Number,
   quota: mixed, finishedAt: Date,
 }, { timestamps: true });
 usage.index({ workload: 1, createdAt: -1 });

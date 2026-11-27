@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRequest, customEndpoints, discoverModels, normalize, providerBase, providerFailure, providerNames, publicAddress, quotaHeaders, retryDelay } from '../src/modules/ai/providers';
+import { buildRequest, isGptOss, outputBudget, customEndpoints, discoverModels, normalize, providerBase, providerFailure, providerNames, publicAddress, quotaHeaders, retryDelay } from '../src/modules/ai/providers';
 
 const choice = { choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }],
   usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
@@ -97,5 +97,44 @@ describe('AI provider contracts', () => {
       await expect(discoverModels({ provider: 'GEMINI' }, 'example-key'))
         .resolves.toEqual([{ id: 'gemini-fixture', inputLimit: 1000, outputLimit: 100 }]);
     } finally { globalThis.fetch = original; }
+  });
+
+  it.each(['openai/gpt-oss-20b', 'openai/gpt-oss-120b'])('builds model-aware Groq parameters for %s', (model) => {
+    const probe = buildRequest({ provider: 'GROQ', model }, 'example-key', 'Policy', '{}', 576, undefined, true).body as Record<string, unknown>;
+    expect(probe).toEqual({ model, max_completion_tokens: 576, messages: expect.any(Array), response_format: { type: 'json_object' },
+      reasoning_effort: 'low', include_reasoning: false });
+    const generation = buildRequest({ provider: 'GROQ', model }, 'example-key', 'Policy', '{}', 2000).body as Record<string, unknown>;
+    expect(generation).toMatchObject({ reasoning_effort: 'medium', include_reasoning: false, response_format: { type: 'json_object' } });
+    expect(generation).not.toHaveProperty('reasoning_format');
+    expect(outputBudget({ provider: 'GROQ', model }, 64)).toBe(576);
+    expect(outputBudget({ provider: 'GROQ', model }, 64, 300)).toBe(300);
+  });
+
+  it('sends no reasoning parameters to other Groq models or providers', () => {
+    for (const options of [{ provider: 'GROQ', model: 'llama-3.3-70b-versatile' }, { provider: 'OPENAI', model: 'openai/gpt-oss-120b' },
+      { provider: 'OPENROUTER', model: 'openai/gpt-oss-120b:free' }, { provider: 'DEEPSEEK', model: 'openai/gpt-oss-20b' }]) {
+      const body = buildRequest(options, 'example-key', 'Policy', '{}', 64, undefined, true).body;
+      expect(body).not.toHaveProperty('reasoning_effort');
+      expect(body).not.toHaveProperty('include_reasoning');
+      expect(outputBudget(options, 64)).toBe(64);
+    }
+    expect(isGptOss('openai/gpt-oss-safeguard-20b')).toBe(false);
+  });
+
+  it('parses content separately from reasoning and strips inline think blocks', () => {
+    const body = { choices: [{ finish_reason: 'stop', message: { reasoning: 'private', content: '{"ok":true}' } }], usage: { prompt_tokens: 74, completion_tokens: 35, total_tokens: 109 } };
+    expect(normalize('GROQ', body)).toMatchObject({ text: '{"ok":true}', finish: 'stop', incomplete: false, total: 109 });
+    expect(normalize('GROQ', { choices: [{ finish_reason: 'stop', message: { content: '<think>x</think>{"ok":true}' } }] }).text).toBe('{"ok":true}');
+    expect(normalize('GROQ', { choices: [{ finish_reason: 'length', message: { content: '', reasoning: 'x' } }] })).toMatchObject({ text: '', incomplete: true, finish: 'length' });
+  });
+
+  it('extracts sanitized diagnostics without echoing generated content or secrets', () => {
+    const failure = providerFailure(400, { error: { message: 'Failed to generate JSON with gsk_abcdef123456', code: 'json_validate_failed', type: 'invalid_request_error',
+      failed_generation: 'private student code' } }, { provider: 'GROQ', model: 'openai/gpt-oss-120b', headers: new Headers({ 'x-request-id': 'req_9' }) });
+    expect(failure.diagnostics).toMatchObject({ provider: 'GROQ', model: 'openai/gpt-oss-120b', httpStatus: 400, providerCode: 'json_validate_failed',
+      requestId: 'req_9', suggestion: expect.stringContaining('output limit') });
+    expect(JSON.stringify(failure.diagnostics)).not.toMatch(/gsk_abcdef|private student code/);
+    expect(providerFailure(400, { error: { message: "unknown parameter 'top_p'" } }, { provider: 'GROQ' }).diagnostics?.rejectedParameter).toBe('top_p');
+    expect(providerFailure(401, {}, { provider: 'GROQ', model: 'm' }).diagnostics?.suggestion).toContain('API key');
   });
 });

@@ -102,6 +102,13 @@ export const errorMessage = (e: unknown) => {
   if (e instanceof ApiError) {
     const d = e.details;
     if (Array.isArray(d) && d.length && typeof d[0] === 'object' && d[0] && 'message' in d[0]) return `${e.message}: ${d.map((x: { path: string; message: string }) => `${x.path ? x.path + ' ' : ''}${x.message}`).join('; ')}`;
+    const diagnostics = d && typeof d === 'object' && 'diagnostics' in d ? (d as { diagnostics?: Record<string, unknown> }).diagnostics : undefined;
+    if (diagnostics) {
+      const parts = [['Provider', diagnostics.provider], ['Model', diagnostics.model], ['HTTP', diagnostics.httpStatus], ['Code', diagnostics.providerCode],
+        ['Rejected parameter', diagnostics.rejectedParameter], ['Finish reason', diagnostics.finishReason], ['Request ID', diagnostics.requestId]]
+        .filter(([, value]) => value !== undefined && value !== null && value !== '').map(([label, value]) => `${label}: ${String(value)}`);
+      return `${e.message} (${parts.join(' · ')})${typeof diagnostics.suggestion === 'string' ? ` Suggested action: ${diagnostics.suggestion}` : ''}`;
+    }
     return e.message;
   }
   return 'Something went wrong';

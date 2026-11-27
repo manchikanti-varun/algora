@@ -13,7 +13,7 @@ import { toCsv } from '../../lib/csv';
 import { limitsSchema, providerLimits, workloads, type Workload } from './policy';
 import { budgetSnapshots, completion, currentBudgets, eligible, encrypt, encryptionReady, limited, listProviderModels, settings, todayStart, unavailable, workloadBudgets } from './runtime';
 
-import { customEndpoints, discoverModels, providerBase, providerIdentity, providerName, providerNames } from './providers';
+import { customEndpoints, discoverModels, ProviderFailure, providerBase, providerIdentity, providerName, providerNames, type ProviderDiagnostics } from './providers';
 
 const workloadSchema = z.enum(workloads);
 const configFields = z.object({
@@ -211,6 +211,7 @@ adminAi.post('/providers/:id/test', async (req, res) => {
   let quota: Record<string, string> | undefined;
   let testedProvider: string | undefined;
   let testedModel: string | null | undefined;
+  let diagnostics: ProviderDiagnostics | undefined;
   try {
     const schema = z.object({ ok: z.literal(true) }).strict();
     const result = await completion(workload, { userId: String(req.user!._id), role: req.user!.role, action: 'CONNECTION_TEST' },
@@ -220,11 +221,16 @@ adminAi.post('/providers/:id/test', async (req, res) => {
     testedModel = result.model;
   } catch (error) {
     status = error instanceof Error && 'code' in error ? String(error.code) : 'UNAVAILABLE';
+    // Sanitized diagnostics are for the Super Admin only. Student and staff routes never receive them.
+    if (error instanceof ProviderFailure && error.diagnostics) {
+      diagnostics = error.diagnostics;
+      throw new AppError(error.status, error.code, error.message, { diagnostics });
+    }
     throw error;
   } finally {
     latency = Date.now() - started;
     await AiProvider.updateOne({ _id: id, version: row.version }, { $set: { lastTest: {
-      status, latency, at: new Date(), version: row.version, ...(quota ? { quota } : {}),
+      status, latency, at: new Date(), version: row.version, ...(quota ? { quota } : {}), ...(diagnostics ? { diagnostics } : {}),
     } } });
     await audit(req, 'ai.credential.test', { type: 'AiProvider', id }, { status });
   }

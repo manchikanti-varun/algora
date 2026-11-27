@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { z } from 'zod';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditLog, Batch, BatchChapterAccess, BatchCourse, CatalogProblem, Chapter, Course, Enrollment, Problem, TrainerBatchAssignment, User } from '../src/models';
 import { AiBatch, AiCounter, AiJob, AiProvider, AiSettings, AiUsage } from '../src/models/ai';
@@ -18,7 +19,7 @@ const key = (c: string) => `gsk_fixture_${c.repeat(24)}`;
 const provider = (workload: string, suffix = 's', quotaGroup = workload.toLowerCase()) => ({
   name: `Fixture ${suffix}`, model: 'fixture-model', apiKey: key(suffix), workload, quotaGroup,
 });
-let outgoing: { url: string; credential: string | null; system: string; input: Record<string, unknown> }[];
+let outgoing: { url: string; credential: string | null; system: string; input: Record<string, unknown>; body?: Record<string, unknown> }[];
 let simulate: (system: string, value: Record<string, unknown>) => Response | Promise<Response>;
 beforeAll(startDb);
 afterAll(stopDb);
@@ -44,7 +45,7 @@ beforeEach(async () => {
     const body = JSON.parse(String(options?.body));
     const system = body.messages[0].content;
     const input = JSON.parse(body.messages[1].content);
-    outgoing.push({ url, credential: new Headers(options?.headers).get('authorization'), system, input });
+    outgoing.push({ url, credential: new Headers(options?.headers).get('authorization'), system, input, body });
     return simulate(system, input);
   });
 });
@@ -538,6 +539,85 @@ describe('simplified provider configuration', () => {
       quotaScope: 'PROJECT', backup: true, independent: true,
       limits: { requestsDay: 50, requestsMinute: 5, tokensDay: 5000, tokensMinute: 500 } });
     expect((await AiSettings.findById(studentWork).lean())?.activeId).toBeUndefined();
+  });
+});
+
+describe.each(['openai/gpt-oss-20b', 'openai/gpt-oss-120b'])('Groq %s compatibility', (model) => {
+  const save = (admin: Awaited<ReturnType<typeof login>>, workload: typeof studentWork | typeof staffWork, suffix: string) =>
+    admin.call('post', `${manage}/providers`, { ...provider(workload, suffix), model });
+
+  it('tests the connection with a supported minimal payload and a reasoning-sized budget', async () => {
+    const admin = await login(tok('admin-oss', 'admin@example.com'));
+    for (const [workload, suffix] of [[studentWork, 'a'], [staffWork, 'b']] as const) {
+      const saved = await save(admin, workload, suffix);
+      const tested = await admin.call('post', `${manage}/providers/${saved.body._id}/test`);
+      expect(tested.status).toBe(200);
+      expect(tested.body).toMatchObject({ status: 'SUCCESS', provider: 'GROQ', model });
+    }
+    for (const call of outgoing) {
+      expect(call.body).toMatchObject({ model, response_format: { type: 'json_object' }, reasoning_effort: 'low', include_reasoning: false });
+      expect(call.body!.max_completion_tokens).toBeGreaterThanOrEqual(512);
+      for (const rejected of ['reasoning_format', 'max_tokens', 'temperature', 'top_p', 'stop']) expect(call.body).not.toHaveProperty(rejected);
+      expect(JSON.stringify(call.body)).not.toContain('gsk_');
+    }
+  });
+
+  it('keeps Student and Staff generation structured, validated and accounted', async () => {
+    const admin = await login(tok('admin-oss-gen', 'admin@example.com'));
+    await configure(admin, studentWork, 'c');
+    await configure(admin, staffWork, 'd');
+    await AiProvider.updateMany({}, { $set: { model } });
+    simulate = () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { reasoning: 'private chain', content: JSON.stringify(mentorAnswer) } }],
+      usage: { prompt_tokens: 100, completion_tokens: 400, total_tokens: 500 } }), { headers: { 'Content-Type': 'application/json' } });
+    for (const workload of [studentWork, staffWork]) {
+      const result = await completion(workload, { userId: `u-${workload}`, role: 'TRAINER', action: 'FIXTURE' }, 'Return JSON', { q: 1 },
+        (value) => z.object({ diagnosis: z.string() }).passthrough().parse(value));
+      expect(result).toMatchObject({ provider: 'GROQ', model, content: { diagnosis: mentorAnswer.diagnosis } });
+      expect(JSON.stringify(result)).not.toContain('private chain');
+    }
+    expect(outgoing).toHaveLength(2);
+    for (const call of outgoing) {
+      expect(call.body).toMatchObject({ response_format: { type: 'json_object' }, reasoning_effort: 'medium', include_reasoning: false });
+      expect(call.body).not.toHaveProperty('reasoning_format');
+      expect(call.body!.max_completion_tokens).toBeGreaterThan(512);
+    }
+    const usage = await AiUsage.find({ recordKind: 'ATTEMPT' }).lean();
+    expect(usage.map((row) => [row.workload, row.status, row.total]).sort()).toEqual([[staffWork, 'SUCCESS', 500], [studentWork, 'SUCCESS', 500]]);
+  });
+
+  it('rejects a response truncated by the reasoning budget instead of parsing partial JSON', async () => {
+    const admin = await login(tok('admin-oss-len', 'admin@example.com'));
+    const saved = await save(admin, studentWork, 'e');
+    simulate = () => new Response(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '', reasoning: 'thinking' } }],
+      usage: { prompt_tokens: 80, completion_tokens: 576, total_tokens: 656 } }));
+    const tested = await admin.call('post', `${manage}/providers/${saved.body._id}/test`);
+    expect(tested.status).toBe(502);
+    expect(tested.body.error).toMatchObject({ code: 'AI_OUTPUT', details: { diagnostics: { provider: 'GROQ', model, finishReason: 'length',
+      suggestion: expect.stringContaining('output limit') } } });
+  });
+});
+
+describe('provider error diagnostics', () => {
+  it('shows the Super Admin a sanitized, actionable rejection and keeps it out of Student responses', async () => {
+    const w = await world();
+    const saved = await w.admin.call('post', `${manage}/providers`, { ...provider(studentWork, 'f'), model: 'openai/gpt-oss-120b' });
+    simulate = () => new Response(JSON.stringify({ error: { message: "`reasoning_format` : property is unsupported. Key gsk_leakedsecret123456", type: 'invalid_request_error',
+      code: 'invalid_parameter', param: 'reasoning_format', failed_generation: 'STUDENT SECRET CODE' } }),
+    { status: 400, headers: { 'x-request-id': 'req_01abc' } });
+    const tested = await w.admin.call('post', `${manage}/providers/${saved.body._id}/test`);
+    expect(tested.status).toBe(502);
+    expect(tested.body.error).toMatchObject({ code: 'AI_PROVIDER_INPUT', details: { diagnostics: {
+      provider: 'GROQ', model: 'openai/gpt-oss-120b', httpStatus: 400, providerCode: 'invalid_parameter', rejectedParameter: 'reasoning_format',
+      requestId: 'req_01abc', suggestion: expect.stringContaining('reasoning_format') } } });
+    const text = JSON.stringify(tested.body) + JSON.stringify(await AiUsage.find().lean()) + JSON.stringify(await AiProvider.find().lean());
+    expect(text).not.toMatch(/gsk_leakedsecret|STUDENT SECRET|Bearer|gsk_fixture/);
+    expect(await AiUsage.findOne({ outbound: true }).lean()).toMatchObject({ providerStatus: 400, providerCode: 'invalid_parameter', providerParam: 'reasoning_format', providerRequestId: 'req_01abc' });
+    await AiSettings.updateOne({ _id: studentWork }, { $set: { enabled: true, activeId: String(saved.body._id) } }, { upsert: true });
+    await w.unlock();
+    await w.admin.call('put', `/batches/${w.batch._id}/courses/${w.course._id}/chapters/${w.chapter._id}/student-ai`, { enabled: true });
+    const convo = await w.student.call('post', `${mentor}/conversations`, w.context);
+    const sent = await w.student.call('post', `${mentor}/conversations/${convo.body._id}/messages`, { mode: 'Explain', consent: true, requestKey: randomUUID(), message: 'help' });
+    expect(JSON.stringify(sent.body)).not.toMatch(/diagnostics|reasoning_format|req_01abc/);
   });
 });
 

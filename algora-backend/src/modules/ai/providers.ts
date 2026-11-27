@@ -118,7 +118,21 @@ function auth(name: ProviderName, secret: string): Record<string, string> {
   return { Authorization: `Bearer ${secret}` };
 }
 
-export function buildRequest(options: ProviderOptions, secret: string, system: string, payload: string, output: number, schema?: Record<string, unknown>) {
+/**
+ * Model-specific Groq behaviour, from https://console.groq.com/docs/reasoning and /docs/api-reference.
+ * GPT-OSS 20B/120B always reason. Reasoning tokens are billed against max_completion_tokens, so a small
+ * budget can be exhausted before any JSON is emitted (Groq then answers 400 json_validate_failed).
+ * They accept reasoning_effort (low|medium|high) and include_reasoning, but reject reasoning_format.
+ */
+export const isGptOss = (model?: string | null) => /^openai\/gpt-oss-(?:20b|120b)$/.test(model ?? '');
+const reasoningHeadroom = 512;
+/** Completion-token budget to send (and reserve) for a request, including reasoning headroom where the model needs it. */
+export function outputBudget(options: ProviderOptions, requested: number, cap?: number | null) {
+  const wanted = providerName(options) === 'GROQ' && isGptOss(options.model) ? requested + reasoningHeadroom : requested;
+  return cap ? Math.min(cap, wanted) : wanted;
+}
+
+export function buildRequest(options: ProviderOptions, secret: string, system: string, payload: string, output: number, schema?: Record<string, unknown>, test = false) {
   const name = providerName(options);
   const base = providerBase(options);
   const model = options.model ?? '';
@@ -140,6 +154,8 @@ export function buildRequest(options: ProviderOptions, secret: string, system: s
     model, [maxTokens]: output, messages: [{ role: 'system', content: instructions }, user],
     ...(name === 'CUSTOM' && options.outputMode === 'PROMPT_JSON' ? {} : { response_format: { type: 'json_object' } }),
     ...(name === 'OPENROUTER' ? { provider: { allow_fallbacks: false, require_parameters: true } } : {}),
+    // Never send reasoning_format to GPT-OSS (unsupported). include_reasoning is mutually exclusive with it.
+    ...(name === 'GROQ' && isGptOss(model) ? { reasoning_effort: test ? 'low' : 'medium', include_reasoning: false } : {}),
   } };
 }
 
@@ -171,30 +187,62 @@ export function normalize(name: ProviderName, value: unknown) {
   }
   const choice = object(list(body.choices)[0]);
   const message = object(choice.message);
-  const text = typeof message.content === 'string' ? message.content :
+  // Reasoning arrives in message.reasoning (never parsed as an answer). Inline <think> blocks are removed defensively.
+  const raw = typeof message.content === 'string' ? message.content :
     list(message.content).map(object).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('');
-  return { text, incomplete: !['stop', 'end_turn'].includes(String(choice.finish_reason)),
+  const text = raw.includes('</think>') ? raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : raw;
+  return { text, finish: typeof choice.finish_reason === 'string' ? choice.finish_reason : undefined,
+    incomplete: !['stop', 'end_turn'].includes(String(choice.finish_reason)),
     input: tokens(usage.prompt_tokens), output: tokens(usage.completion_tokens), total: tokens(usage.total_tokens),
     costUsd: name === 'OPENROUTER' ? dollars(usage.cost) : undefined };
 }
 
-export class ProviderFailure extends AppError {
-  constructor(status: number, code: string, message: string, public readonly retryable = false) { super(status, code, message); }
+export interface ProviderDiagnostics {
+  provider: string; model?: string; httpStatus?: number; providerCode?: string; rejectedParameter?: string;
+  requestId?: string; finishReason?: string; message?: string; suggestion: string;
 }
-export function providerFailure(status: number, body: unknown) {
+export class ProviderFailure extends AppError {
+  constructor(status: number, code: string, message: string, public readonly retryable = false, public readonly diagnostics?: ProviderDiagnostics) { super(status, code, message); }
+}
+const secretPattern = /(?:gsk_|sk-|sk_|AIza|xai-|Bearer\s+)[\w.-]{6,}/g;
+const clean = (value: unknown, max: number) => typeof value === 'string' || typeof value === 'number'
+  ? String(value).replace(secretPattern, '[redacted]').replace(/\s+/g, ' ').trim().slice(0, max) || undefined : undefined;
+const identifier = (value: unknown) => { const text = clean(value, 100); return text && /^[\w.:/-]+$/.test(text) && !text.includes('[redacted]') ? text : undefined; };
+const suggestion = (status: number, code: string | undefined, param: string | undefined, name: string, model: string | undefined) => {
+  if (code === 'json_validate_failed') return 'The model did not finish a valid JSON object, usually because reasoning used the whole output budget. Increase the configuration output limit or retry.';
+  if (code === 'model_not_found' || code === 'model_decommissioned' || status === 404) return `Choose a model your ${name} account can use; refresh the model list.`;
+  if (status === 401 || status === 403) return `Replace the ${name} API key and confirm it has access to ${model ?? 'the model'}.`;
+  if (status === 402) return `Check ${name} billing or credits.`;
+  if (status === 413) return 'Reduce the input size or choose a model with a larger context window.';
+  if (status === 429) return 'Wait for the provider allowance to reset or raise the provider plan.';
+  if (param) return `The provider rejected parameter "${param}" for model ${model ?? ''}. Report this so the adapter can omit it for this model.`;
+  if (status >= 400 && status < 500) return 'Check the model ID, output limit and output capability. Compare with the provider documentation for this model.';
+  return 'Retry later. If it persists, check the provider status page.';
+};
+export function providerFailure(status: number, body: unknown, context?: { provider?: string; model?: string | null; headers?: Headers }) {
   const error = object(object(body).error);
   const codes = [error.code, error.type, error.status].map(String);
-  if (status === 429) return new ProviderFailure(429, 'AI_PROVIDER_LIMIT', 'The provider has limited requests. Try again after its allowance resets.', true);
-  if ([401, 402, 403].includes(status)) return new ProviderFailure(503, 'AI_PROVIDER_ACCESS', 'The provider credential, permissions or billing need administrator attention.');
+  const providerCode = identifier(error.code) ?? identifier(error.type) ?? identifier(error.status);
+  const message = clean(error.message, 300);
+  const param = identifier(error.param) ?? (message?.match(/(?:parameter|property|field)\s+[`'"]?([\w.]+)[`'"]?/i)?.[1]
+    ?? message?.match(/[`'"](reasoning_\w+|include_reasoning|response_format|max_\w+|temperature|top_p|stop|seed)[`'"]/)?.[1]);
+  const provider = context?.provider ?? 'UNKNOWN';
+  const model = clean(context?.model, 160);
+  const requestId = identifier(context?.headers?.get('x-request-id') ?? context?.headers?.get('request-id') ?? context?.headers?.get('cf-ray'));
+  const diagnostics: ProviderDiagnostics = { provider, model, httpStatus: status, providerCode, rejectedParameter: param, requestId, message,
+    suggestion: suggestion(status, providerCode, param, provider, model) };
+  const fail = (http: number, code: string, text: string, retryable = false) => new ProviderFailure(http, code, text, retryable, diagnostics);
+  if (status === 429) return fail(429, 'AI_PROVIDER_LIMIT', 'The provider has limited requests. Try again after its allowance resets.', true);
+  if ([401, 402, 403].includes(status)) return fail(503, 'AI_PROVIDER_ACCESS', 'The provider credential, permissions or billing need administrator attention.');
   if (status === 404 || codes.some((code) => ['model_not_found', 'model_decommissioned', 'model_unavailable'].includes(code))) {
-    return new ProviderFailure(503, 'AI_MODEL_UNAVAILABLE', 'The configured AI model is unavailable.', true);
+    return fail(503, 'AI_MODEL_UNAVAILABLE', 'The configured AI model is unavailable.', true);
   }
   if (status === 529 || (status === 503 && codes.some((code) => ['UNAVAILABLE', 'overloaded_error', 'server_overloaded', 'service_unavailable', 'capacity_exceeded'].includes(code)))) {
-    return new ProviderFailure(503, 'AI_PROVIDER_OVERLOADED', 'The provider declined the request due to capacity.', true);
+    return fail(503, 'AI_PROVIDER_OVERLOADED', 'The provider declined the request due to capacity.', true);
   }
-  if ([400, 413, 422].includes(status)) return new ProviderFailure(502, 'AI_PROVIDER_INPUT', 'The provider rejected the model or input options.');
+  if ([400, 413, 422].includes(status)) return fail(502, 'AI_PROVIDER_INPUT', 'The provider rejected the model or input options.');
   // Ambiguous upstream failures may have executed the operation. They never trigger a second attempt.
-  return new ProviderFailure(503, 'AI_PROVIDER_UNCERTAIN', 'The provider did not confirm whether it completed the request.');
+  return fail(503, 'AI_PROVIDER_UNCERTAIN', 'The provider did not confirm whether it completed the request.');
 }
 
 export function quotaHeaders(headers: Headers) {
@@ -219,15 +267,15 @@ export function retryDelay(quota: Record<string, string>) {
   return Math.max(60_000, ...resets.filter(Number.isFinite));
 }
 
-export async function invokeProvider(options: ProviderOptions, secret: string, system: string, payload: string, output: number, schema?: Record<string, unknown>) {
-  const request = buildRequest(options, secret, system, payload, output, schema);
+export async function invokeProvider(options: ProviderOptions, secret: string, system: string, payload: string, output: number, schema?: Record<string, unknown>, test = false) {
+  const request = buildRequest(options, secret, system, payload, output, schema, test);
   return send(request.url, request.headers, options.timeoutMs ?? 12_000, providerName(options) === 'CUSTOM', request.body);
 }
 
 export async function discoverModels(options: ProviderOptions, secret: string) {
   const name = providerName(options);
   const reply = await send(`${providerBase(options)}/models`, auth(name, secret), options.timeoutMs ?? 12_000, name === 'CUSTOM');
-  if (reply.status < 200 || reply.status >= 300) throw providerFailure(reply.status, reply.body);
+  if (reply.status < 200 || reply.status >= 300) throw providerFailure(reply.status, reply.body, { provider: name, headers: reply.headers });
   const body = object(reply.body);
   const items = list(body.data ?? body.models).map(object);
   return items.flatMap((item) => {
